@@ -1,3 +1,36 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Repository Layout
+
+```
+fe/   — Phaser + TypeScript game client
+be/   — Node.js + Socket.IO backend server
+```
+
+Both directories are currently empty; populate them as phases complete.
+
+## Commands
+
+> Commands will be added here once `package.json` files are created in `fe/` and `be/`.
+
+Typical expected scripts (to be confirmed):
+- `npm run dev` — start Phaser dev server (fe/)
+- `npm test` — run unit tests (fe/)
+- `npm run build` — production build (fe/)
+- `node server.js` — start backend (be/)
+
+## Architecture
+
+The game is split into three strict layers — **never mix them**:
+
+1. **Engine** (`fe/src/engine/`) — pure logic, no Phaser imports. `Board.ts` owns grid state; `MatchEngine.ts` detects matches, removes tiles, applies gravity, and resolves cascades. All randomness goes through a seeded RNG so replays are deterministic.
+2. **Rendering** (`fe/src/scenes/`) — Phaser scenes read engine state and animate it. `GameScene.ts` is the main scene. The rendering layer must never mutate engine state directly.
+3. **Network** (`be/`) — server relays player moves and the shared seed only; it never sends full board state. Each client simulates locally from the same seed + move log.
+
+---
+
 # Competitive Match-3 Game – Development Plan
 
 ## Tech stack
