@@ -40,16 +40,19 @@ Three strict layers — **never mix them**:
 
 3. **Rendering** (`fe/src/scenes/`, `fe/src/rendering/`) — Phaser only.
    - `rendering/TileSpritePool.ts` — Phaser object pool with stable sprite IDs
-   - `scenes/GameScene.ts` — async swap/resolve loop, tile animations, opponent minimap, score/timer
-   - `scenes/LobbyScene.ts` — matchmaking UI (Find Match / Play Solo)
-   - `scenes/ResultScene.ts` — WIN/LOSE/DRAW with scores
+   - `scenes/GameScene.ts` — async swap/resolve loop, tile animations, opponent minimap, dual clocks, turn indicator
+   - `scenes/LobbyScene.ts` — three modes: PvP Find Match, vs Bot, Practice
+   - `scenes/ResultScene.ts` — WIN/LOSE/DRAW, match score, time bonus, total
    - **Never mutate engine state directly from the render layer** — call `GameLoopController.attemptSwap()` only.
 
-4. **Network** (`be/`, `fe/src/net/`) — server relays seed + moves only; never full board state.
-   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, 90-second `game_over` timer
-   - `be/src/RoomManager.ts` — room lifecycle, seed generation
+4. **Bot** (`fe/src/bot/`) — pure TypeScript, zero Phaser imports.
+   - `bot/BotPlayer.ts` — scans all adjacent pairs, returns the swap that clears the most cells
+
+5. **Network** (`be/`, `fe/src/net/`) — server relays seed + moves only; never full board state.
+   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay
+   - `be/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking
    - `be/src/validator.ts` — adjacency + bounds validation
-   - `fe/src/net/SyncClient.ts` — client Socket.IO wrapper
+   - `fe/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match
 
 ## Key Constraints
 
@@ -83,9 +86,28 @@ Tiles have stable integer IDs throughout their lifetime (`nextTileId` counter in
 
 When gravity moves a tile, its ID moves with it. When a tile is matched, its ID is retired. New refill tiles get fresh IDs. This enables animations without full redraws.
 
+## Game Modes
+
+| Mode | Description |
+|---|---|
+| `solo` | Practice — no opponent, no timer |
+| `pve` | vs Bot — turn-based, 5 min per player, client-only (no server) |
+| `turn_based` | PvP online — server enforces turn order and 5-min per-player clocks |
+
+`GameScene` receives `mode` in its scene data and gates input on `myTurn`.
+
 ## Scoring
 
-`matchedCells × 10 × cascadeLevel` (cascade level starts at 1, increments each cascade step).
+- Match points: `matchedCells × 10 × cascadeLevel` (cascade level starts at 1)
+- Time bonus (winner only): `Math.floor(remainingSeconds) × 10` — awarded when opponent's clock hits zero
+
+## Turn System
+
+- Server tracks `activePlayer` per room; rejects moves from the wrong socket
+- After a valid move: server switches `activePlayer`, emits `turn_changed { activePlayerId, times }` to the room
+- Per-player `setInterval(1000)` ticks down the active player's clock; emits `game_over { loserTimeUp, times }` at zero
+- Client sets `myTurn = false` optimistically when sending a move; confirmed by `turn_changed`
+- In PvE mode, the client's own `setInterval(200)` drives both clocks locally
 
 ## Multiplayer Sync
 

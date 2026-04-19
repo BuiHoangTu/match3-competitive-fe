@@ -29,7 +29,7 @@
 | B2 | Room manager | `be/src/RoomManager.ts` | ✅ |
 | B3 | WebSocket server — matchmaking, relay moves | `be/src/server.ts` | ✅ |
 | B4 | Move validator | `be/src/validator.ts` | ✅ |
-| B5 | 90-second `game_over` timer per room | `be/src/server.ts` | ✅ |
+| B5 | Per-player 5-min turn timers + `turn_changed` / `game_over` relay | `be/src/server.ts` | ✅ |
 
 ## Track C — Rendering
 
@@ -49,11 +49,11 @@
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
 | D1 | `SyncClient` — Socket.IO client wrapper + `onGameOver` | `fe/src/net/SyncClient.ts` | ✅ |
-| D2 | `LobbyScene` — Find Match / Play Solo | `fe/src/scenes/LobbyScene.ts` | ✅ |
-| D3 | `ResultScene` — WIN/LOSE/DRAW, scores, Play Again | `fe/src/scenes/ResultScene.ts` | ✅ |
+| D2 | `LobbyScene` — PvP / vs Bot / Practice modes | `fe/src/scenes/LobbyScene.ts` | ✅ |
+| D3 | `ResultScene` — WIN/LOSE/DRAW, match score, time bonus, Play Again | `fe/src/scenes/ResultScene.ts` | ✅ |
 | D4 | Wire `SyncClient` into `GameScene` — send moves, recv opponent moves | `GameScene.ts` | ✅ |
 | D5 | Opponent minimap (32 px tiles, full-redraw on each move) | `GameScene.ts` | ✅ |
-| D6 | 90-second countdown timer in-game | `GameScene.ts` | ✅ |
+| D6 | Dual per-player clocks (5 min each), turn indicator | `GameScene.ts` | ✅ |
 | D7 | End-to-end test: two browser tabs, same seed, same boards | manual | ⬜ |
 
 ## Track E — Bot + Turn-based Mode
@@ -84,12 +84,13 @@
 
 ```
 A1–A7 ──► A8–A9 ──► C1 ──► C2 ──► C3–C8 ──► D4–D6 ──► D7
-                                               ▲
-B1–B4 ──► B5 ──► D1 ──► D2–D3 ─────────────────┘
-            └──► E1 ──► E2
+                                               ▲         │
+B1–B4 ──► B5 ──► D1 ──► D2–D3 ─────────────────┘         │
+                                                           ▼
+                    E1 ──► E2 (client-side, no server dep) D7 ──► G1
+                    E3 (server-side turn timers, done)
 
-                         C3 ──► F1 ──► F2 ──► G2
-                         D7 ──► G1
+                    C3 ──► F1 ──► F2 ──► G2
 ```
 
 ---
@@ -105,11 +106,21 @@ B1–B4 ──► B5 ──► D1 ──► D2–D3 ─────────�
 - `GameLoopController` is the single source of truth for game state; never bypassed
 - Async `doSwap` pipeline: visual tween → engine commit → animate-back or resolve steps
 - All animations: swap tween, match fade, gravity fall, refill fall-in
-- Score display; opponent minimap; 90s timer; WIN/LOSE/DRAW result screen
+- Dual per-player clocks (5 min), turn indicator, time bonus in ResultScene
 
 **Backend (21 tests passing)**
 - Socket.IO server, matchmaking, move relay, adjacency/bounds validation
-- 90-second `game_over` event fired server-side per room
+- Per-player 5-min turn timers; emits `turn_changed` after each move and `game_over {loserTimeUp, times}` when a clock hits zero
+- Server enforces turn order (rejects moves from the wrong player)
+
+**Bot (PvE)**
+- `BotPlayer.ts` — client-side; scans board for best match-creating swap; 700ms think delay
+- Plays on `opponentCtrl` locally — no server involvement
+
+**Game modes**
+- `solo` — Practice, no timer
+- `pve` — vs Bot, turn-based, 5 min each, client-only
+- `turn_based` — PvP online, server-managed clocks
 
 **Scene flow**: `LobbyScene` → `GameScene` → `ResultScene` → `LobbyScene`
 
