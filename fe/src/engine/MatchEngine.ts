@@ -192,6 +192,93 @@ export function refill(grid: number[][], rng: () => number): number[][] {
 
 const MAX_ITERATIONS = 20;
 
+// ---------------------------------------------------------------------------
+// Animation support — additive, does not change existing exports
+// ---------------------------------------------------------------------------
+
+export interface TileMovement {
+  col: number;
+  fromRow: number;
+  toRow: number;
+}
+
+export interface GravityResult {
+  newGrid: number[][];
+  movements: TileMovement[];
+}
+
+export interface AnimatedResolveStep {
+  matches: Match[];
+  movements: TileMovement[];
+  newTilePositions: { row: number; col: number }[];
+  afterGravity: number[][];
+  afterRefill: number[][];
+}
+
+/**
+ * Applies gravity and records which tiles moved (fromRow < toRow always).
+ */
+export function applyGravityWithMovements(grid: number[][]): GravityResult {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  const newGrid = grid.map((row) => [...row]);
+  const movements: TileMovement[] = [];
+
+  for (let c = 0; c < width; c++) {
+    const tiles: { sym: number; originalRow: number }[] = [];
+    for (let r = height - 1; r >= 0; r--) {
+      if (newGrid[r][c] >= 0) {
+        tiles.push({ sym: newGrid[r][c], originalRow: r });
+      }
+    }
+    for (let r = height - 1; r >= 0; r--) {
+      const idx = height - 1 - r;
+      if (idx < tiles.length) {
+        const { sym, originalRow } = tiles[idx];
+        newGrid[r][c] = sym;
+        if (originalRow !== r) movements.push({ col: c, fromRow: originalRow, toRow: r });
+      } else {
+        newGrid[r][c] = -1;
+      }
+    }
+  }
+
+  return { newGrid, movements };
+}
+
+/**
+ * Like resolveBoard but returns AnimatedResolveStep[] with per-step movement
+ * data. Produces the same final grid as resolveBoard for the same inputs.
+ */
+export function resolveBoardAnimated(
+  grid: number[][],
+  rng: () => number
+): { grid: number[][]; steps: AnimatedResolveStep[] } {
+  const steps: AnimatedResolveStep[] = [];
+  let current = grid.map((row) => [...row]);
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const matches = findMatches(current);
+    if (matches.length === 0) break;
+
+    const removed = removeMatches(current, matches);
+    const { newGrid: afterGravity, movements } = applyGravityWithMovements(removed);
+
+    const newTilePositions: { row: number; col: number }[] = [];
+    for (let r = 0; r < afterGravity.length; r++) {
+      for (let c = 0; c < (afterGravity[r]?.length ?? 0); c++) {
+        if (afterGravity[r][c] === -1) newTilePositions.push({ row: r, col: c });
+      }
+    }
+
+    const afterRefill = refill(afterGravity, rng);
+    steps.push({ matches, movements, newTilePositions, afterGravity, afterRefill });
+    current = afterRefill;
+  }
+
+  return { grid: current, steps };
+}
+
 /**
  * Resolves cascades on the board until no matches remain.
  * Returns the final grid and a log of each resolution step.
