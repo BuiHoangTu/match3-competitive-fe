@@ -9,267 +9,96 @@ fe/   — Phaser + TypeScript game client
 be/   — Node.js + Socket.IO backend server
 ```
 
-Both directories are currently empty; populate them as phases complete.
-
 ## Commands
 
-> Commands will be added here once `package.json` files are created in `fe/` and `be/`.
+**Frontend (`fe/`)**
+```bash
+npm run dev     # Vite dev server  →  http://localhost:5173
+npm test        # Vitest unit tests (46 tests)
+npm run build   # TypeScript + Vite production build
+```
 
-Typical expected scripts (to be confirmed):
-- `npm run dev` — start Phaser dev server (fe/)
-- `npm test` — run unit tests (fe/)
-- `npm run build` — production build (fe/)
-- `node server.js` — start backend (be/)
+**Backend (`be/`)**
+```bash
+npm run dev     # ts-node src/server.ts  →  port 3001
+npm test        # Vitest unit tests (21 tests)
+npm run build   # tsc → dist/
+```
 
 ## Architecture
 
-The game is split into three strict layers — **never mix them**:
+Three strict layers — **never mix them**:
 
-1. **Engine** (`fe/src/engine/`) — pure logic, no Phaser imports. `Board.ts` owns grid state; `MatchEngine.ts` detects matches, removes tiles, applies gravity, and resolves cascades. All randomness goes through a seeded RNG so replays are deterministic.
-2. **Rendering** (`fe/src/scenes/`) — Phaser scenes read engine state and animate it. `GameScene.ts` is the main scene. The rendering layer must never mutate engine state directly.
-3. **Network** (`be/`) — server relays player moves and the shared seed only; it never sends full board state. Each client simulates locally from the same seed + move log.
+1. **Engine** (`fe/src/engine/`) — pure TypeScript, zero Phaser imports.
+   - `rng.ts` — mulberry32 seeded PRNG (`createRng`, `randInt`)
+   - `Board.ts` — grid state, `createBoard(seed)`, `swapTiles()` (immutable)
+   - `MatchEngine.ts` — `findMatches`, `removeMatches`, `applyGravity`, `refill`, `resolveBoard`, plus animation variants `applyGravityWithMovements` and `resolveBoardAnimated`
+   - All randomness flows through seeded RNG; same seed + moves = identical board on every client.
 
----
+2. **Game loop** (`fe/src/game/`) — pure TypeScript, zero Phaser imports.
+   - `GameLoopController.ts` — owns `Board`, score, tile ID grid. `attemptSwap()` returns animation choreography data (`ResolvedStep[]`). This is the single source of truth for game state in the rendering layer.
 
-# Competitive Match-3 Game – Development Plan
+3. **Rendering** (`fe/src/scenes/`, `fe/src/rendering/`) — Phaser only.
+   - `rendering/TileSpritePool.ts` — Phaser object pool with stable sprite IDs
+   - `scenes/GameScene.ts` — async swap/resolve loop, tile animations, opponent minimap, score/timer
+   - `scenes/LobbyScene.ts` — matchmaking UI (Find Match / Play Solo)
+   - `scenes/ResultScene.ts` — WIN/LOSE/DRAW with scores
+   - **Never mutate engine state directly from the render layer** — call `GameLoopController.attemptSwap()` only.
 
-## Tech stack
+4. **Network** (`be/`, `fe/src/net/`) — server relays seed + moves only; never full board state.
+   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, 90-second `game_over` timer
+   - `be/src/RoomManager.ts` — room lifecycle, seed generation
+   - `be/src/validator.ts` — adjacency + bounds validation
+   - `fe/src/net/SyncClient.ts` — client Socket.IO wrapper
 
-### Game Client
-- Phaser (HTML5 game framework)
-- TypeScript (all game + shared logic)
+## Key Constraints
 
-### Backend
-- Node.js (runtime)
-- Socket.IO (real-time multiplayer communication)
+- **Determinism is sacred**: same seed → same board on all clients. Never break this.
+- Engine layer (`fe/src/engine/`) must have zero Phaser imports. Tests run in Node.
+- `GameLoopController` (`fe/src/game/`) must have zero Phaser imports.
+- Rendering layer reads engine state; it never mutates it.
+- Server sends seed + moves only — no board state over the wire.
 
-### Mobile Deployment
-- Capacitor (wrap web game into iOS/Android app)
+## Canvas & Layout
 
-### App Shell (later phase only)
-- Flutter (UI shell only: login, shop, friends, map)
+- Canvas: **900 × 700 px**
+- Player board: `BOARD_ORIGIN_X = 28`, `BOARD_ORIGIN_Y = 80` (fixed, left side)
+- Info panel: `PANEL_X = 630` (score, opponent score, timer)
+- Opponent minimap: origin `(625, 220)`, 32 px tiles, 2 px gap
 
-### **Important**:
-Flutter must NEVER contain game logic.
-Phaser is the only game runtime.
+## Animation Durations
 
-## Principles
-- Keep all logic deterministic
-- Prefer simple, readable code over clever abstractions
-- Separate game logic from rendering and networking
-- Each phase must be testable independently
+| Constant | Value | Purpose |
+|---|---|---|
+| `SWAP_MS` | 150 ms | Tile swap tween |
+| `FLASH_MS` | 180 ms | Match disappear fade |
+| `FALL_MS_PER_ROW` | 40 ms | Fall duration per row fallen |
+| `APPEAR_MS` | 220 ms | New tile fall-in |
 
----
+## Tile Identity System
 
-# Phase 1 — Match-3 Core Engine (Single Player)
+Tiles have stable integer IDs throughout their lifetime (`nextTileId` counter in `GameLoopController`). `GameScene` keeps:
+- `spriteAt: Map<id, TileSprite>` — id → Phaser sprite objects
+- `idAt: number[][]` — grid position → current tile ID
 
-## Goal
-Build a deterministic match-3 engine that runs locally.
+When gravity moves a tile, its ID moves with it. When a tile is matched, its ID is retired. New refill tiles get fresh IDs. This enables animations without full redraws.
 
-## Requirements
-- Grid-based board (e.g., 8x8)
-- 5 symbol types (must be easily extendable)
-- Swap mechanics (adjacent tiles only)
-- Match detection (horizontal + vertical, 3+)
-- Tile removal
-- Gravity (tiles fall down)
-- Cascade (chain reactions)
+## Scoring
 
-## Constraints
-- No animations yet (logic only)
-- No UI framework dependency (pure logic module)
-- Deterministic random (seeded RNG)
+`matchedCells × 10 × cascadeLevel` (cascade level starts at 1, increments each cascade step).
 
-## Deliverables
-- `Board.ts`
-- `MatchEngine.ts`
-- Unit-testable functions
+## Multiplayer Sync
 
-## Claude Prompt
-"Implement a deterministic match-3 engine in TypeScript with a seeded RNG. Focus only on logic (no rendering)."
-
----
-
-# Phase 2 — Rendering Layer (Phaser)
-
-## Goal
-Visualize the match-3 board using Phaser.
-
-## Requirements
-- Render grid and tiles
-- Tap / drag to swap tiles
-- Basic animations:
-  - Swap
-  - Fall
-  - Match disappear
-
-## Constraints
-- Keep game logic separate from rendering
-- Rendering reads state from engine
-
-## Deliverables
-- `GameScene.ts`
-- Tile sprite system
-
-## Claude Prompt
-"Using Phaser, render a match-3 board driven by an external game engine. Keep rendering separate from logic."
+Both clients receive the same `seed` from the server. Each independently runs `GameLoopController(seed)`. When player A's move arrives at player B's client, player B calls `opponentCtrl.attemptSwap(move)` — same seed + same moves = identical board state.
 
 ---
 
-# Phase 3 — Game Loop + State Control
+# Tech Stack
 
-## Goal
-Control game flow properly.
-
-## Requirements
-- Turn system
-- Input locking during animations
-- Resolve loop:
-  - swap → match → clear → fall → repeat
-
-## Constraints
-- No networking yet
-- Must be deterministic
-
-## Deliverables
-- Game state manager
-
-## Claude Prompt
-"Implement a game loop controller for match-3 that ensures deterministic resolution of cascades."
-
----
-
-# Phase 4 — Backend (Node.js Multiplayer)
-
-## Goal
-Enable real-time 1v1 matches.
-
-## Requirements
-- WebSocket server
-- Matchmaking (pair players)
-- Game rooms
-- Broadcast moves
-
-## Constraints
-- Do NOT send full board state
-- Only send player moves + seed
-
-## Deliverables
-- `server.js`
-- Room manager
-
-## Claude Prompt
-"Build a minimal Node.js WebSocket server that supports 1v1 rooms and relays player moves."
-
----
-
-# Phase 5 — Client-Server Sync
-
-## Goal
-Synchronize two players deterministically.
-
-## Requirements
-- Shared random seed
-- Send only:
-  - moves
-  - timestamps
-- Each client simulates locally
-
-## Constraints
-- Server validates moves
-- Prevent illegal swaps
-
-## Deliverables
-- Sync layer
-
-## Claude Prompt
-"Implement client-server sync for a deterministic match-3 game using move events and shared seed."
-
----
-
-# Phase 6 — Bot Player (Node.js)
-
-## Goal
-Allow testing without real players.
-
-## Requirements
-- Simple AI:
-  - find valid match
-  - prioritize higher combos later
-- Runs on server
-
-## Constraints
-- Must follow same rules as player
-
-## Deliverables
-- `bot.js`
-
-## Claude Prompt
-"Create a simple match-3 bot that finds valid moves and plays automatically."
-
----
-
-# Phase 7 — Mobile Packaging (Capacitor)
-
-## Goal
-Run the game as a mobile app.
-
-## Requirements
-- Wrap Phaser app
-- Handle touch input
-- Optimize performance
-
-## Deliverables
-- Capacitor setup
-
-## Claude Prompt
-"Wrap a Phaser web game into a mobile app using Capacitor."
-
----
-
-# Phase 8 — Meta Systems (Optional Later)
-
-## Goal
-Add progression and retention systems.
-
-## Features
-- Level map
-- Rewards
-- Shop
-- Leaderboard
-
----
-
-# Phase 9 — Flutter Wrapper (Advanced / Optional)
-
-## Goal
-Use Flutter as outer app shell.
-
-## Responsibilities
-- Navigation
-- Social features
-- Store
-- Notifications
-
-## Communication
-- WebView ↔ Phaser via message passing
-
-## Claude Prompt
-"Embed a Phaser game inside a Flutter WebView and implement bidirectional communication."
-
----
-
-# Development Strategy
-
-## Rules for Claude
-- Work one phase at a time
-- Do not mix concerns
-- Always produce minimal working version first
-- Avoid overengineering
-
-## Workflow
-1. Copy phase prompt
-2. Generate code
-3. Test locally
-4. Iterate
-5. Move to next phase
+| Layer | Technology |
+|---|---|
+| Game client | Phaser 3.88, TypeScript 5.8, Vite 6 |
+| Unit tests | Vitest 3 (fe), Vitest 1 (be) |
+| Backend | Node.js, Socket.IO 4.7, ts-node |
+| Mobile (future) | Capacitor |
+| App shell (future) | Flutter (UI only — no game logic) |
