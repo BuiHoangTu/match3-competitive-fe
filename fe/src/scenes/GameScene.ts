@@ -28,16 +28,6 @@ const BOARD_ORIGIN_Y = 80;
 
 const PANEL_X = 630;
 
-const MINI_TILE = 32;
-const MINI_GAP = 2;
-const MINI_STRIDE = MINI_TILE + MINI_GAP; // 34px
-const MINI_ORIGIN_X = 625;
-const MINI_ORIGIN_Y = 220;
-
-const MINI_COLORS: number[] = [
-  0xc0392b, 0x2980b9, 0x27ae60, 0xd4ac0d, 0x7d3c98,
-];
-
 const HIGHLIGHT_COLOR = 0xffffff;
 const HIGHLIGHT_ALPHA = 0.35;
 
@@ -75,11 +65,11 @@ interface GameSceneData {
 // GameScene
 // -------------------------------------------------------------------------
 export class GameScene extends Phaser.Scene {
+  // Single shared board — both players' moves are applied here
   private ctrl!: GameLoopController;
-  private opponentCtrl!: GameLoopController;
   private pool!: TileSpritePool;
 
-  /** id → live TileSprite for the player's board */
+  /** id → live TileSprite */
   private spriteAt = new Map<number, TileSprite>();
   /** [row][col] → tile ID currently at that cell */
   private idAt: number[][] = [];
@@ -92,6 +82,10 @@ export class GameScene extends Phaser.Scene {
   private mode: GameMode = "solo";
   private myPlayerId: string | null = null;
   private myTurn = true;
+
+  // Separate score counters (ctrl.score accumulates total from both players)
+  private myScore = 0;
+  private opponentScore = 0;
 
   // Per-player clocks (ms remaining)
   private myTimeMs = 0;
@@ -106,11 +100,17 @@ export class GameScene extends Phaser.Scene {
   private opponentTimerText: Phaser.GameObjects.Text | null = null;
   private turnIndicator: Phaser.GameObjects.Text | null = null;
 
-  private minimapObjects: Phaser.GameObjects.Rectangle[][] = [];
-
   private roomId: string | null = null;
   private syncClient: SyncClient | null = null;
   private botPlayer: BotPlayer | null = null;
+
+  // Queue for opponent moves that arrive while we're animating
+  private opponentMoveQueue: Array<{
+    r1: number;
+    c1: number;
+    r2: number;
+    c2: number;
+  }> = [];
 
   constructor() {
     super({ key: "GameScene" });
@@ -127,8 +127,11 @@ export class GameScene extends Phaser.Scene {
     this.mode = (data?.mode as GameMode) ?? "solo";
     this.myPlayerId = data?.myPlayerId ?? null;
 
+    this.myScore = 0;
+    this.opponentScore = 0;
+    this.opponentMoveQueue = [];
+
     this.ctrl = new GameLoopController(seed);
-    this.opponentCtrl = new GameLoopController(seed);
     this.pool = new TileSpritePool(this);
 
     if (this.mode !== "solo") {
@@ -227,7 +230,6 @@ export class GameScene extends Phaser.Scene {
         .setDepth(20);
 
       this.updateTurnIndicator();
-      this.drawMinimap();
     }
   }
 
@@ -237,18 +239,8 @@ export class GameScene extends Phaser.Scene {
 
   private wireMultiplayer(): void {
     this.syncClient!.onOpponentMove((move: OpponentMove) => {
-      const result = this.opponentCtrl.attemptSwap(
-        move.r1,
-        move.c1,
-        move.r2,
-        move.c2
-      );
-      if (result.kind === "resolved") {
-        this.drawMinimap();
-        this.opponentScoreText?.setText(
-          `Opponent: ${this.opponentCtrl.score}`
-        );
-      }
+      this.opponentMoveQueue.push(move);
+      this.processOpponentQueue();
     });
 
     this.syncClient!.onTurnChanged((data: TurnChangedData) => {
@@ -286,31 +278,13 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // Opponent minimap
-  // -------------------------------------------------------------------------
-
-  private drawMinimap(): void {
-    for (const row of this.minimapObjects) {
-      for (const rect of row) rect.destroy();
-    }
-    this.minimapObjects = [];
-
-    const board = this.opponentCtrl.board;
-    for (let r = 0; r < board.height; r++) {
-      this.minimapObjects[r] = [];
-      for (let c = 0; c < board.width; c++) {
-        const sym = board.grid[r][c];
-        const x = MINI_ORIGIN_X + c * MINI_STRIDE;
-        const y = MINI_ORIGIN_Y + r * MINI_STRIDE;
-        const color = MINI_COLORS[sym] ?? 0x888888;
-        this.minimapObjects[r][c] = this.add
-          .rectangle(x, y, MINI_TILE, MINI_TILE, color)
-          .setOrigin(0, 0)
-          .setDepth(1)
-          .setAlpha(0.85);
-      }
-    }
+  // Drain queued opponent moves one at a time (prevents animation overlap)
+  private processOpponentQueue(): void {
+    if (this.state !== "idle" || this.opponentMoveQueue.length === 0) return;
+    const move = this.opponentMoveQueue.shift()!;
+    this.animateSwap(move.r1, move.c1, move.r2, move.c2, false).then(() => {
+      this.processOpponentQueue();
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -385,8 +359,8 @@ export class GameScene extends Phaser.Scene {
     this.state = "game_over";
     this.stopTurnTimer();
     this.scene.start("ResultScene", {
-      myScore: this.ctrl.score,
-      opponentScore: this.opponentCtrl.score,
+      myScore: this.myScore,
+      opponentScore: this.opponentScore,
       timeBonus,
     });
   }
@@ -447,7 +421,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------------------
-  // Swap + resolve (async)
+  // Swap (player move entry point)
   // -------------------------------------------------------------------------
 
   private async doSwap(
@@ -456,33 +430,9 @@ export class GameScene extends Phaser.Scene {
     r2: number,
     c2: number
   ): Promise<void> {
-    this.state = "animating";
+    const resolved = await this.animateSwap(r1, c1, r2, c2, true);
 
-    const idA = this.idAt[r1][c1];
-    const idB = this.idAt[r2][c2];
-    const sprA = this.spriteAt.get(idA)!;
-    const sprB = this.spriteAt.get(idB)!;
-
-    // Visual swap
-    await Promise.all([
-      this.tweenSpriteToCell(sprA, r2, c2, SWAP_MS),
-      this.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
-    ]);
-
-    const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
-
-    if (result.kind === "no_match") {
-      // Animate back
-      await Promise.all([
-        this.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
-        this.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
-      ]);
-    } else {
-      // Commit swap in idAt
-      this.idAt[r1][c1] = idB;
-      this.idAt[r2][c2] = idA;
-
-      // Send move to server and optimistically relinquish turn
+    if (resolved) {
       if (this.syncClient && this.roomId) {
         this.syncClient.sendMove(this.roomId, r1, c1, r2, c2);
         if (this.mode === "turn_based") {
@@ -491,10 +441,6 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      await this.playResolveSteps(result.steps);
-      this.scoreText.setText(`Score: ${this.ctrl.score}`);
-
-      // For PvE: relinquish turn after animations and schedule bot
       if (this.mode === "pve") {
         this.myTurn = false;
         this.updateTurnIndicator();
@@ -502,7 +448,63 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // Drain any opponent moves that arrived while we were animating
+    this.processOpponentQueue();
+  }
+
+  // -------------------------------------------------------------------------
+  // Core animation — used by player moves, opponent moves, and bot moves
+  // Returns true if the swap produced a match (false = animated back)
+  // -------------------------------------------------------------------------
+
+  private async animateSwap(
+    r1: number,
+    c1: number,
+    r2: number,
+    c2: number,
+    isMyMove: boolean
+  ): Promise<boolean> {
+    this.state = "animating";
+
+    const idA = this.idAt[r1][c1];
+    const idB = this.idAt[r2][c2];
+    const sprA = this.spriteAt.get(idA)!;
+    const sprB = this.spriteAt.get(idB)!;
+
+    await Promise.all([
+      this.tweenSpriteToCell(sprA, r2, c2, SWAP_MS),
+      this.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
+    ]);
+
+    const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
+
+    if (result.kind === "no_match") {
+      await Promise.all([
+        this.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
+        this.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
+      ]);
+      this.state = "idle";
+      return false;
+    }
+
+    // Commit swap in idAt
+    this.idAt[r1][c1] = idB;
+    this.idAt[r2][c2] = idA;
+
+    await this.playResolveSteps(result.steps);
+
+    // Credit points to the right player
+    if (isMyMove) {
+      this.myScore += result.pointsEarned;
+      this.scoreText.setText(`Score: ${this.myScore}`);
+    } else {
+      this.opponentScore += result.pointsEarned;
+      const label = this.mode === "pve" ? "Bot" : "Opponent";
+      this.opponentScoreText?.setText(`${label}: ${this.opponentScore}`);
+    }
+
     this.state = "idle";
+    return true;
   }
 
   private async playResolveSteps(steps: ResolvedStep[]): Promise<void> {
@@ -513,7 +515,6 @@ export class GameScene extends Phaser.Scene {
       );
       await this.flashAndRemoveSprites(matchedIds);
 
-      // Release matched sprites, clear idAt
       for (const match of engineStep.matches) {
         for (const [r, c] of match.cells) {
           const id = this.idAt[r][c];
@@ -529,7 +530,6 @@ export class GameScene extends Phaser.Scene {
       // 2. Tween gravity
       await this.tweenGravity(engineStep.movements);
 
-      // Update idAt for gravity (order-independent via snapshot)
       const snapshot = this.idAt.map((row) => [...row]);
       const updated = snapshot.map((row) => [...row]);
       for (const { col, fromRow } of engineStep.movements) {
@@ -540,7 +540,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.idAt = updated;
 
-      // 3. Spawn refill sprites above board, then tween into position
+      // 3. Spawn + tween refill sprites
       for (const pos of engineStep.newTilePositions) {
         const key = `${pos.row},${pos.col}`;
         const id = refillIds.get(key)!;
@@ -565,26 +565,17 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(700, () => this.doBotTurn());
   }
 
-  private doBotTurn(): void {
+  private async doBotTurn(): Promise<void> {
     if (this.state !== "idle") return;
 
-    const move = this.botPlayer!.findBestMove(this.opponentCtrl.board.grid);
+    const move = this.botPlayer!.findBestMove(this.ctrl.board.grid);
     if (!move) {
       this.myTurn = true;
       this.updateTurnIndicator();
       return;
     }
 
-    const result = this.opponentCtrl.attemptSwap(
-      move.r1,
-      move.c1,
-      move.r2,
-      move.c2
-    );
-    this.drawMinimap();
-    if (result.kind === "resolved") {
-      this.opponentScoreText?.setText(`Bot: ${this.opponentCtrl.score}`);
-    }
+    await this.animateSwap(move.r1, move.c1, move.r2, move.c2, false);
 
     this.myTurn = true;
     this.updateTurnIndicator();

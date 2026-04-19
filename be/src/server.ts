@@ -239,6 +239,19 @@ io.on("connection", (socket) => {
 
       socket.to(data.roomId).emit("opponent_move", move);
 
+      // In bot rooms, apply human's move to the shared board so the bot
+      // always plays on the current state of the board
+      const botState = botStates.get(data.roomId);
+      if (botState) {
+        try {
+          const swapped = swapTiles(botState.board, data.r1, data.c1, data.r2, data.c2);
+          const { grid: finalGrid } = resolveBoard(swapped.grid, botState.rng);
+          botState.board = { ...swapped, grid: finalGrid };
+        } catch {
+          // Invalid swap — ignore (validator already checked adjacency)
+        }
+      }
+
       const nextPlayer = room.players.find((p) => p !== socket.id);
       if (nextPlayer) {
         room.activePlayer = nextPlayer;

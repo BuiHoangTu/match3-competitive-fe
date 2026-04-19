@@ -125,9 +125,16 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 - Client sets `myTurn = false` optimistically when sending a move; confirmed by `turn_changed`
 - In PvE mode, the client's own `setInterval(200)` drives both clocks locally
 
-## Multiplayer Sync
+## Shared Board
 
-Both clients receive the same `seed` from the server. Each independently runs `GameLoopController(seed)`. When player A's move arrives at player B's client, player B calls `opponentCtrl.attemptSwap(move)` — same seed + same moves = identical board state.
+Both players play on **the same board**. There is no separate opponent board or minimap.
+
+- Both clients receive the same `seed` and run one `GameLoopController(seed)` each
+- When player A makes a move, it is applied to their `ctrl` (with animations) and relayed to B via the server
+- When B receives the `opponent_move` event, it is applied to B's `ctrl` (same board, same animations)
+- Same seed + same moves in same order = identical board state on every client (deterministic)
+- Each player's `myScore` / `opponentScore` is tracked locally from the `pointsEarned` returned by `attemptSwap`
+- In bot rooms, the server applies human moves to its shared board state so the bot always plays on the current board
 
 ---
 
