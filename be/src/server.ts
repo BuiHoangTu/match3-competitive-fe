@@ -48,6 +48,11 @@ io.on("connection", (socket) => {
         seed: room.seed,
         opponentId: player1Id,
       });
+
+      // End game after 90 seconds
+      setTimeout(() => {
+        io.to(roomId).emit("game_over");
+      }, 90_000);
     } else {
       // No waiting room — create one and wait
       const room = roomManager.createRoom(socket.id);

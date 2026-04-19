@@ -92,4 +92,14 @@ export class SyncClient {
       },
     );
   }
+
+  onGameOver(cb: () => void): void {
+    if (!this.socket) throw new Error("Not connected");
+    this.socket.on("game_over", cb);
+  }
+
+  onOpponentDisconnect(cb: () => void): void {
+    if (!this.socket) throw new Error("Not connected");
+    this.socket.on("opponent_disconnected", cb);
+  }
 }
