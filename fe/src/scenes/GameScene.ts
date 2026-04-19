@@ -1,88 +1,117 @@
 import Phaser from "phaser";
-import { createBoard, swapTiles } from "../engine/Board.js";
-import { resolveBoard } from "../engine/MatchEngine.js";
-import { createRng } from "../engine/rng.js";
-import type { Board } from "../engine/Board.js";
+import {
+  GameLoopController,
+  type ResolvedStep,
+} from "../game/GameLoopController.js";
+import {
+  TileSpritePool,
+  TILE_SIZE,
+  type TileSprite,
+} from "../rendering/TileSpritePool.js";
+import type { TileMovement } from "../engine/MatchEngine.js";
+import type { SyncClient, OpponentMove } from "../net/SyncClient.js";
 
-// ---------------------------------------------------------------------------
-// Layout constants
-// ---------------------------------------------------------------------------
-const TILE_SIZE = 64;
+// -------------------------------------------------------------------------
+// Layout
+// -------------------------------------------------------------------------
 const TILE_GAP = 4;
 const CELL_STRIDE = TILE_SIZE + TILE_GAP; // 68px
 
-// 5 distinct colors for symbol types 0–4
-const SYMBOL_COLORS: number[] = [
-  0xe74c3c, // 0 — red
-  0x3498db, // 1 — blue
-  0x2ecc71, // 2 — green
-  0xf1c40f, // 3 — yellow
-  0x9b59b6, // 4 — purple
+// Player board fixed in the left portion of the 900px canvas
+const BOARD_ORIGIN_X = 28;
+const BOARD_ORIGIN_Y = 80;
+
+// Info panel (right side)
+const PANEL_X = 630;
+
+// Opponent minimap
+const MINI_TILE = 32;
+const MINI_GAP = 2;
+const MINI_STRIDE = MINI_TILE + MINI_GAP; // 34px
+const MINI_ORIGIN_X = 625;
+const MINI_ORIGIN_Y = 220;
+
+// Minimap symbol colors (slightly muted)
+const MINI_COLORS: number[] = [
+  0xc0392b, 0x2980b9, 0x27ae60, 0xd4ac0d, 0x7d3c98,
 ];
 
+// Highlight overlay
 const HIGHLIGHT_COLOR = 0xffffff;
 const HIGHLIGHT_ALPHA = 0.35;
 
-// Seed used for the initial board and the refill RNG
-const INITIAL_SEED = 12345;
+// Default seed for single-player / solo mode
+const DEFAULT_SEED = 12345;
 
-// ---------------------------------------------------------------------------
-// Helper types
-// ---------------------------------------------------------------------------
-interface TileObjects {
-  rect: Phaser.GameObjects.Rectangle;
-  label: Phaser.GameObjects.Text;
+// Animation durations (ms)
+const SWAP_MS = 150;
+const FLASH_MS = 180;
+const FALL_MS_PER_ROW = 40;
+const APPEAR_MS = 220;
+
+// Must match server-side GAME_DURATION_MS
+const GAME_DURATION_MS = 90_000;
+
+// -------------------------------------------------------------------------
+// Types
+// -------------------------------------------------------------------------
+type GameSceneState = "idle" | "animating" | "game_over";
+
+interface GameSceneData {
+  seed?: number;
+  roomId?: string;
+  opponentId?: string;
+  syncClient?: SyncClient;
 }
 
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 // GameScene
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 export class GameScene extends Phaser.Scene {
-  private board!: Board;
-  private rng!: () => number;
+  private ctrl!: GameLoopController;
+  private opponentCtrl!: GameLoopController;
+  private pool!: TileSpritePool;
 
-  /** Pixel offset so the grid is centred in the canvas. */
-  private originX = 0;
-  private originY = 0;
+  /** id → live TileSprite for the player's board */
+  private spriteAt = new Map<number, TileSprite>();
+  /** [row][col] → tile ID currently at that cell */
+  private idAt: number[][] = [];
 
-  /** All rendered tile GameObjects, indexed [row][col]. */
-  private tileObjects: TileObjects[][] = [];
-
-  /** Highlight overlay rectangle drawn on the selected tile. */
+  private state: GameSceneState = "idle";
+  private selected: { row: number; col: number } | null = null;
   private selectionOverlay: Phaser.GameObjects.Rectangle | null = null;
 
-  /** Currently selected cell, or null. */
-  private selected: { row: number; col: number } | null = null;
+  private scoreText!: Phaser.GameObjects.Text;
+  private opponentScoreText: Phaser.GameObjects.Text | null = null;
+  private timerText: Phaser.GameObjects.Text | null = null;
+  private timeLeft = 0;
 
-  /** Prevents input while cascades are resolving. */
-  private resolving = false;
+  private minimapObjects: Phaser.GameObjects.Rectangle[][] = [];
+
+  private roomId: string | null = null;
+  private syncClient: SyncClient | null = null;
 
   constructor() {
     super({ key: "GameScene" });
   }
 
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // Phaser lifecycle
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
 
-  create(): void {
-    // Create initial board
-    this.board = createBoard(INITIAL_SEED);
+  create(data?: GameSceneData): void {
+    const seed = data?.seed ?? DEFAULT_SEED;
+    this.roomId = data?.roomId ?? null;
+    this.syncClient = data?.syncClient ?? null;
 
-    // The refill RNG is seeded independently from the board creation seed so
-    // that cascade refills are deterministic but distinct from board init.
-    this.rng = createRng(INITIAL_SEED + 1);
+    this.ctrl = new GameLoopController(seed);
+    this.opponentCtrl = new GameLoopController(seed);
+    this.pool = new TileSpritePool(this);
 
-    // Compute centred origin
-    const boardPx = this.board.width * CELL_STRIDE - TILE_GAP;
-    const boardPy = this.board.height * CELL_STRIDE - TILE_GAP;
-    this.originX = Math.floor((this.scale.width - boardPx) / 2);
-    this.originY = Math.floor((this.scale.height - boardPy) / 2);
+    this.initBoard();
+    this.buildInfoPanel();
+    if (this.syncClient) this.wireMultiplayer();
 
-    // Initial draw
-    this.drawBoard(this.board);
-
-    // Wire up pointer input
     this.input.on(
       Phaser.Input.Events.POINTER_DOWN,
       this.handlePointerDown,
@@ -90,68 +119,175 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Input handler
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Board initialisation
+  // -------------------------------------------------------------------------
+
+  private initBoard(): void {
+    this.pool.releaseAll();
+    this.spriteAt.clear();
+
+    const board = this.ctrl.board;
+    this.idAt = board.grid.map((row, r) =>
+      row.map((sym, c) => {
+        const id = this.ctrl.getTileId(r, c);
+        const { x, y } = this.cellToPixel(r, c);
+        const sprite = this.pool.acquire(id, sym, x, y);
+        this.spriteAt.set(id, sprite);
+        return id;
+      })
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // UI construction
+  // -------------------------------------------------------------------------
+
+  private buildInfoPanel(): void {
+    this.scoreText = this.add
+      .text(PANEL_X, 30, "Score: 0", {
+        fontSize: "22px",
+        color: "#ffffff",
+        fontStyle: "bold",
+      })
+      .setDepth(20);
+  }
+
+  private wireMultiplayer(): void {
+    this.opponentScoreText = this.add
+      .text(PANEL_X, 80, "Opponent: 0", {
+        fontSize: "18px",
+        color: "#aaaaff",
+      })
+      .setDepth(20);
+
+    this.timerText = this.add
+      .text(PANEL_X, 140, "1:30", {
+        fontSize: "28px",
+        color: "#ffdd44",
+        fontStyle: "bold",
+      })
+      .setDepth(20);
+
+    this.drawMinimap();
+
+    this.syncClient!.onOpponentMove((move: OpponentMove) => {
+      const result = this.opponentCtrl.attemptSwap(
+        move.r1,
+        move.c1,
+        move.r2,
+        move.c2
+      );
+      if (result.kind === "resolved") {
+        this.drawMinimap();
+        this.opponentScoreText?.setText(
+          `Opponent: ${this.opponentCtrl.score}`
+        );
+      }
+    });
+
+    this.syncClient!.onGameOver(() => this.endGame());
+
+    this.startTimer();
+  }
+
+  // -------------------------------------------------------------------------
+  // Opponent minimap
+  // -------------------------------------------------------------------------
+
+  private drawMinimap(): void {
+    for (const row of this.minimapObjects) {
+      for (const rect of row) rect.destroy();
+    }
+    this.minimapObjects = [];
+
+    const board = this.opponentCtrl.board;
+    for (let r = 0; r < board.height; r++) {
+      this.minimapObjects[r] = [];
+      for (let c = 0; c < board.width; c++) {
+        const sym = board.grid[r][c];
+        const x = MINI_ORIGIN_X + c * MINI_STRIDE;
+        const y = MINI_ORIGIN_Y + r * MINI_STRIDE;
+        const color = MINI_COLORS[sym] ?? 0x888888;
+        this.minimapObjects[r][c] = this.add
+          .rectangle(x, y, MINI_TILE, MINI_TILE, color)
+          .setOrigin(0, 0)
+          .setDepth(1)
+          .setAlpha(0.85);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Timer
+  // -------------------------------------------------------------------------
+
+  private startTimer(): void {
+    this.timeLeft = 90;
+    this.time.addEvent({
+      delay: 1000,
+      repeat: 89,
+      callback: () => {
+        this.timeLeft--;
+        const m = Math.floor(this.timeLeft / 60);
+        const s = this.timeLeft % 60;
+        this.timerText?.setText(`${m}:${s.toString().padStart(2, "0")}`);
+        if (this.timeLeft <= 0) this.endGame();
+      },
+    });
+    this.time.delayedCall(GAME_DURATION_MS, () => this.endGame());
+  }
+
+  private endGame(): void {
+    if (this.state === "game_over") return;
+    this.state = "game_over";
+    this.scene.start("ResultScene", {
+      myScore: this.ctrl.score,
+      opponentScore: this.opponentCtrl.score,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Input
+  // -------------------------------------------------------------------------
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
-    if (this.resolving) return;
+    if (this.state !== "idle") return;
 
-    const col = Math.floor((pointer.x - this.originX) / CELL_STRIDE);
-    const row = Math.floor((pointer.y - this.originY) / CELL_STRIDE);
+    const col = Math.floor((pointer.x - BOARD_ORIGIN_X) / CELL_STRIDE);
+    const row = Math.floor((pointer.y - BOARD_ORIGIN_Y) / CELL_STRIDE);
 
-    // Out-of-bounds click
-    if (
-      row < 0 ||
-      row >= this.board.height ||
-      col < 0 ||
-      col >= this.board.width
-    ) {
+    const { width, height } = this.ctrl.board;
+    if (row < 0 || row >= height || col < 0 || col >= width) {
       this.clearSelection();
       return;
     }
 
     if (this.selected === null) {
-      // First tap — select this tile
       this.selectTile(row, col);
     } else {
       const { row: selRow, col: selCol } = this.selected;
-
       if (selRow === row && selCol === col) {
-        // Tapped same tile — deselect
         this.clearSelection();
         return;
       }
-
       const dr = Math.abs(selRow - row);
       const dc = Math.abs(selCol - col);
-      const isAdjacent = (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
-
-      if (isAdjacent) {
-        // Perform swap + resolve
+      if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
         this.clearSelection();
-        this.performSwapAndResolve(selRow, selCol, row, col);
+        this.doSwap(selRow, selCol, row, col);
       } else {
-        // Non-adjacent — deselect old, select new
         this.clearSelection();
         this.selectTile(row, col);
       }
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Selection helpers
-  // ---------------------------------------------------------------------------
-
   private selectTile(row: number, col: number): void {
     this.selected = { row, col };
-
     const { x, y } = this.cellToPixel(row, col);
-
-    // Create (or reuse) highlight overlay
     if (this.selectionOverlay) {
-      this.selectionOverlay.setPosition(x, y);
-      this.selectionOverlay.setVisible(true);
+      this.selectionOverlay.setPosition(x, y).setVisible(true);
     } else {
       this.selectionOverlay = this.add
         .rectangle(x, y, TILE_SIZE, TILE_SIZE, HIGHLIGHT_COLOR, HIGHLIGHT_ALPHA)
@@ -162,99 +298,196 @@ export class GameScene extends Phaser.Scene {
 
   private clearSelection(): void {
     this.selected = null;
-    if (this.selectionOverlay) {
-      this.selectionOverlay.setVisible(false);
-    }
+    this.selectionOverlay?.setVisible(false);
   }
 
-  // ---------------------------------------------------------------------------
-  // Swap + resolve
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Swap + resolve (async)
+  // -------------------------------------------------------------------------
 
-  private performSwapAndResolve(
+  private async doSwap(
     r1: number,
     c1: number,
     r2: number,
     c2: number
-  ): void {
-    this.resolving = true;
+  ): Promise<void> {
+    this.state = "animating";
 
-    // swapTiles returns a new Board (immutable)
-    const swapped = swapTiles(this.board, r1, c1, r2, c2);
+    const idA = this.idAt[r1][c1];
+    const idB = this.idAt[r2][c2];
+    const sprA = this.spriteAt.get(idA)!;
+    const sprB = this.spriteAt.get(idB)!;
 
-    // resolveBoard returns a new grid after all cascades
-    const { grid: resolvedGrid } = resolveBoard(swapped.grid, this.rng);
+    // Visual swap
+    await Promise.all([
+      this.tweenSpriteToCell(sprA, r2, c2, SWAP_MS),
+      this.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
+    ]);
 
-    // Build the final board value
-    this.board = {
-      grid: resolvedGrid,
-      width: swapped.width,
-      height: swapped.height,
-    };
+    const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
 
-    this.drawBoard(this.board);
+    if (result.kind === "no_match") {
+      // Animate back to original positions
+      await Promise.all([
+        this.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
+        this.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
+      ]);
+    } else {
+      // Commit swap in idAt
+      this.idAt[r1][c1] = idB;
+      this.idAt[r2][c2] = idA;
 
-    this.resolving = false;
+      // Relay to server in multiplayer
+      if (this.syncClient && this.roomId) {
+        this.syncClient.sendMove(this.roomId, r1, c1, r2, c2);
+      }
+
+      await this.playResolveSteps(result.steps);
+      this.scoreText.setText(`Score: ${this.ctrl.score}`);
+    }
+
+    this.state = "idle";
   }
 
-  // ---------------------------------------------------------------------------
-  // Board rendering
-  // ---------------------------------------------------------------------------
+  private async playResolveSteps(steps: ResolvedStep[]): Promise<void> {
+    for (const { engineStep, refillIds } of steps) {
+      // 1. Flash out matched sprites
+      const matchedIds = engineStep.matches.flatMap((m) =>
+        m.cells.map(([r, c]) => this.idAt[r][c])
+      );
+      await this.flashAndRemoveSprites(matchedIds);
 
-  /**
-   * Clears and redraws every tile from board.grid.
-   * This is the single source-of-truth redraw helper.
-   */
-  drawBoard(board: Board): void {
-    // Destroy previous tile objects
-    for (let r = 0; r < this.tileObjects.length; r++) {
-      for (let c = 0; c < this.tileObjects[r].length; c++) {
-        this.tileObjects[r][c].rect.destroy();
-        this.tileObjects[r][c].label.destroy();
+      // Release matched sprites, clear idAt
+      for (const match of engineStep.matches) {
+        for (const [r, c] of match.cells) {
+          const id = this.idAt[r][c];
+          const spr = this.spriteAt.get(id);
+          if (spr) {
+            this.pool.release(spr);
+            this.spriteAt.delete(id);
+          }
+          this.idAt[r][c] = -1;
+        }
       }
-    }
-    this.tileObjects = [];
 
-    // Bring selection overlay back to the top so it is not buried
-    if (this.selectionOverlay) {
-      this.selectionOverlay.setDepth(10);
-    }
+      // 2. Tween gravity
+      await this.tweenGravity(engineStep.movements);
 
-    for (let r = 0; r < board.height; r++) {
-      this.tileObjects[r] = [];
-      for (let c = 0; c < board.width; c++) {
-        const sym = board.grid[r][c];
-        const { x, y } = this.cellToPixel(r, c);
-        const color = SYMBOL_COLORS[sym] ?? 0x888888;
-
-        const rect = this.add
-          .rectangle(x, y, TILE_SIZE, TILE_SIZE, color)
-          .setOrigin(0, 0)
-          .setDepth(1);
-
-        const label = this.add
-          .text(x + TILE_SIZE / 2, y + TILE_SIZE / 2, String(sym), {
-            fontSize: "20px",
-            color: "#ffffff",
-            fontStyle: "bold",
-          })
-          .setOrigin(0.5, 0.5)
-          .setDepth(2);
-
-        this.tileObjects[r][c] = { rect, label };
+      // Update idAt for gravity (order-independent via snapshot)
+      const snapshot = this.idAt.map((row) => [...row]);
+      const updated = snapshot.map((row) => [...row]);
+      for (const { col, fromRow } of engineStep.movements) {
+        updated[fromRow][col] = -1;
       }
+      for (const { col, fromRow, toRow } of engineStep.movements) {
+        updated[toRow][col] = snapshot[fromRow][col];
+      }
+      this.idAt = updated;
+
+      // 3. Spawn refill sprites above board, then tween into position
+      for (const pos of engineStep.newTilePositions) {
+        const key = `${pos.row},${pos.col}`;
+        const id = refillIds.get(key)!;
+        const symbol = engineStep.afterRefill[pos.row][pos.col];
+        const { x } = this.cellToPixel(pos.row, pos.col);
+        const spawnY = BOARD_ORIGIN_Y - TILE_SIZE;
+        const spr = this.pool.acquire(id, symbol, x, spawnY);
+        this.spriteAt.set(id, spr);
+        this.idAt[pos.row][pos.col] = id;
+      }
+
+      await this.tweenRefillFall(engineStep.newTilePositions);
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Coordinate helpers
-  // ---------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Tween helpers
+  // -------------------------------------------------------------------------
 
-  /** Returns the top-left pixel coordinate for a grid cell. */
+  private tweenSpriteToCell(
+    sprite: TileSprite,
+    row: number,
+    col: number,
+    duration: number
+  ): Promise<void> {
+    const { x, y } = this.cellToPixel(row, col);
+    return new Promise<void>((resolve) => {
+      let done = 0;
+      const onBothDone = () => {
+        if (++done === 2) resolve();
+      };
+      this.tweens.add({ targets: sprite.rect, x, y, duration, onComplete: onBothDone });
+      this.tweens.add({
+        targets: sprite.label,
+        x: x + TILE_SIZE / 2,
+        y: y + TILE_SIZE / 2,
+        duration,
+        onComplete: onBothDone,
+      });
+    });
+  }
+
+  private tweenSpriteAlpha(
+    sprite: TileSprite,
+    alpha: number,
+    duration: number
+  ): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let done = 0;
+      const onBothDone = () => {
+        if (++done === 2) resolve();
+      };
+      this.tweens.add({ targets: sprite.rect, alpha, duration, onComplete: onBothDone });
+      this.tweens.add({ targets: sprite.label, alpha, duration, onComplete: onBothDone });
+    });
+  }
+
+  private flashAndRemoveSprites(ids: number[]): Promise<void> {
+    if (ids.length === 0) return Promise.resolve();
+    return Promise.all(
+      ids.map((id) => {
+        const spr = this.spriteAt.get(id);
+        if (!spr) return Promise.resolve();
+        return this.tweenSpriteAlpha(spr, 0, FLASH_MS);
+      })
+    ).then(() => {});
+  }
+
+  private tweenGravity(movements: TileMovement[]): Promise<void> {
+    if (movements.length === 0) return Promise.resolve();
+    return Promise.all(
+      movements.map(({ col, fromRow, toRow }) => {
+        const id = this.idAt[fromRow][col];
+        const spr = this.spriteAt.get(id);
+        if (!spr) return Promise.resolve();
+        const duration = FALL_MS_PER_ROW * (toRow - fromRow);
+        return this.tweenSpriteToCell(spr, toRow, col, duration);
+      })
+    ).then(() => {});
+  }
+
+  private tweenRefillFall(
+    positions: { row: number; col: number }[]
+  ): Promise<void> {
+    if (positions.length === 0) return Promise.resolve();
+    return Promise.all(
+      positions.map((pos) => {
+        const id = this.idAt[pos.row][pos.col];
+        const spr = this.spriteAt.get(id);
+        if (!spr) return Promise.resolve();
+        return this.tweenSpriteToCell(spr, pos.row, pos.col, APPEAR_MS);
+      })
+    ).then(() => {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Coordinate helper
+  // -------------------------------------------------------------------------
+
   private cellToPixel(row: number, col: number): { x: number; y: number } {
     return {
-      x: this.originX + col * CELL_STRIDE,
-      y: this.originY + row * CELL_STRIDE,
+      x: BOARD_ORIGIN_X + col * CELL_STRIDE,
+      y: BOARD_ORIGIN_Y + row * CELL_STRIDE,
     };
   }
 }
