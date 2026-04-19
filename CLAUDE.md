@@ -5,11 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Repository Layout
 
 ```
-fe/   — Phaser + TypeScript game client
-be/   — Node.js + Socket.IO backend server
+shared/   — Pure TypeScript shared by both fe and be
+fe/       — Phaser + TypeScript game client
+be/       — Node.js + Socket.IO backend server
 ```
 
 ## Commands
+
+**Shared (`shared/`)**
+```bash
+# No build step needed — imported directly by fe and be
+npx tsc --project shared/tsconfig.json --noEmit   # type-check only
+```
 
 **Frontend (`fe/`)**
 ```bash
@@ -27,9 +34,15 @@ npm run build   # tsc → dist/
 
 ## Architecture
 
-Three strict layers — **never mix them**:
+Four strict layers — **never mix them**:
 
-1. **Engine** (`fe/src/engine/`) — pure TypeScript, zero Phaser imports.
+0. **Shared** (`shared/src/`) — pure TypeScript, no framework/Phaser/Node imports.
+   - `engine/rng.ts`, `engine/Board.ts`, `engine/MatchEngine.ts` — canonical engine source
+   - `protocol.d.ts` — Socket.IO wire-format types shared by fe and be
+   - `fe/src/engine/*.ts` are **re-export shims** (`export * from "../../../shared/src/engine/..."`) so existing engine tests and imports continue to work unchanged
+   - `be/` imports protocol types via `import type { Move } from "../../shared/src/protocol"` — `import type` means the `.d.ts` file is never emitted, so `be/`'s `rootDir: "src"` is not violated
+
+1. **Engine** (`fe/src/engine/`) — re-export shims only; real source lives in `shared/`.
    - `rng.ts` — mulberry32 seeded PRNG (`createRng`, `randInt`)
    - `Board.ts` — grid state, `createBoard(seed)`, `swapTiles()` (immutable)
    - `MatchEngine.ts` — `findMatches`, `removeMatches`, `applyGravity`, `refill`, `resolveBoard`, plus animation variants `applyGravityWithMovements` and `resolveBoardAnimated`

@@ -1,23 +1,15 @@
 import { io, Socket } from "socket.io-client";
+import type {
+  Move,
+  MatchFoundPayload,
+  TurnChangedPayload,
+  GameOverPayload,
+} from "../../../shared/src/protocol.js";
 
-export interface OpponentMove {
-  playerId: string;
-  r1: number;
-  c1: number;
-  r2: number;
-  c2: number;
-  timestamp: number;
-}
-
-export interface GameOverData {
-  loserTimeUp?: string;
-  times?: Record<string, number>;
-}
-
-export interface TurnChangedData {
-  activePlayerId: string;
-  times: Record<string, number>;
-}
+// Re-export shared types under the names used by the rest of the fe codebase
+export type OpponentMove = Move;
+export type GameOverData = GameOverPayload;
+export type TurnChangedData = TurnChangedPayload;
 
 export class SyncClient {
   private socket: Socket | null = null;
@@ -85,29 +77,19 @@ export class SyncClient {
     cb: (roomId: string, seed: number, opponentId: string) => void
   ): void {
     if (!this.socket) throw new Error("Not connected");
-    this.socket.on(
-      "match_found",
-      (data: {
-        roomId: string;
-        seed: number;
-        opponentId: string;
-        myPlayerId?: string;
-        firstPlayerId?: string;
-        mode?: string;
-      }) => {
-        this.roomId = data.roomId;
-        this.seed = data.seed;
-        this.myPlayerId = data.myPlayerId ?? null;
-        this.firstPlayerId = data.firstPlayerId ?? null;
-        this.gameMode = data.mode ?? null;
-        cb(data.roomId, data.seed, data.opponentId);
-      }
-    );
+    this.socket.on("match_found", (data: MatchFoundPayload) => {
+      this.roomId = data.roomId;
+      this.seed = data.seed;
+      this.myPlayerId = data.myPlayerId;
+      this.firstPlayerId = data.firstPlayerId;
+      this.gameMode = data.mode;
+      cb(data.roomId, data.seed, data.opponentId);
+    });
   }
 
   onOpponentMove(cb: (move: OpponentMove) => void): void {
     if (!this.socket) throw new Error("Not connected");
-    this.socket.on("opponent_move", (move: OpponentMove) => {
+    this.socket.on("opponent_move", (move: Move) => {
       cb(move);
     });
   }
@@ -124,12 +106,12 @@ export class SyncClient {
 
   onGameOver(cb: (data?: GameOverData) => void): void {
     if (!this.socket) throw new Error("Not connected");
-    this.socket.on("game_over", (data?: GameOverData) => cb(data));
+    this.socket.on("game_over", (data?: GameOverPayload) => cb(data));
   }
 
   onTurnChanged(cb: (data: TurnChangedData) => void): void {
     if (!this.socket) throw new Error("Not connected");
-    this.socket.on("turn_changed", (data: TurnChangedData) => cb(data));
+    this.socket.on("turn_changed", (data: TurnChangedPayload) => cb(data));
   }
 
   onOpponentDisconnect(cb: () => void): void {

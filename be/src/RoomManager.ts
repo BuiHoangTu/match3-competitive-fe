@@ -1,11 +1,6 @@
-export type Move = {
-  playerId: string;
-  r1: number;
-  c1: number;
-  r2: number;
-  c2: number;
-  timestamp: number;
-};
+import type { Move } from "../../shared/src/protocol";
+
+export type { Move };
 
 export type Room = {
   id: string;
