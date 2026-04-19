@@ -4,7 +4,7 @@ import type {
   MatchFoundPayload,
   TurnChangedPayload,
   GameOverPayload,
-} from "../../../shared/src/protocol.js";
+} from "@match3/shared/protocol.js";
 
 // Re-export shared types under the names used by the rest of the fe codebase
 export type OpponentMove = Move;

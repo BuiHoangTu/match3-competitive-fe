@@ -1,4 +1,4 @@
-import type { Move } from "../../shared/src/protocol";
+import type { Move } from "@match3/shared/protocol";
 
 export type { Move };
 

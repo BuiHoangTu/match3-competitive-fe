@@ -1,10 +1,17 @@
 import { createServer } from "http";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import { RoomManager } from "./RoomManager";
 import { isValidMove } from "./validator";
+import { BotPlayer } from "@match3/shared/bot/BotPlayer";
+import { createBoard, swapTiles, type Board } from "@match3/shared/engine/Board";
+import { createRng } from "@match3/shared/engine/rng";
+import { resolveBoard } from "@match3/shared/engine/MatchEngine";
 
 const PORT = 3001;
 const PLAYER_TIME_MS = 5 * 60 * 1000;
+const BOT_ID = "BOT";
+const BOT_WAIT_MS = 5_000;
+const BOT_THINK_MS = 700;
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -12,15 +19,23 @@ const io = new Server(httpServer, {
 });
 
 const roomManager = new RoomManager();
+const botPlayer = new BotPlayer();
 
 interface TimerState {
   intervalId: ReturnType<typeof setInterval>;
   times: Record<string, number>;
 }
 
+interface BotBoardState {
+  board: Board;
+  rng: () => number;
+}
+
 const roomTimers = new Map<string, TimerState>();
+const botStates = new Map<string, BotBoardState>();
 
 let waitingRoomId: string | null = null;
+let waitingBotTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 function stopRoomTimer(roomId: string): void {
   const t = roomTimers.get(roomId);
@@ -45,6 +60,9 @@ function startRoomTimer(
     const timerState = roomTimers.get(roomId);
     if (!room || !timerState || !room.activePlayer) return;
 
+    // Don't drain bot's clock — it always moves fast
+    if (room.activePlayer === BOT_ID) return;
+
     timerState.times[room.activePlayer] -= 1000;
 
     if ((timerState.times[room.activePlayer] ?? 0) <= 0) {
@@ -59,11 +77,78 @@ function startRoomTimer(
   roomTimers.set(roomId, { intervalId, times });
 }
 
+function scheduleBotTurn(roomId: string, humanSocket: Socket): void {
+  setTimeout(() => {
+    const botState = botStates.get(roomId);
+    const room = roomManager.getRoom(roomId);
+    if (!botState || !room || room.activePlayer !== BOT_ID) return;
+
+    const move = botPlayer.findBestMove(botState.board.grid);
+    if (!move) return;
+
+    const { r1, c1, r2, c2 } = move;
+
+    // Apply move to bot's board (resolveBoard is a no-op if no matches)
+    const swapped = swapTiles(botState.board, r1, c1, r2, c2);
+    const { grid: finalGrid } = resolveBoard(swapped.grid, botState.rng);
+    botState.board = { ...swapped, grid: finalGrid };
+
+    const botMove = { playerId: BOT_ID, r1, c1, r2, c2, timestamp: Date.now() };
+    roomManager.addMove(roomId, botMove);
+
+    humanSocket.emit("opponent_move", botMove);
+
+    room.activePlayer = humanSocket.id;
+    const timerState = roomTimers.get(roomId);
+    io.to(roomId).emit("turn_changed", {
+      activePlayerId: humanSocket.id,
+      times: timerState ? { ...timerState.times } : {},
+    });
+  }, BOT_THINK_MS);
+}
+
+function startBotGame(roomId: string, humanSocket: Socket): void {
+  const room = roomManager.joinRoom(roomId, BOT_ID);
+  if (!room) return;
+  waitingRoomId = null;
+
+  const { seed } = room;
+  botStates.set(roomId, {
+    board: createBoard(seed),
+    rng: createRng(seed + 1),
+  });
+
+  const humanId = humanSocket.id;
+  const firstPlayerId = Math.random() < 0.5 ? humanId : BOT_ID;
+  room.activePlayer = firstPlayerId;
+
+  startRoomTimer(roomId, humanId, BOT_ID);
+
+  humanSocket.emit("match_found", {
+    roomId,
+    seed,
+    opponentId: BOT_ID,
+    myPlayerId: humanId,
+    firstPlayerId,
+    mode: "turn_based",
+  });
+
+  if (firstPlayerId === BOT_ID) {
+    scheduleBotTurn(roomId, humanSocket);
+  }
+}
+
 io.on("connection", (socket) => {
   console.log(`[connect] ${socket.id}`);
 
   socket.on("matchmake", () => {
     if (waitingRoomId !== null) {
+      // Cancel bot fallback — a human arrived
+      if (waitingBotTimeoutId !== null) {
+        clearTimeout(waitingBotTimeoutId);
+        waitingBotTimeoutId = null;
+      }
+
       const room = roomManager.joinRoom(waitingRoomId, socket.id);
       if (room === null) {
         const newRoom = roomManager.createRoom(socket.id);
@@ -76,7 +161,7 @@ io.on("connection", (socket) => {
       waitingRoomId = null;
       socket.join(roomId);
 
-      const [player1Id, player2Id] = room.players;
+      const [player1Id, player2Id] = room.players as [string, string];
       const firstPlayerId = Math.random() < 0.5 ? player1Id : player2Id;
       room.activePlayer = firstPlayerId;
 
@@ -102,6 +187,13 @@ io.on("connection", (socket) => {
       const room = roomManager.createRoom(socket.id);
       waitingRoomId = room.id;
       socket.join(room.id);
+
+      waitingBotTimeoutId = setTimeout(() => {
+        waitingBotTimeoutId = null;
+        if (waitingRoomId === room.id) {
+          startBotGame(room.id, socket);
+        }
+      }, BOT_WAIT_MS);
     }
   });
 
@@ -147,7 +239,6 @@ io.on("connection", (socket) => {
 
       socket.to(data.roomId).emit("opponent_move", move);
 
-      // Switch active player and emit turn_changed
       const nextPlayer = room.players.find((p) => p !== socket.id);
       if (nextPlayer) {
         room.activePlayer = nextPlayer;
@@ -156,6 +247,10 @@ io.on("connection", (socket) => {
           activePlayerId: nextPlayer,
           times: timerState ? { ...timerState.times } : {},
         });
+
+        if (nextPlayer === BOT_ID) {
+          scheduleBotTurn(data.roomId, socket);
+        }
       }
     }
   );
@@ -167,12 +262,17 @@ io.on("connection", (socket) => {
       const waitingRoom = roomManager.getRoom(waitingRoomId);
       if (waitingRoom && waitingRoom.players.includes(socket.id)) {
         waitingRoomId = null;
+        if (waitingBotTimeoutId !== null) {
+          clearTimeout(waitingBotTimeoutId);
+          waitingBotTimeoutId = null;
+        }
       }
     }
 
     const activeRoom = roomManager.getRoomByPlayer(socket.id);
-    if (activeRoom && roomTimers.has(activeRoom.id)) {
+    if (activeRoom) {
       stopRoomTimer(activeRoom.id);
+      botStates.delete(activeRoom.id);
       socket.to(activeRoom.id).emit("opponent_disconnected");
     }
 

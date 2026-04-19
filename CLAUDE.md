@@ -38,9 +38,11 @@ Four strict layers — **never mix them**:
 
 0. **Shared** (`shared/src/`) — pure TypeScript, no framework/Phaser/Node imports.
    - `engine/rng.ts`, `engine/Board.ts`, `engine/MatchEngine.ts` — canonical engine source
+   - `bot/BotPlayer.ts` — bot AI shared by frontend (PvE client-side) and backend (matchmaking fallback)
    - `protocol.d.ts` — Socket.IO wire-format types shared by fe and be
-   - `fe/src/engine/*.ts` are **re-export shims** (`export * from "../../../shared/src/engine/..."`) so existing engine tests and imports continue to work unchanged
-   - `be/` imports protocol types via `import type { Move } from "../../shared/src/protocol"` — `import type` means the `.d.ts` file is never emitted, so `be/`'s `rootDir: "src"` is not violated
+   - All packages import shared code via the `@match3/shared` npm workspace alias (e.g. `@match3/shared/engine/Board.js`)
+   - `fe/src/engine/*.ts` and `fe/src/bot/BotPlayer.ts` are **re-export shims** so existing imports and tests continue to work unchanged
+   - `be/tsconfig.json` uses `rootDir: ".."` (monorepo root) to allow importing shared `.ts` source files; build output is `dist/be/src/server.js`
 
 1. **Engine** (`fe/src/engine/`) — re-export shims only; real source lives in `shared/`.
    - `rng.ts` — mulberry32 seeded PRNG (`createRng`, `randInt`)
@@ -58,11 +60,12 @@ Four strict layers — **never mix them**:
    - `scenes/ResultScene.ts` — WIN/LOSE/DRAW, match score, time bonus, total
    - **Never mutate engine state directly from the render layer** — call `GameLoopController.attemptSwap()` only.
 
-4. **Bot** (`fe/src/bot/`) — pure TypeScript, zero Phaser imports.
-   - `bot/BotPlayer.ts` — scans all adjacent pairs, returns the swap that clears the most cells
+4. **Bot** (`fe/src/bot/`) — re-export shim; real source in `shared/src/bot/BotPlayer.ts`.
+   - Scans all adjacent pairs, returns the swap that clears the most cells
+   - Used client-side (PvE mode) and server-side (matchmaking fallback when no human opponent)
 
 5. **Network** (`be/`, `fe/src/net/`) — server relays seed + moves only; never full board state.
-   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay
+   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay; falls back to bot opponent after 5 s if no human joins
    - `be/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking
    - `be/src/validator.ts` — adjacency + bounds validation
    - `fe/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match
@@ -104,8 +107,8 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 | Mode | Description |
 |---|---|
 | `solo` | Practice — no opponent, no timer |
-| `pve` | vs Bot — turn-based, 5 min per player, client-only (no server) |
-| `turn_based` | PvP online — server enforces turn order and 5-min per-player clocks |
+| `pve` | vs Bot — turn-based, 5 min per player, client drives bot locally (no server) |
+| `turn_based` | PvP online — server enforces turn order and 5-min per-player clocks; server falls back to bot opponent after 5 s of no human joining |
 
 `GameScene` receives `mode` in its scene data and gates input on `myTurn`.
 

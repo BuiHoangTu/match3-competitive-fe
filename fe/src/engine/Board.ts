@@ -1,1 +1,1 @@
-export * from "../../../shared/src/engine/Board.js";
+export * from "@match3/shared/engine/Board.js";

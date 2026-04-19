@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@match3/shared": "*",
     "phaser": "^3.88.2",
     "socket.io-client": "^4.8.1"
   },

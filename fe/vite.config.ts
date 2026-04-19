@@ -2,10 +2,13 @@ import { defineConfig } from "vitest/config";
 import path from "path";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@match3/shared": path.resolve(__dirname, "../shared/src"),
+    },
+  },
   server: {
     fs: {
-      // Allow the dev server to serve files from the monorepo root
-      // (needed so fe/ can import from shared/)
       allow: [path.resolve(__dirname, "..")],
     },
   },

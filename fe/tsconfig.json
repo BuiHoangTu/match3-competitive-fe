@@ -10,7 +10,10 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "paths": {
+      "@match3/shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src"]
 }

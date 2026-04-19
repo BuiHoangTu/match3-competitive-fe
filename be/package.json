@@ -2,13 +2,14 @@
   "name": "match3-be",
   "version": "0.1.0",
   "description": "Match-3 competitive backend",
-  "main": "dist/server.js",
+  "main": "dist/be/src/server.js",
   "scripts": {
     "dev": "ts-node src/server.ts",
     "build": "tsc",
     "test": "vitest run"
   },
   "dependencies": {
+    "@match3/shared": "*",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {

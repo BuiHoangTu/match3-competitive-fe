@@ -1,1 +1,1 @@
-export * from "../../../shared/src/engine/rng.js";
+export * from "@match3/shared/engine/rng.js";
