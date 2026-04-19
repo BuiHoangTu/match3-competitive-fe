@@ -56,12 +56,13 @@
 | D6 | 90-second countdown timer in-game | `GameScene.ts` | ✅ |
 | D7 | End-to-end test: two browser tabs, same seed, same boards | manual | ⬜ |
 
-## Track E — Bot (depends on B)
+## Track E — Bot + Turn-based Mode
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| E1 | Bot engine — find all valid moves from board state | `be/src/bot/MoveScorer.ts` | ⬜ |
-| E2 | Bot player — auto-plays inside a room | `be/src/bot/Bot.ts` | ⬜ |
+| E1 | Client-side bot — scans board for best match-creating swap | `fe/src/bot/BotPlayer.ts` | ✅ |
+| E2 | PvE mode — local turn-based game vs bot with per-player 5-min clocks | `GameScene.ts`, `LobbyScene.ts` | ✅ |
+| E3 | PvP turn-based — server-side per-player 5-min timers, `turn_changed` relay | `be/src/server.ts`, `SyncClient.ts` | ✅ |
 
 ## Track F — Mobile (depends on C)
 
@@ -115,8 +116,7 @@ B1–B4 ──► B5 ──► D1 ──► D2–D3 ─────────�
 ## What's Next
 
 Priority order for remaining work:
-1. **D7** — manual end-to-end multiplayer test (two browsers)
-2. **E1–E2** — bot player (enables solo testing without a human opponent)
-3. **F1–F2** — Capacitor mobile packaging
-4. **G1** — meta systems
-5. **G2** — Flutter shell
+1. **D7** — manual end-to-end multiplayer test (two browsers, PvP turn-based)
+2. **F1–F2** — Capacitor mobile packaging
+3. **G1** — meta systems
+4. **G2** — Flutter shell

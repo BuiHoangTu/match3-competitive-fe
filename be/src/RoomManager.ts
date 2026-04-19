@@ -12,6 +12,7 @@ export type Room = {
   players: string[];
   seed: number;
   moves: Move[];
+  activePlayer: string | null;
 };
 
 function generateId(): string {
@@ -20,7 +21,6 @@ function generateId(): string {
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
-  // Map from playerId to roomId for fast lookup
   private playerRoom: Map<string, string> = new Map();
 
   createRoom(playerId: string): Room {
@@ -29,6 +29,7 @@ export class RoomManager {
       players: [playerId],
       seed: Math.floor(Math.random() * 2 ** 31),
       moves: [],
+      activePlayer: null,
     };
     this.rooms.set(room.id, room);
     this.playerRoom.set(playerId, room.id);
@@ -52,6 +53,12 @@ export class RoomManager {
   }
 
   getRoom(roomId: string): Room | null {
+    return this.rooms.get(roomId) ?? null;
+  }
+
+  getRoomByPlayer(playerId: string): Room | null {
+    const roomId = this.playerRoom.get(playerId);
+    if (!roomId) return null;
     return this.rooms.get(roomId) ?? null;
   }
 

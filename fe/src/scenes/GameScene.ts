@@ -9,7 +9,13 @@ import {
   type TileSprite,
 } from "../rendering/TileSpritePool.js";
 import type { TileMovement } from "../engine/MatchEngine.js";
-import type { SyncClient, OpponentMove } from "../net/SyncClient.js";
+import type {
+  SyncClient,
+  OpponentMove,
+  TurnChangedData,
+  GameOverData,
+} from "../net/SyncClient.js";
+import { BotPlayer } from "../bot/BotPlayer.js";
 
 // -------------------------------------------------------------------------
 // Layout
@@ -17,30 +23,24 @@ import type { SyncClient, OpponentMove } from "../net/SyncClient.js";
 const TILE_GAP = 4;
 const CELL_STRIDE = TILE_SIZE + TILE_GAP; // 68px
 
-// Player board fixed in the left portion of the 900px canvas
 const BOARD_ORIGIN_X = 28;
 const BOARD_ORIGIN_Y = 80;
 
-// Info panel (right side)
 const PANEL_X = 630;
 
-// Opponent minimap
 const MINI_TILE = 32;
 const MINI_GAP = 2;
 const MINI_STRIDE = MINI_TILE + MINI_GAP; // 34px
 const MINI_ORIGIN_X = 625;
 const MINI_ORIGIN_Y = 220;
 
-// Minimap symbol colors (slightly muted)
 const MINI_COLORS: number[] = [
   0xc0392b, 0x2980b9, 0x27ae60, 0xd4ac0d, 0x7d3c98,
 ];
 
-// Highlight overlay
 const HIGHLIGHT_COLOR = 0xffffff;
 const HIGHLIGHT_ALPHA = 0.35;
 
-// Default seed for single-player / solo mode
 const DEFAULT_SEED = 12345;
 
 // Animation durations (ms)
@@ -49,19 +49,26 @@ const FLASH_MS = 180;
 const FALL_MS_PER_ROW = 40;
 const APPEAR_MS = 220;
 
-// Must match server-side GAME_DURATION_MS
-const GAME_DURATION_MS = 90_000;
+// 5 minutes per player in turn-based / pve modes
+const TURN_TIME_MS = 5 * 60 * 1000;
+
+// Bonus points per second of remaining time when opponent's clock runs out
+const BONUS_PER_SECOND = 10;
 
 // -------------------------------------------------------------------------
 // Types
 // -------------------------------------------------------------------------
 type GameSceneState = "idle" | "animating" | "game_over";
+type GameMode = "solo" | "turn_based" | "pve";
 
 interface GameSceneData {
   seed?: number;
   roomId?: string;
   opponentId?: string;
   syncClient?: SyncClient;
+  mode?: string;
+  myPlayerId?: string;
+  firstPlayerId?: string;
 }
 
 // -------------------------------------------------------------------------
@@ -81,15 +88,29 @@ export class GameScene extends Phaser.Scene {
   private selected: { row: number; col: number } | null = null;
   private selectionOverlay: Phaser.GameObjects.Rectangle | null = null;
 
+  // Mode & turn state
+  private mode: GameMode = "solo";
+  private myPlayerId: string | null = null;
+  private myTurn = true;
+
+  // Per-player clocks (ms remaining)
+  private myTimeMs = 0;
+  private opponentTimeMs = 0;
+  private timerInterval: number | null = null;
+  private lastTimerTick = 0;
+
+  // UI elements
   private scoreText!: Phaser.GameObjects.Text;
   private opponentScoreText: Phaser.GameObjects.Text | null = null;
-  private timerText: Phaser.GameObjects.Text | null = null;
-  private timeLeft = 0;
+  private myTimerText: Phaser.GameObjects.Text | null = null;
+  private opponentTimerText: Phaser.GameObjects.Text | null = null;
+  private turnIndicator: Phaser.GameObjects.Text | null = null;
 
   private minimapObjects: Phaser.GameObjects.Rectangle[][] = [];
 
   private roomId: string | null = null;
   private syncClient: SyncClient | null = null;
+  private botPlayer: BotPlayer | null = null;
 
   constructor() {
     super({ key: "GameScene" });
@@ -103,20 +124,42 @@ export class GameScene extends Phaser.Scene {
     const seed = data?.seed ?? DEFAULT_SEED;
     this.roomId = data?.roomId ?? null;
     this.syncClient = data?.syncClient ?? null;
+    this.mode = (data?.mode as GameMode) ?? "solo";
+    this.myPlayerId = data?.myPlayerId ?? null;
 
     this.ctrl = new GameLoopController(seed);
     this.opponentCtrl = new GameLoopController(seed);
     this.pool = new TileSpritePool(this);
 
+    if (this.mode !== "solo") {
+      this.myTimeMs = TURN_TIME_MS;
+      this.opponentTimeMs = TURN_TIME_MS;
+    }
+
+    if (this.mode === "turn_based") {
+      this.myTurn = data?.firstPlayerId === data?.myPlayerId;
+    } else if (this.mode === "pve") {
+      this.myTurn = true;
+      this.botPlayer = new BotPlayer();
+    } else {
+      this.myTurn = true;
+    }
+
     this.initBoard();
     this.buildInfoPanel();
+
     if (this.syncClient) this.wireMultiplayer();
+    if (this.mode !== "solo") this.startTurnTimer();
 
     this.input.on(
       Phaser.Input.Events.POINTER_DOWN,
       this.handlePointerDown,
       this
     );
+  }
+
+  shutdown(): void {
+    this.stopTurnTimer();
   }
 
   // -------------------------------------------------------------------------
@@ -151,26 +194,48 @@ export class GameScene extends Phaser.Scene {
         fontStyle: "bold",
       })
       .setDepth(20);
+
+    if (this.mode !== "solo") {
+      const opponentLabel = this.mode === "pve" ? "Bot: 0" : "Opponent: 0";
+      this.opponentScoreText = this.add
+        .text(PANEL_X, 70, opponentLabel, {
+          fontSize: "18px",
+          color: "#aaaaff",
+        })
+        .setDepth(20);
+
+      this.myTimerText = this.add
+        .text(PANEL_X, 120, "You:  5:00", {
+          fontSize: "20px",
+          color: "#44ff88",
+          fontStyle: "bold",
+        })
+        .setDepth(20);
+
+      this.opponentTimerText = this.add
+        .text(PANEL_X, 150, "Opp:  5:00", {
+          fontSize: "20px",
+          color: "#ff9944",
+        })
+        .setDepth(20);
+
+      this.turnIndicator = this.add
+        .text(PANEL_X, 190, "", {
+          fontSize: "15px",
+          color: "#ffffff",
+        })
+        .setDepth(20);
+
+      this.updateTurnIndicator();
+      this.drawMinimap();
+    }
   }
 
+  // -------------------------------------------------------------------------
+  // Multiplayer wiring (PvP turn_based only)
+  // -------------------------------------------------------------------------
+
   private wireMultiplayer(): void {
-    this.opponentScoreText = this.add
-      .text(PANEL_X, 80, "Opponent: 0", {
-        fontSize: "18px",
-        color: "#aaaaff",
-      })
-      .setDepth(20);
-
-    this.timerText = this.add
-      .text(PANEL_X, 140, "1:30", {
-        fontSize: "28px",
-        color: "#ffdd44",
-        fontStyle: "bold",
-      })
-      .setDepth(20);
-
-    this.drawMinimap();
-
     this.syncClient!.onOpponentMove((move: OpponentMove) => {
       const result = this.opponentCtrl.attemptSwap(
         move.r1,
@@ -186,9 +251,39 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    this.syncClient!.onGameOver(() => this.endGame());
+    this.syncClient!.onTurnChanged((data: TurnChangedData) => {
+      this.myTurn = data.activePlayerId === this.myPlayerId;
+      if (this.myPlayerId !== null && data.times[this.myPlayerId] !== undefined) {
+        this.myTimeMs = data.times[this.myPlayerId]!;
+      }
+      const opponentId = Object.keys(data.times).find(
+        (id) => id !== this.myPlayerId
+      );
+      if (opponentId && data.times[opponentId] !== undefined) {
+        this.opponentTimeMs = data.times[opponentId]!;
+      }
+      this.updateTimerDisplay();
+      this.updateTurnIndicator();
+    });
 
-    this.startTimer();
+    this.syncClient!.onGameOver((gameOverData?: GameOverData) => {
+      if (gameOverData?.loserTimeUp) {
+        const won = gameOverData.loserTimeUp !== this.myPlayerId;
+        const myRemaining =
+          gameOverData.times?.[this.myPlayerId ?? ""] ?? 0;
+        const timeBonus = won
+          ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
+          : 0;
+        this.endGame(timeBonus);
+      } else {
+        this.endGame(0);
+      }
+    });
+
+    this.syncClient!.onOpponentDisconnect(() => {
+      const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
+      this.endGame(bonus);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -219,31 +314,80 @@ export class GameScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------------------
-  // Timer
+  // Turn timer
   // -------------------------------------------------------------------------
 
-  private startTimer(): void {
-    this.timeLeft = 90;
-    this.time.addEvent({
-      delay: 1000,
-      repeat: 89,
-      callback: () => {
-        this.timeLeft--;
-        const m = Math.floor(this.timeLeft / 60);
-        const s = this.timeLeft % 60;
-        this.timerText?.setText(`${m}:${s.toString().padStart(2, "0")}`);
-        if (this.timeLeft <= 0) this.endGame();
-      },
-    });
-    this.time.delayedCall(GAME_DURATION_MS, () => this.endGame());
+  private startTurnTimer(): void {
+    this.lastTimerTick = Date.now();
+    this.timerInterval = window.setInterval(() => this.tickTurnTimer(), 200);
   }
 
-  private endGame(): void {
+  private stopTurnTimer(): void {
+    if (this.timerInterval !== null) {
+      clearInterval(this.timerInterval);
+      this.timerInterval = null;
+    }
+  }
+
+  private tickTurnTimer(): void {
+    if (this.state === "game_over") return;
+    const now = Date.now();
+    const elapsed = now - this.lastTimerTick;
+    this.lastTimerTick = now;
+
+    if (this.myTurn) {
+      this.myTimeMs = Math.max(0, this.myTimeMs - elapsed);
+      if (this.myTimeMs <= 0 && this.mode === "pve") {
+        this.endGame(0);
+        return;
+      }
+    } else {
+      this.opponentTimeMs = Math.max(0, this.opponentTimeMs - elapsed);
+      if (this.opponentTimeMs <= 0 && this.mode === "pve") {
+        const bonus =
+          Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
+        this.endGame(bonus);
+        return;
+      }
+    }
+
+    this.updateTimerDisplay();
+  }
+
+  private updateTimerDisplay(): void {
+    const fmt = (ms: number): string => {
+      const totalSecs = Math.max(0, Math.ceil(ms / 1000));
+      const m = Math.floor(totalSecs / 60);
+      const s = totalSecs % 60;
+      return `${m}:${s.toString().padStart(2, "0")}`;
+    };
+    this.myTimerText?.setText(`You:  ${fmt(this.myTimeMs)}`);
+    this.opponentTimerText?.setText(`Opp:  ${fmt(this.opponentTimeMs)}`);
+  }
+
+  private updateTurnIndicator(): void {
+    if (!this.turnIndicator) return;
+    if (this.myTurn) {
+      this.turnIndicator.setText(">> YOUR TURN <<").setColor("#ffff44");
+    } else {
+      const label =
+        this.mode === "pve" ? "Bot's Turn..." : "Opponent's Turn";
+      this.turnIndicator.setText(label).setColor("#888888");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Game over
+  // -------------------------------------------------------------------------
+
+  private endGame(timeBonus = 0): void {
     if (this.state === "game_over") return;
     this.state = "game_over";
+    this.stopTurnTimer();
     this.scene.start("ResultScene", {
       myScore: this.ctrl.score,
       opponentScore: this.opponentCtrl.score,
+      timeBonus,
     });
   }
 
@@ -253,6 +397,7 @@ export class GameScene extends Phaser.Scene {
 
   private handlePointerDown(pointer: Phaser.Input.Pointer): void {
     if (this.state !== "idle") return;
+    if (this.mode !== "solo" && !this.myTurn) return;
 
     const col = Math.floor((pointer.x - BOARD_ORIGIN_X) / CELL_STRIDE);
     const row = Math.floor((pointer.y - BOARD_ORIGIN_Y) / CELL_STRIDE);
@@ -327,7 +472,7 @@ export class GameScene extends Phaser.Scene {
     const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
 
     if (result.kind === "no_match") {
-      // Animate back to original positions
+      // Animate back
       await Promise.all([
         this.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
         this.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
@@ -337,13 +482,24 @@ export class GameScene extends Phaser.Scene {
       this.idAt[r1][c1] = idB;
       this.idAt[r2][c2] = idA;
 
-      // Relay to server in multiplayer
+      // Send move to server and optimistically relinquish turn
       if (this.syncClient && this.roomId) {
         this.syncClient.sendMove(this.roomId, r1, c1, r2, c2);
+        if (this.mode === "turn_based") {
+          this.myTurn = false;
+          this.updateTurnIndicator();
+        }
       }
 
       await this.playResolveSteps(result.steps);
       this.scoreText.setText(`Score: ${this.ctrl.score}`);
+
+      // For PvE: relinquish turn after animations and schedule bot
+      if (this.mode === "pve") {
+        this.myTurn = false;
+        this.updateTurnIndicator();
+        this.scheduleBotTurn();
+      }
     }
 
     this.state = "idle";
@@ -398,6 +554,40 @@ export class GameScene extends Phaser.Scene {
 
       await this.tweenRefillFall(engineStep.newTilePositions);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Bot turn (PvE)
+  // -------------------------------------------------------------------------
+
+  private scheduleBotTurn(): void {
+    if (this.state === "game_over") return;
+    this.time.delayedCall(700, () => this.doBotTurn());
+  }
+
+  private doBotTurn(): void {
+    if (this.state !== "idle") return;
+
+    const move = this.botPlayer!.findBestMove(this.opponentCtrl.board.grid);
+    if (!move) {
+      this.myTurn = true;
+      this.updateTurnIndicator();
+      return;
+    }
+
+    const result = this.opponentCtrl.attemptSwap(
+      move.r1,
+      move.c1,
+      move.r2,
+      move.c2
+    );
+    this.drawMinimap();
+    if (result.kind === "resolved") {
+      this.opponentScoreText?.setText(`Bot: ${this.opponentCtrl.score}`);
+    }
+
+    this.myTurn = true;
+    this.updateTurnIndicator();
   }
 
   // -------------------------------------------------------------------------
