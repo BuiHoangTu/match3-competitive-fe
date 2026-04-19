@@ -1,7 +1,16 @@
 node_modules/
-dist/
+
+# OS
 .DS_Store
-*.local
-# Stale tsc emission artifacts from shared/ (shared has no outDir)
-shared/src/**/*.js
-shared/src/**/*.js.map
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.*
+!.env.example

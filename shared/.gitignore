@@ -1,0 +1,5 @@
+dist/
+*.tsbuildinfo
+# Stale tsc emission artifacts when tsc is run directly in this folder
+src/**/*.js
+src/**/*.js.map
