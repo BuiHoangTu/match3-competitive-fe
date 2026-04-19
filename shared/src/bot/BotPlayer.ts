@@ -1,4 +1,4 @@
-import { findMatches } from "../engine/MatchEngine.js";
+import { findMatches } from "../engine/MatchEngine";
 
 export class BotPlayer {
   findBestMove(

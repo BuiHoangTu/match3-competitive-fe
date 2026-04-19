@@ -1,4 +1,4 @@
-import { randInt } from "./rng.js";
+import { randInt } from "./rng";
 
 // Number of distinct symbol types on the board (must match Board.ts)
 const NUM_SYMBOLS = 5;

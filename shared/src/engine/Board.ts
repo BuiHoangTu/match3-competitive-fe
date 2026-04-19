@@ -1,4 +1,4 @@
-import { createRng, randInt } from "./rng.js";
+import { createRng, randInt } from "./rng";
 
 export const BOARD_WIDTH = 8;
 export const BOARD_HEIGHT = 8;
