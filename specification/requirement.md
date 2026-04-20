@@ -8,7 +8,7 @@ Requirement IDs are stable and may be referenced from issues, PRs, and design do
 
 Placeholder values (e.g. grid size, clock length) are listed in [§ Open values](#open-values) and should be pinned before implementation of the corresponding requirement begins.
 
-Scope of this document: **functional gameplay & modes**, **multiplayer & networking**, **non-functional (performance, determinism, accessibility)**. Architecture and layering are intentionally out of scope — they are implementation concerns, not requirements.
+Scope of this document: **functional gameplay & modes**, **multiplayer & networking**, **identity & accounts**, **non-functional (performance, determinism, accessibility)**. Architecture and layering are intentionally out of scope — they are implementation concerns, not requirements.
 
 ---
 
@@ -60,15 +60,33 @@ Full-state messages are reserved for rejoin-after-disconnect (see MR-6) and MUST
 
 **MR-5 — Per-player clocks.** Each player MUST have a bounded total thinking time per match (chess-clock semantics: the active player's clock ticks down, the opponent's does not). The server MUST be authoritative for both clocks. Clients render clocks based on server updates; they MUST NOT independently run their own authoritative clock in head-to-head modes. Exact per-player time is defined in [§ Open values](#open-values).
 
-**MR-6 — Disconnection & reconnection.** If a player's connection drops mid-match, the server MUST hold the match open for a bounded window and MUST allow that player to rejoin and resume with full state restored (seed + move history + current clocks). If the window elapses without a rejoin, the match MUST end per FR-7(b). Exact window is defined in [§ Open values](#open-values).
+**MR-6 — Disconnection & reconnection.** If a player's connection drops mid-match, the server MUST hold the match open for a bounded window and MUST allow that player to rejoin and resume with full state restored (seed + move history + current clocks). If the window elapses without a rejoin, the match MUST end per FR-7(b). Rejoin tokens MUST be keyed by authenticated user id (see AR-1) rather than socket id, so a player MAY resume from a different device (e.g. phone → laptop) as long as both sessions belong to the same account and the window has not elapsed. Exact window is defined in [§ Open values](#open-values).
 
-**MR-7 — Move validation.** The server MUST validate every submitted move against at least: (i) bounds, (ii) adjacency, (iii) turn ownership, (iv) that the submitting socket belongs to the correct room. Invalid moves MUST NOT mutate state and MUST be reported back to the submitter as rejected.
+**MR-7 — Move validation.** The server MUST validate every submitted move against at least: (i) bounds, (ii) adjacency, (iii) turn ownership, (iv) that the submitting socket belongs to the correct room, (v) that the submitting socket carries a valid authentication token whose user id matches the player slot in that room. Invalid moves MUST NOT mutate state and MUST be reported back to the submitter as rejected.
 
 **MR-8 — Bandwidth ceiling.** Total wire traffic for a typical match SHOULD remain on the order of a few kilobytes. Move messages are tiny (a pair of coordinates plus metadata); no board snapshots are sent in the hot path. This is a design consequence of MR-2 and MR-3 and exists as an explicit target so future changes don't silently regress it.
 
 ---
 
-## 3. Non-functional requirements
+## 3. Identity & account requirements
+
+**AR-1 — Mandatory authentication.** Every player MUST sign in before reaching matchmaking or any game mode, including Practice. There is no guest play: the product is distributed only as a Flutter app shell (iOS, Android, Flutter Web) which gates all gameplay behind authentication. The raw embedded game view is never reachable without a valid auth token.
+
+**AR-2 — Sign-in providers.** The product MUST offer **Apple Sign-In** and **Google Sign-In** as authentication options. Email/password sign-in MUST NOT be offered in the first spec. (Apple Sign-In is required alongside Google to comply with App Store Review Guideline 4.8.)
+
+**AR-3 — Token flow.** The Flutter shell MUST obtain the auth token from the provider and refresh it as required by the provider's SDK. The embedded game view MUST receive the token via a narrow shell→game bridge at init and on each refresh, and MUST attach it to the Socket.IO handshake. The game view MUST NOT initiate sign-in itself. Apart from the token and platform lifecycle events (foreground, background, pause, resume), no gameplay data MAY cross the shell/game bridge — in particular, moves, clock ticks, and match events stay inside the game view's socket connection.
+
+**AR-4 — Account deletion.** The app MUST provide an in-app path to permanently delete the signed-in account, accessible without contacting support. On deletion, the user row MUST be removed and any associated match-history rows MUST be anonymised (replace userId with a tombstone identifier) so that the opponent's history remains intact. Deletion MUST complete within a bounded grace period defined in [§ Open values](#open-values).
+
+**AR-5 — Privacy & terms.** A published privacy policy and terms-of-service MUST be reachable from within the app prior to sign-in. The app MUST NOT collect personal data beyond what the sign-in provider returns (display name, avatar URL, provider-scoped user id) plus what is strictly required for gameplay and reconnection.
+
+**AR-6 — Match history persistence.** For every completed match, the server MUST persist a record containing: match id, both player ids, final scores, outcome (W/L/D), duration, and end timestamp. Persisted match history is the only durable state introduced by identity; live match state (board, moves, clocks) remains in-memory for the duration of the match only.
+
+**AR-7 — Cross-device session.** An authenticated user MUST be able to have at most one active match at a time. Opening a second client while a match is in progress MUST either resume that same match (if within the reconnection window) or refuse to start a new one. This follows from MR-6 combined with AR-1.
+
+---
+
+## 4. Non-functional requirements
 
 ### Performance
 
@@ -98,9 +116,16 @@ Full-state messages are reserved for rejoin-after-disconnect (see MR-6) and MUST
 
 ### Platform & access
 
-**NFR-11 — Browser support.** The game MUST run correctly in the latest two major versions of Chrome, Firefox, and Safari on desktop. It SHOULD run in the same on mobile browsers.
+**NFR-11 — Platform support.** The product MUST run correctly on:
+  - **Flutter Web**, opened in the latest two major versions of Chrome, Firefox, and Safari on desktop, and at least one evergreen mobile browser.
+  - **iOS**, as a Flutter app shell wrapping the game view in a WKWebView. Minimum iOS version is defined in [§ Open values](#open-values).
+  - **Android**, as a Flutter app shell wrapping the game view in a platform WebView. Minimum Android version is defined in [§ Open values](#open-values).
+Board state MUST be cell-identical across all three runtime targets for a given match.
 
-**NFR-12 — Zero-friction entry.** A player MUST be able to land on the page and start a match (solo, bot, or human) within roughly 10 seconds, without creating an account, verifying an email, or installing anything.
+**NFR-12 — Low-friction entry.**
+  - (a) **First launch** (no cached session): from cold load to in-match SHOULD take no longer than ~20 seconds, inclusive of a single sign-in tap with Apple or Google.
+  - (b) **Returning launch** (cached session): from cold load to in-match MUST take no longer than ~10 seconds.
+  - (c) No email verification step MUST be required. No native app install MUST be required on the Flutter Web target. Mobile targets MAY require a native install (this is inherent to the platform, not a product choice).
 
 ---
 
@@ -116,8 +141,13 @@ These values are intentionally left as placeholders in this specification. They 
 | Bot thinking-time bound | FR-6 | ≤ 1 s per move |
 | Matchmaking wait before bot fallback | MR-1 | ≤ 10 s |
 | Per-player clock | MR-5 | 5 min per player per match |
-| Reconnection window | MR-6 | 60 s |
+| Reconnection window | MR-6 | 5 min (extended from 60 s once identity allows cross-device rejoin) |
 | Reference machine for NFR-1 | NFR-1 | e.g. "mid-2020 laptop, integrated GPU, 1080p" |
+| Account deletion grace period | AR-4 | 30 days (soft-delete + hard-delete on expiry), or immediate hard-delete for simplicity |
+| Minimum iOS version | NFR-11 | iOS 15 |
+| Minimum Android version | NFR-11 | Android 10 (API 29) |
+| Identity provider backend | AR-2, AR-3 | Firebase Auth (Apple + Google providers) |
+| Persistence store | AR-6 | Postgres (production); SQLite acceptable for closed beta |
 
 ---
 

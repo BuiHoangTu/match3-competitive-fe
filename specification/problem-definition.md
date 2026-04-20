@@ -20,32 +20,33 @@ This project fills that gap.
 ## 3. Target users & use cases
 
 - **Casual puzzle players** who want quick, skill-expressing matches rather than energy-gated single-player grinds.
-- **Friends challenging each other** who want to send a link and play *now*, without installing an app or creating accounts.
+- **Friends challenging each other** who want to send a link and play *now* on any device, without installing a native app on the web path.
 - **Players practicing alone or versus a bot** when no human opponent is available.
 
-Primary session shape: open the page → click a button → be in a match within seconds → play for under five minutes → see a clear result → play again.
+Primary session shape: open the app (web or mobile) → sign in once (cached thereafter) → click a button → be in a match within seconds → play for under five minutes → see a clear result → play again.
 
 ## 4. Core value proposition
 
 - **Skill-based.** Outcomes are driven by decisions, not by luck drops or paywalls.
 - **Deterministic.** Both players play the same board. "We saw the same thing" is a hard guarantee, not a hope.
-- **Frictionless.** No install, no account, no onboarding flow on day one.
+- **One identity, everywhere.** A single account works across the web app and the mobile apps. Sign in once; resume a disrupted match from any device within the reconnection window.
+- **Low-friction on web.** No native install required on the web path — visit a URL, sign in, play. Mobile adds a one-time native install for platform features (push, native sign-in, account deletion UI).
 
 ## 5. Success criteria
 
 - A match completes in under roughly five minutes from the first click to the result screen.
 - Two players on different machines see identical board state at all times during a match.
-- A player who briefly loses connection can return and continue their match.
-- A player can start a new match without creating an account.
+- A player who briefly loses connection can return and continue their match — on the same device or a different one, within the reconnection window.
+- First-time players reach a match within ~20 seconds including sign-in; returning players (cached session) reach a match within ~10 seconds.
 - The game is playable by colour-blind players and by players using keyboard-only or touch-only input.
 
 ## 6. Non-goals (out of scope for this specification)
 
 - Ranked ladders, ELO, seasons, or leaderboards.
-- User accounts, authentication, or persistence of history.
 - Monetisation, payments, or cosmetics.
-- Native mobile apps (the product is browser-first; a mobile shell is a later, separate concern).
+- Email/password sign-in (providers are Apple + Google only; email/password is deferred indefinitely).
 - Social features beyond 1v1: no chat, no spectators, no tournaments, no friends list.
-- Anti-cheat beyond what strict determinism and server-side validation naturally provide.
+- Anti-cheat beyond what strict determinism, server-side validation, and authenticated sessions naturally provide.
+- Cross-account match-history merging (guest play does not exist; history is always tied to a single account from first launch).
 
 These are not forbidden forever — they are simply not part of what "done" means for this spec.
