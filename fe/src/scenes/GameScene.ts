@@ -309,17 +309,13 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.syncClient!.onOpponentReconnecting(() => {
-      this.myTurn = false;
-      this.updateTurnIndicator();
+      if (this.reconnectingBanner) return;
       this.reconnectingBanner = this.add
-        .text(
-          this.scale.width / 2,
-          this.scale.height / 2 - 40,
-          "Opponent reconnecting...",
-          { fontSize: "24px", color: "#ffff44", backgroundColor: "#000000aa", padding: { x: 16, y: 8 } }
-        )
-        .setOrigin(0.5)
-        .setDepth(50);
+        .text(PANEL_X, 220, "Opponent reconnecting…", {
+          fontSize: "14px",
+          color: "#ffff44",
+        })
+        .setDepth(20);
     });
 
     this.syncClient!.onOpponentReconnected(() => {
