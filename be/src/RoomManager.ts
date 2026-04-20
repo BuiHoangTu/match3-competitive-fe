@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { Move } from "@match3/shared/protocol";
 
 export type { Move };
@@ -8,10 +9,11 @@ export type Room = {
   seed: number;
   moves: Move[];
   activePlayer: string | null;
+  status: "active" | "over";
 };
 
 function generateId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return randomUUID();
 }
 
 export class RoomManager {
@@ -25,6 +27,7 @@ export class RoomManager {
       seed: Math.floor(Math.random() * 2 ** 31),
       moves: [],
       activePlayer: null,
+      status: "active",
     };
     this.rooms.set(room.id, room);
     this.playerRoom.set(playerId, room.id);
@@ -44,6 +47,7 @@ export class RoomManager {
     const room = this.rooms.get(roomId);
     if (!room) return false;
     room.moves.push(move);
+    if (room.moves.length > 200) room.moves.splice(0, room.moves.length - 200);
     return true;
   }
 
@@ -69,5 +73,34 @@ export class RoomManager {
     if (room.players.length === 0) {
       this.rooms.delete(roomId);
     }
+  }
+
+  replacePlayer(oldPlayerId: string, newPlayerId: string): Room | null {
+    const roomId = this.playerRoom.get(oldPlayerId);
+    if (!roomId) return null;
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+
+    const idx = room.players.indexOf(oldPlayerId);
+    if (idx === -1) return null;
+
+    room.players[idx] = newPlayerId;
+    this.playerRoom.delete(oldPlayerId);
+    this.playerRoom.set(newPlayerId, roomId);
+
+    if (room.activePlayer === oldPlayerId) {
+      room.activePlayer = newPlayerId;
+    }
+
+    return room;
+  }
+
+  closeRoom(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    for (const playerId of [...room.players]) {
+      this.playerRoom.delete(playerId);
+    }
+    this.rooms.delete(roomId);
   }
 }
