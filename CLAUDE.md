@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Spec & agent workflow
+
+Before implementing any task, read [specification/implementation-plan.md](specification/implementation-plan.md) — specifically its **Execution Rules** and **Agent Execution Workflow** sections. Tasks are picked from that file; every task lists its own Context / Inputs / Outputs / Acceptance contract. Do not improvise scope.
+
+Specs live under [specification/](specification/):
+- [problem-definition.md](specification/problem-definition.md) — product framing
+- [requirement.md](specification/requirement.md) — stable requirement IDs (FR/MR/AR/NFR)
+- [system-design.md](specification/system-design.md) — architecture + diagrams
+- [planning.md](specification/planning.md) — milestones and per-version scope
+- [implementation-plan.md](specification/implementation-plan.md) — agent-executable tasks
+
+**Not yet in the codebase (v0.6 work):** Flutter app shell, shell↔game bridge, Firebase Auth / Socket.IO token verification, Postgres persistence (`users`, `match_history`), userId-keyed rejoin. Do not assume these exist when reading code — they are planned, not present. Current code state matches the Status snapshot in [implementation-plan.md](specification/implementation-plan.md).
+
 ## Repository Layout
 
 ```
@@ -140,10 +153,11 @@ Both players play on **the same board**. There is no separate opponent board or 
 
 # Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Game client | Phaser 3.88, TypeScript 5.8, Vite 6 |
-| Unit tests | Vitest 3 (fe), Vitest 1 (be) |
-| Backend | Node.js, Socket.IO 4.7, ts-node |
-| Mobile (future) | Capacitor |
-| App shell (future) | Flutter (UI only — no game logic) |
+| Layer | Technology | Status |
+|---|---|---|
+| Embedded game view | Phaser 3.88, TypeScript 5.8, Vite 6 | current |
+| Unit tests | Vitest 3 (fe), Vitest 1 (be) | current |
+| Backend | Node.js, Socket.IO 4.7, ts-node | current |
+| App shell (iOS + Android + Web) | Flutter + Dart — decided universal shell, embeds the Phaser game view via `webview_flutter` / `HtmlElementView`. See [system-design § 2.1](specification/system-design.md#21-client-shell-and-embedded-game-view). | v0.6 planned |
+| Identity | Firebase Auth (Apple + Google providers) — JWT verified on Socket.IO handshake | v0.6 planned |
+| Persistence | Postgres — `users`, `match_history` | v0.6 planned |
