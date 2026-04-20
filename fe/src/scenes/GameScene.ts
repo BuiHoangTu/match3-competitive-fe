@@ -9,11 +9,12 @@ import {
   type TileSprite,
 } from "../rendering/TileSpritePool.js";
 import type { TileMovement } from "../engine/MatchEngine.js";
+import { SyncClient } from "../net/SyncClient.js";
 import type {
-  SyncClient,
   OpponentMove,
   TurnChangedData,
   GameOverData,
+  RejoinOkPayload,
 } from "../net/SyncClient.js";
 import { BotPlayer } from "../bot/BotPlayer.js";
 
@@ -59,6 +60,8 @@ interface GameSceneData {
   mode?: string;
   myPlayerId?: string;
   firstPlayerId?: string;
+  /** Present when re-joining a live game after a disconnect. */
+  rejoinState?: RejoinOkPayload;
 }
 
 // -------------------------------------------------------------------------
@@ -104,6 +107,9 @@ export class GameScene extends Phaser.Scene {
   private syncClient: SyncClient | null = null;
   private botPlayer: BotPlayer | null = null;
 
+  // B1: reconnecting banner shown when opponent disconnects temporarily
+  private reconnectingBanner: Phaser.GameObjects.Text | null = null;
+
   // Queue for opponent moves that arrive while we're animating
   private opponentMoveQueue: Array<{
     r1: number;
@@ -134,18 +140,43 @@ export class GameScene extends Phaser.Scene {
     this.ctrl = new GameLoopController(seed);
     this.pool = new TileSpritePool(this);
 
-    if (this.mode !== "solo") {
+    const rejoin = data?.rejoinState;
+
+    if (rejoin) {
+      // B1: silent move replay to reconstruct board state
+      for (const m of rejoin.moves) {
+        const result = this.ctrl.attemptSwap(m.r1, m.c1, m.r2, m.c2);
+        if (result.kind === "resolved") {
+          if (m.playerId === rejoin.myPlayerId) {
+            this.myScore += result.pointsEarned;
+          } else {
+            this.opponentScore += result.pointsEarned;
+          }
+        }
+      }
+      this.myTimeMs = rejoin.times[rejoin.myPlayerId] ?? TURN_TIME_MS;
+      const opponentId = Object.keys(rejoin.times).find(
+        (id) => id !== rejoin.myPlayerId
+      );
+      this.opponentTimeMs =
+        opponentId !== undefined
+          ? (rejoin.times[opponentId] ?? TURN_TIME_MS)
+          : TURN_TIME_MS;
+      this.myTurn = rejoin.activePlayerId === rejoin.myPlayerId;
+    } else if (this.mode !== "solo") {
       this.myTimeMs = TURN_TIME_MS;
       this.opponentTimeMs = TURN_TIME_MS;
-    }
-
-    if (this.mode === "turn_based") {
-      this.myTurn = data?.firstPlayerId === data?.myPlayerId;
-    } else if (this.mode === "pve") {
-      this.myTurn = true;
-      this.botPlayer = new BotPlayer();
+      if (this.mode === "turn_based") {
+        this.myTurn = data?.firstPlayerId === data?.myPlayerId;
+      } else {
+        this.myTurn = true;
+      }
     } else {
       this.myTurn = true;
+    }
+
+    if (this.mode === "pve") {
+      this.botPlayer = new BotPlayer();
     }
 
     this.initBoard();
@@ -276,6 +307,25 @@ export class GameScene extends Phaser.Scene {
       const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
       this.endGame(bonus);
     });
+
+    this.syncClient!.onOpponentReconnecting(() => {
+      this.myTurn = false;
+      this.updateTurnIndicator();
+      this.reconnectingBanner = this.add
+        .text(
+          this.scale.width / 2,
+          this.scale.height / 2 - 40,
+          "Opponent reconnecting...",
+          { fontSize: "24px", color: "#ffff44", backgroundColor: "#000000aa", padding: { x: 16, y: 8 } }
+        )
+        .setOrigin(0.5)
+        .setDepth(50);
+    });
+
+    this.syncClient!.onOpponentReconnected(() => {
+      this.reconnectingBanner?.destroy();
+      this.reconnectingBanner = null;
+    });
   }
 
   // Drain queued opponent moves one at a time (prevents animation overlap)
@@ -358,6 +408,8 @@ export class GameScene extends Phaser.Scene {
     if (this.state === "game_over") return;
     this.state = "game_over";
     this.stopTurnTimer();
+    // B1: game is over — no need for a rejoin token anymore
+    SyncClient.clearRejoinToken();
     this.scene.start("ResultScene", {
       myScore: this.myScore,
       opponentScore: this.opponentScore,
