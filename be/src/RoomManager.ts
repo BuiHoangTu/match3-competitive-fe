@@ -10,6 +10,8 @@ export type Room = {
   moves: Move[];
   activePlayer: string | null;
   status: "active" | "over";
+  /** Epoch ms of the last event that should reset the idle-match timer. */
+  lastActivityAt: number;
 };
 
 function generateId(): string {
@@ -28,6 +30,7 @@ export class RoomManager {
       moves: [],
       activePlayer: null,
       status: "active",
+      lastActivityAt: Date.now(),
     };
     this.rooms.set(room.id, room);
     this.playerRoom.set(playerId, room.id);
@@ -48,7 +51,21 @@ export class RoomManager {
     if (!room) return false;
     room.moves.push(move);
     if (room.moves.length > 200) room.moves.splice(0, room.moves.length - 200);
+    room.lastActivityAt = Date.now();
     return true;
+  }
+
+  /**
+   * Returns all active rooms whose last activity is older than `cutoffMs` ago.
+   * Does not mutate room state — caller decides how to close them.
+   */
+  findIdleRooms(cutoffMs: number, now: number = Date.now()): Room[] {
+    const idle: Room[] = [];
+    for (const room of this.rooms.values()) {
+      if (room.status !== "active") continue;
+      if (now - room.lastActivityAt >= cutoffMs) idle.push(room);
+    }
+    return idle;
   }
 
   getRoom(roomId: string): Room | null {

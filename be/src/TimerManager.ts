@@ -1,6 +1,7 @@
 import type { Server } from "socket.io";
 import type { RoomManager } from "./RoomManager";
 import { BOT_ID, PLAYER_TIME_MS } from "./constants";
+import { logEvent } from "./logger";
 
 interface TimerState {
   intervalId: ReturnType<typeof setInterval>;
@@ -40,6 +41,7 @@ export class TimerManager {
           loserTimeUp: loserId,
           times: { ...timerState.times },
         });
+        logEvent("match_ended", { matchId: roomId, reason: "time_up", loserId });
         onTimeUp?.(roomId);
       }
     }, 1000);
