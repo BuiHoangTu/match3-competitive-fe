@@ -25,19 +25,16 @@ import '../errors/auth_errors.dart';
 const bool kAuthStubMode =
     String.fromEnvironment('AUTH_MODE') == 'stub';
 
-// The real sign_in_with_apple import is conditionally compiled so that a
-// machine without the native plugin installed can still run Dart analysis and
-// unit tests in stub mode.
+// sign_in_with_apple is a compile-time dependency. Unit tests bypass the real
+// plugin via AUTH_MODE=stub (see [kAuthStubMode]). On iOS/macOS this calls the
+// native Sign in with Apple sheet; on Android the platform guard in
+// [_realAppleCredential] raises [AuthUnsupportedPlatformError] before the
+// plugin is invoked.
 //
-// Import is guarded by the stub flag at runtime; the type references below use
-// a conditional import pattern via a shim interface.
-//
-// NOTE: In real usage (non-stub), you must have sign_in_with_apple in
-// pubspec.yaml and the iOS entitlement configured (T-v0.6-C02).
+// NOTE: sign_in_with_apple must be in pubspec.yaml and the iOS entitlement
+// must be configured (T-v0.6-C02) before deploying to a real device.
 
-// ignore: depend_on_referenced_packages
-import 'package:sign_in_with_apple/sign_in_with_apple.dart'
-    if (dart.library.io) 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 /// Generates a cryptographically random nonce and returns it as a hex string.
 String _generateNonce([int length = 32]) {
