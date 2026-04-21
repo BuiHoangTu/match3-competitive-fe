@@ -1,0 +1,157 @@
+/// Asserts that the Dart bridge message-name constants match the canonical
+/// fixture at shared/src/__tests__/bridge-messages.txt.
+///
+/// This is the Dart half of the parity test — the TypeScript half lives at
+/// fe/src/__tests__/bridge-contract.test.ts. Both read the same fixture so
+/// drift on either side breaks a test immediately.
+import 'dart:io';
+
+import 'package:test/test.dart';
+
+import '../../lib/bridge/bridge_messages.dart';
+
+void main() {
+  // Resolve the fixture path relative to the repo root. When running via
+  // `dart test` from shell/, the working directory is shell/.
+  final fixturePath = [
+    '../shared/src/__tests__/bridge-messages.txt',
+    // fallback if run from repo root
+    'shared/src/__tests__/bridge-messages.txt',
+  ].firstWhere((p) => File(p).existsSync(), orElse: () {
+    throw StateError(
+      'bridge-messages.txt fixture not found; run from shell/ or repo root',
+    );
+  });
+
+  late Set<String> fixtureNames;
+
+  setUpAll(() {
+    final raw = File(fixturePath).readAsStringSync();
+    fixtureNames = raw
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toSet();
+  });
+
+  group('bridge contract — message name parity', () {
+    test('BridgeMessageType.all exactly matches the canonical fixture', () {
+      expect(BridgeMessageType.all, equals(fixtureNames));
+    });
+
+    test('has exactly six messages', () {
+      expect(BridgeMessageType.all.length, equals(6));
+    });
+
+    test('shell→game names are present', () {
+      expect(BridgeMessageType.all, contains(BridgeMessageType.setAuthToken));
+      expect(BridgeMessageType.all, contains(BridgeMessageType.appLifecycle));
+      expect(
+        BridgeMessageType.all,
+        contains(BridgeMessageType.requestLeaveMatch),
+      );
+    });
+
+    test('game→shell names are present', () {
+      expect(BridgeMessageType.all, contains(BridgeMessageType.ready));
+      expect(
+        BridgeMessageType.all,
+        contains(BridgeMessageType.authTokenRejected),
+      );
+      expect(BridgeMessageType.all, contains(BridgeMessageType.matchEnded));
+    });
+  });
+
+  group('SetAuthTokenMessage', () {
+    test('round-trips through JSON', () {
+      const msg = SetAuthTokenMessage(
+        token: 'tok.abc.def',
+        userId: 'user-123',
+        expiresAt: 9999999,
+      );
+      final json = msg.toJson();
+      final decoded = BridgeMessage.fromJson(json) as SetAuthTokenMessage;
+      expect(decoded.token, equals(msg.token));
+      expect(decoded.userId, equals(msg.userId));
+      expect(decoded.expiresAt, equals(msg.expiresAt));
+      expect(decoded.version, equals('1'));
+    });
+  });
+
+  group('AppLifecycleMessage', () {
+    for (final state in AppLifecycleState.values) {
+      test('round-trips state=${state.value}', () {
+        final msg = AppLifecycleMessage(state: state);
+        final decoded =
+            BridgeMessage.fromJson(msg.toJson()) as AppLifecycleMessage;
+        expect(decoded.state, equals(state));
+      });
+    }
+  });
+
+  group('RequestLeaveMatchMessage', () {
+    test('round-trips through JSON', () {
+      const msg = RequestLeaveMatchMessage();
+      final decoded =
+          BridgeMessage.fromJson(msg.toJson()) as RequestLeaveMatchMessage;
+      expect(decoded.type, equals(BridgeMessageType.requestLeaveMatch));
+      expect(decoded.version, equals('1'));
+    });
+  });
+
+  group('ReadyMessage', () {
+    test('round-trips through JSON', () {
+      const msg = ReadyMessage();
+      final decoded = BridgeMessage.fromJson(msg.toJson()) as ReadyMessage;
+      expect(decoded.type, equals(BridgeMessageType.ready));
+      expect(decoded.version, equals('1'));
+    });
+  });
+
+  group('AuthTokenRejectedMessage', () {
+    test('round-trips through JSON', () {
+      const msg = AuthTokenRejectedMessage();
+      final decoded =
+          BridgeMessage.fromJson(msg.toJson()) as AuthTokenRejectedMessage;
+      expect(decoded.type, equals(BridgeMessageType.authTokenRejected));
+      expect(decoded.version, equals('1'));
+    });
+  });
+
+  group('MatchEndedMessage', () {
+    test('round-trips WIN outcome through JSON', () {
+      const msg = MatchEndedMessage(
+        outcome: MatchOutcome.win,
+        selfScore: 1200,
+        opponentScore: 800,
+      );
+      final decoded =
+          BridgeMessage.fromJson(msg.toJson()) as MatchEndedMessage;
+      expect(decoded.outcome, equals(MatchOutcome.win));
+      expect(decoded.selfScore, equals(1200));
+      expect(decoded.opponentScore, equals(800));
+    });
+
+    for (final outcome in MatchOutcome.values) {
+      test('round-trips outcome=${outcome.value}', () {
+        final msg = MatchEndedMessage(
+          outcome: outcome,
+          selfScore: 0,
+          opponentScore: 0,
+        );
+        final decoded =
+            BridgeMessage.fromJson(msg.toJson()) as MatchEndedMessage;
+        expect(decoded.outcome, equals(outcome));
+      });
+    }
+  });
+
+  group('BridgeMessage.fromJson', () {
+    test('throws FormatException for unknown type', () {
+      expect(
+        () => BridgeMessage.fromJson('{"type":"unknownType","version":"1","payload":{}}'),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+}
