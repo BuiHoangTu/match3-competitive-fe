@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@match3/shared": "*",
+    "firebase-admin": "^13.8.0",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {

@@ -64,3 +64,24 @@ export interface OpponentReconnectingPayload {
   /** How long the server will wait before ending the game (ms). */
   timeoutMs: number;
 }
+
+// ─── Auth error codes (T-v0.6-D07) ───────────────────────────────────────────
+// Machine-readable codes the client maps to UX messages.
+// "AUTH_MISSING_TOKEN" — handshake carried no token at all.
+// "AUTH_INVALID_TOKEN" — token present but signature / claims failed verification.
+// "AUTH_EXPIRED"       — token signature valid but exp claim has passed.
+
+export type AuthErrorCode =
+  | "AUTH_MISSING_TOKEN"
+  | "AUTH_INVALID_TOKEN"
+  | "AUTH_EXPIRED";
+
+/**
+ * Emitted by the server when a socket's token is rejected mid-session.
+ * The socket is disconnected immediately after emission.
+ * Clients should request a fresh token and reconnect.
+ */
+export interface AuthTokenRejectedPayload {
+  code: AuthErrorCode;
+  reason: string;
+}

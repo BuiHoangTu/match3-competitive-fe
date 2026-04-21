@@ -1,5 +1,9 @@
 {
   "name": "match3-competitive",
   "private": true,
-  "workspaces": ["shared", "fe", "be"]
+  "workspaces": [
+    "shared",
+    "fe",
+    "be"
+  ]
 }
