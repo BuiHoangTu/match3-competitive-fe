@@ -1,0 +1,6 @@
+setAuthToken
+appLifecycle
+requestLeaveMatch
+ready
+authTokenRejected
+matchEnded

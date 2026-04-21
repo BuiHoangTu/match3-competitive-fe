@@ -12,6 +12,8 @@
     "./bot/BotPlayer.js": "./src/bot/BotPlayer.ts",
     "./bot/BotPlayer": "./src/bot/BotPlayer.ts",
     "./protocol.js": "./src/protocol.d.ts",
-    "./protocol": "./src/protocol.d.ts"
+    "./protocol": "./src/protocol.d.ts",
+    "./bridge.js": "./src/bridge.d.ts",
+    "./bridge": "./src/bridge.d.ts"
   }
 }
