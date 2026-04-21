@@ -1,0 +1,4 @@
+// screens/ — Flutter screen widgets.
+// Each file is named <screen_name>_screen.dart and exports a class <ScreenName>Screen.
+// Screens accept callbacks and typed parameters via their constructors; they do not
+// implement auth, bridge, or backend logic themselves.
