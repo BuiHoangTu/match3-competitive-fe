@@ -1,0 +1,26 @@
+version: "3.9"
+
+# Local development only — never expose these credentials to production.
+# Prod uses a managed Postgres instance (Cloud SQL / RDS); see system-design § 6.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: match3
+      POSTGRES_PASSWORD: match3dev
+      POSTGRES_DB: match3
+    ports:
+      # Non-standard port to avoid clashing with any local Postgres installation.
+      - "5433:5432"
+    volumes:
+      - match3_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U match3 -d match3"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  match3_pgdata:
