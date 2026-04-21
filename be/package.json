@@ -6,14 +6,19 @@
   "scripts": {
     "dev": "ts-node src/server.ts",
     "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate:up": "node-pg-migrate up --migrations-dir migrations --database-url-var DATABASE_URL",
+    "migrate:down": "node-pg-migrate down --migrations-dir migrations --database-url-var DATABASE_URL"
   },
   "dependencies": {
     "@match3/shared": "*",
+    "pg": "^8.12.0",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "node-pg-migrate": "^7.3.2",
     "socket.io-client": "^4.8.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
