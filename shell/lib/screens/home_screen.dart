@@ -1,0 +1,234 @@
+// T-v0.6-A04 — Home / lobby screen (mode select)
+//
+// Displays the three game modes (Practice, vs Bot, vs Human) and a
+// user profile header (display name + avatar placeholder).
+//
+// Mode button handlers are stubs. Real navigation to the embedded game view
+// lands once T-v0.6-A08a/b/c and the bridge are complete.
+//
+// Route: /home  (see router.dart)
+
+import 'package:flutter/material.dart';
+import '../models/user_profile.dart';
+
+/// Home / lobby screen.
+///
+/// Accepts [profile] for display and three stub callbacks for the game modes.
+/// Each callback is expected to navigate to the game view screen; the actual
+/// navigation and bridge initialisation is wired by sub-tracks A08 + B.
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({
+    super.key,
+    required this.profile,
+    required this.onPracticePressed,
+    required this.onVsBotPressed,
+    required this.onVsHumanPressed,
+    required this.onAccountPressed,
+  });
+
+  /// Currently signed-in user, used to display avatar + name.
+  final UserProfile profile;
+
+  /// Stub: starts a practice (solo) match. Wired to game view in T-v0.6-A08.
+  final VoidCallback onPracticePressed;
+
+  /// Stub: starts a vs-Bot (PvE) match. Wired to game view in T-v0.6-A08.
+  final VoidCallback onVsBotPressed;
+
+  /// Stub: starts PvP matchmaking. Wired to game view in T-v0.6-A08.
+  final VoidCallback onVsHumanPressed;
+
+  /// Navigates to the account screen.
+  final VoidCallback onAccountPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Match-3 Competitive'),
+        actions: [
+          Semantics(
+            label: 'Account settings',
+            button: true,
+            child: IconButton(
+              key: const Key('account_button'),
+              icon: const Icon(Icons.account_circle_outlined),
+              tooltip: 'Account',
+              onPressed: onAccountPressed,
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // User profile header
+              _ProfileHeader(profile: profile),
+              const SizedBox(height: 32),
+
+              Text(
+                'Choose a mode',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Practice
+              _ModeCard(
+                key: const Key('practice_button'),
+                title: 'Practice',
+                subtitle: 'Solo play — no timer, no opponent',
+                icon: Icons.self_improvement_rounded,
+                onPressed: onPracticePressed,
+              ),
+              const SizedBox(height: 12),
+
+              // vs Bot
+              _ModeCard(
+                key: const Key('vs_bot_button'),
+                title: 'vs Bot',
+                subtitle: 'Turn-based match against the AI',
+                icon: Icons.smart_toy_outlined,
+                onPressed: onVsBotPressed,
+              ),
+              const SizedBox(height: 12),
+
+              // vs Human
+              _ModeCard(
+                key: const Key('vs_human_button'),
+                title: 'vs Human',
+                subtitle: 'Online PvP — find an opponent',
+                icon: Icons.people_alt_outlined,
+                onPressed: onVsHumanPressed,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({required this.profile});
+
+  final UserProfile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 24,
+          backgroundImage: profile.avatarUrl != null
+              ? NetworkImage(profile.avatarUrl!)
+              : null,
+          child: profile.avatarUrl == null
+              ? Text(
+                  profile.displayName.isNotEmpty
+                      ? profile.displayName[0].toUpperCase()
+                      : '?',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                )
+              : null,
+          backgroundColor: theme.colorScheme.primaryContainer,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                profile.displayName,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                'Ready to play',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  const _ModeCard({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Semantics(
+      label: '$title mode',
+      button: true,
+      child: Card(
+        clipBehavior: Clip.hardEdge,
+        child: InkWell(
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            child: Row(
+              children: [
+                Icon(icon, size: 32, color: theme.colorScheme.primary),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
