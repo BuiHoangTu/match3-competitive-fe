@@ -20,25 +20,11 @@
  */
 
 // ---------------------------------------------------------------------------
-// Message-name constants — keep in sync with shell/lib/bridge/bridge_messages.dart
+// Message-name constants — see bridge.ts for the runtime const
+// Keep in sync with shell/lib/bridge/bridge_messages.dart
 // and shared/src/__tests__/bridge-messages.txt
 // ---------------------------------------------------------------------------
-
-/** All bridge message type names as a const object. */
-export const BridgeMessageType = {
-  // shell → game
-  SET_AUTH_TOKEN: "setAuthToken",
-  APP_LIFECYCLE: "appLifecycle",
-  REQUEST_LEAVE_MATCH: "requestLeaveMatch",
-  // game → shell
-  READY: "ready",
-  AUTH_TOKEN_REJECTED: "authTokenRejected",
-  MATCH_ENDED: "matchEnded",
-} as const;
-
-/** Union of all valid bridge message type name strings. */
-export type BridgeMessageTypeName =
-  (typeof BridgeMessageType)[keyof typeof BridgeMessageType];
+// (Runtime exports are in bridge.ts; this file declares types only.)
 
 // ---------------------------------------------------------------------------
 // Shell → game message interfaces
