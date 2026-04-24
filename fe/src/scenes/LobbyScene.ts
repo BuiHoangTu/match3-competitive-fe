@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { SyncClient } from "../net/SyncClient.js";
 
-const SERVER_URL = "http://localhost:3001";
+const SERVER_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:3001";
 
 export class LobbyScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;

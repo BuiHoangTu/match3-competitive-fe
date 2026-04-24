@@ -22,5 +22,37 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      context: .
+      dockerfile: be/Dockerfile
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://match3:match3dev@postgres:5432/match3
+      PORT: 3001
+
+  frontend:
+    build:
+      context: .
+      dockerfile: fe/Dockerfile
+      args:
+        VITE_BACKEND_URL: http://localhost:3001
+    ports:
+      - "5173:80"
+
+  shell:
+    build:
+      context: .
+      dockerfile: shell/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+
 volumes:
   match3_pgdata:
