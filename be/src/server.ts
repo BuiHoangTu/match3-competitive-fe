@@ -6,9 +6,13 @@ import { RejoinManager } from "./RejoinManager";
 import { TimerManager } from "./TimerManager";
 import { BotManager } from "./BotManager";
 import { IdleSweeper } from "./IdleSweeper";
+import { MatchmakingService } from "./MatchmakingService";
+import { createMatchmakingHttpHandler } from "./matchmakingHttp";
+import { verify as verifyRoomToken } from "./RoomTokenSigner";
 import { isValidMove } from "./validator";
 import {
   BOT_ID,
+  BOT_USER_ID,
   BOT_WAIT_MS,
   REJOIN_WINDOW_MS,
   IDLE_MATCH_TIMEOUT_MS,
@@ -24,6 +28,7 @@ export interface ServerHandle {
   timerManager: TimerManager;
   botManager: BotManager;
   idleSweeper: IdleSweeper;
+  matchmaking: MatchmakingService;
   port: number;
   close(): Promise<void>;
 }
@@ -65,11 +70,50 @@ export function createMatch3Server(): ServerHandle {
   const rejoinManager = new RejoinManager();
   const timerManager = new TimerManager(io, roomManager);
   const botManager = new BotManager(io, roomManager, timerManager);
+  const matchmaking = new MatchmakingService(roomManager, botManager);
   const idleSweeper = new IdleSweeper(io, roomManager, timerManager, (id) => {
     botManager.cleanup(id);
     rejoinManager.cleanupRoom(id);
   });
   idleSweeper.start(IDLE_MATCH_TIMEOUT_MS, IDLE_SWEEP_INTERVAL_MS);
+
+  // T-v0.6-D09, D10 — attach HTTP matchmaking endpoints to the same httpServer.
+  // Socket.IO ignores non-/socket.io/ URLs; our listener only reacts to
+  // /matchmaking/*, so other listeners are unaffected.
+  const matchmakingHttp = createMatchmakingHttpHandler({ roomManager, matchmaking });
+  httpServer.on("request", (req, res) => {
+    if (!req.url?.startsWith("/matchmaking/")) return;
+    void matchmakingHttp(req, res);
+  });
+
+  // T-v0.6-D02 (revised) — if the handshake carries a valid room token,
+  // place the socket into the referenced room and skip the legacy join_queue
+  // path. Legacy (untoken) handshakes continue to work for v0.5 tests.
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) {
+      next();
+      return;
+    }
+    const payload = verifyRoomToken(token);
+    if (!payload) {
+      next(new Error("invalid_token"));
+      return;
+    }
+    const room = roomManager.getRoom(payload.roomId);
+    if (!room || room.status !== "active") {
+      next(new Error("room_closed"));
+      return;
+    }
+    if (room.userIds[payload.slot] !== payload.userId) {
+      next(new Error("slot_mismatch"));
+      return;
+    }
+    socket.data.roomId = payload.roomId;
+    socket.data.userId = payload.userId;
+    socket.data.slot = payload.slot;
+    next();
+  });
 
   const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -127,6 +171,68 @@ export function createMatch3Server(): ServerHandle {
 
   io.on("connection", (socket) => {
     console.log(`[connect] ${socket.id}`);
+
+    // T-v0.6-D02 (revised) — room-token handshake: place the socket directly
+    // into its pre-existing room and emit match_found without needing a
+    // `matchmake` event from the client.
+    const tokenRoomId = socket.data.roomId as string | undefined;
+    const tokenUserId = socket.data.userId as string | undefined;
+    const tokenSlot = socket.data.slot as 0 | 1 | undefined;
+    if (tokenRoomId && tokenUserId !== undefined && tokenSlot !== undefined) {
+      const room = roomManager.attachSocketToSlot(tokenRoomId, tokenSlot, socket.id);
+      if (room) {
+        socket.join(tokenRoomId);
+        logEvent("player_joined", { matchId: tokenRoomId, playerId: socket.id });
+
+        const opponentSlot = tokenSlot === 0 ? 1 : 0;
+        const opponentUserId = room.userIds[opponentSlot];
+        const isBotOpponent = opponentUserId === BOT_USER_ID;
+
+        // Both slots bound (both humans connected, OR bot opponent is
+        // always "present"): start the match.
+        const bothSocketsConnected = room.players.length === 2;
+        if (bothSocketsConnected || isBotOpponent) {
+          if (!room.activePlayer) {
+            // Pick starter deterministically for reproducibility: slot 0 goes first.
+            room.activePlayer = room.players[0];
+          }
+          if (isBotOpponent) {
+            botManager.setup(room.id);
+            timerManager.startRoomTimer(
+              room.id,
+              socket.id,
+              BOT_ID,
+              (id) => {
+                roomCleanup(id);
+                timerManager.scheduleRoomClose(id);
+              }
+            );
+          } else if (room.players.length === 2) {
+            const [p0, p1] = room.players as [string, string];
+            timerManager.startRoomTimer(room.id, p0, p1, (id) => {
+              rejoinManager.cleanupRoom(id);
+              timerManager.scheduleRoomClose(id);
+            });
+          }
+
+          for (const pid of room.players) {
+            const opponentSocketId = room.players.find((p) => p !== pid) ?? BOT_ID;
+            io.to(pid).emit("match_found", {
+              roomId: room.id,
+              seed: room.seed,
+              opponentId: isBotOpponent ? BOT_ID : opponentSocketId,
+              myPlayerId: pid,
+              firstPlayerId: room.activePlayer,
+              mode: "turn_based",
+            });
+          }
+
+          if (isBotOpponent && room.activePlayer === BOT_ID) {
+            botManager.scheduleBotTurn(room.id, socket.id);
+          }
+        }
+      }
+    }
 
     socket.on("matchmake", () => {
       if (waitingQueue.size > 0) {
@@ -379,6 +485,7 @@ export function createMatch3Server(): ServerHandle {
     timerManager,
     botManager,
     idleSweeper,
+    matchmaking,
     get port(): number {
       const addr = httpServer.address();
       if (addr && typeof addr === "object") return addr.port;
@@ -386,6 +493,7 @@ export function createMatch3Server(): ServerHandle {
     },
     async close(): Promise<void> {
       idleSweeper.stop();
+      matchmaking.shutdown();
       for (const handle of disconnectedPlayers.values()) clearTimeout(handle);
       disconnectedPlayers.clear();
       await new Promise<void>((resolve) => {

@@ -6,6 +6,8 @@ export type { Move };
 export type Room = {
   id: string;
   players: string[];
+  /** Per-slot userId; index 0 = slot 0, index 1 = slot 1. Empty string for unfilled/legacy slots. */
+  userIds: [string, string];
   seed: number;
   moves: Move[];
   activePlayer: string | null;
@@ -21,11 +23,13 @@ function generateId(): string {
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   private playerRoom: Map<string, string> = new Map();
+  private userRoom: Map<string, string> = new Map();
 
   createRoom(playerId: string): Room {
     const room: Room = {
       id: generateId(),
       players: [playerId],
+      userIds: ["", ""],
       seed: Math.floor(Math.random() * 2 ** 31),
       moves: [],
       activePlayer: null,
@@ -37,12 +41,47 @@ export class RoomManager {
     return room;
   }
 
+  /**
+   * Create a room with both slots pre-populated with userIds. Socket IDs are
+   * attached later when the clients connect using their room tokens.
+   * T-v0.6-D09.
+   */
+  createRoomForMatch(userIdSlot0: string, userIdSlot1: string): Room {
+    const room: Room = {
+      id: generateId(),
+      players: [],
+      userIds: [userIdSlot0, userIdSlot1],
+      seed: Math.floor(Math.random() * 2 ** 31),
+      moves: [],
+      activePlayer: null,
+      status: "active",
+      lastActivityAt: Date.now(),
+    };
+    this.rooms.set(room.id, room);
+    if (userIdSlot0) this.userRoom.set(userIdSlot0, room.id);
+    if (userIdSlot1) this.userRoom.set(userIdSlot1, room.id);
+    return room;
+  }
+
   joinRoom(roomId: string, playerId: string): Room | null {
     const room = this.rooms.get(roomId);
     if (!room) return null;
     if (room.players.length >= 2) return null;
     room.players.push(playerId);
     this.playerRoom.set(playerId, roomId);
+    return room;
+  }
+
+  /**
+   * Bind a socket ID to a slot in an existing room. Used when a client
+   * connects via Socket.IO with a room token after HTTP matchmaking.
+   * T-v0.6-D02.
+   */
+  attachSocketToSlot(roomId: string, slot: 0 | 1, socketId: string): Room | null {
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+    if (!room.players.includes(socketId)) room.players.push(socketId);
+    this.playerRoom.set(socketId, roomId);
     return room;
   }
 
@@ -78,6 +117,21 @@ export class RoomManager {
     return this.rooms.get(roomId) ?? null;
   }
 
+  /**
+   * Look up the active room for a userId. Returns null if no active room.
+   * T-v0.6-D09 (AR-7 one-active-match-per-user enforcement).
+   */
+  getRoomByUserId(userId: string): Room | null {
+    const roomId = this.userRoom.get(userId);
+    if (!roomId) return null;
+    const room = this.rooms.get(roomId) ?? null;
+    if (!room || room.status !== "active") {
+      this.userRoom.delete(userId);
+      return null;
+    }
+    return room;
+  }
+
   removePlayer(playerId: string): void {
     const roomId = this.playerRoom.get(playerId);
     if (!roomId) return;
@@ -87,7 +141,7 @@ export class RoomManager {
     if (!room) return;
 
     room.players = room.players.filter((p) => p !== playerId);
-    if (room.players.length === 0) {
+    if (room.players.length === 0 && room.userIds.every((u) => !u)) {
       this.rooms.delete(roomId);
     }
   }
@@ -117,6 +171,9 @@ export class RoomManager {
     if (!room) return;
     for (const playerId of [...room.players]) {
       this.playerRoom.delete(playerId);
+    }
+    for (const userId of room.userIds) {
+      if (userId) this.userRoom.delete(userId);
     }
     this.rooms.delete(roomId);
   }
