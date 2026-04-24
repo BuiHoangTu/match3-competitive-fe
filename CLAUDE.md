@@ -25,6 +25,17 @@ be/       — Node.js + Socket.IO backend server
 
 ## Commands
 
+### Docker (Recommended for local testing)
+```bash
+docker compose build      # Build all images (backend, frontend, shell, postgres)
+docker compose up         # Start all services
+docker compose logs -f    # Follow logs
+docker compose down       # Stop all services
+```
+See [DOCKER.md](DOCKER.md) for full setup and debugging guide.
+
+### Local development (requires Node.js 20, Flutter SDK)
+
 **Shared (`shared/`)**
 ```bash
 # No build step needed — imported directly by fe and be
@@ -34,15 +45,23 @@ npx tsc --project shared/tsconfig.json --noEmit   # type-check only
 **Frontend (`fe/`)**
 ```bash
 npm run dev     # Vite dev server  →  http://localhost:5173
-npm test        # Vitest unit tests (46 tests)
+npm test        # Vitest unit tests (68 tests)
 npm run build   # TypeScript + Vite production build
 ```
 
 **Backend (`be/`)**
 ```bash
 npm run dev     # ts-node src/server.ts  →  port 3001
-npm test        # Vitest unit tests (21 tests)
+npm test        # Vitest unit tests (36 tests)
 npm run build   # tsc → dist/
+```
+
+**Flutter Shell (`shell/`)**
+```bash
+cd shell
+flutter pub get
+flutter run -d chrome          # Run on web (requires Chrome/Chromium)
+flutter build web              # Build for production
 ```
 
 ## Architecture
