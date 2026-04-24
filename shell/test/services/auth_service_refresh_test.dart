@@ -200,8 +200,15 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       // The cached token should reflect the second event.
+      // expiresAt2 is created from DateTime.now() (microsecond precision), but
+      // IdTokenResult.expirationTime round-trips through millisecondsSinceEpoch
+      // so microseconds are truncated. Compare at millisecond precision.
+      final expiresAt2Ms = DateTime.fromMillisecondsSinceEpoch(
+        expiresAt2.millisecondsSinceEpoch,
+        isUtc: true,
+      );
       expect(service.currentAuth(), isNotNull);
-      expect(service.currentAuth()!.expiresAt, equals(expiresAt2.toUtc()));
+      expect(service.currentAuth()!.expiresAt, equals(expiresAt2Ms));
     });
   });
 

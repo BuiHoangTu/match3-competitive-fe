@@ -311,7 +311,13 @@ class AuthService {
 
     _refreshTimer = Timer(effectiveDelay, () async {
       try {
-        await _forceRefresh();
+        final refreshed = await _forceRefresh();
+        if (refreshed == null) {
+          // currentUser disappeared (e.g. Firebase session evicted externally).
+          // Emit null so subscribers know the session is gone.
+          _cached = null;
+          _emit(null);
+        }
       } on AuthError catch (e) {
         // Refresh failed — emit null (signed-out state) so subscribers know
         // the session is gone. The UI should route to the sign-in screen.
@@ -335,10 +341,15 @@ class AuthService {
   /// updates the token (auto-refresh, sign-out, revocation).
   Future<void> _handleFirebaseAuthChange(User? user) async {
     if (user == null) {
-      // Firebase signed out or token was revoked.
+      // Firebase signed out or token was revoked. If [signOut] already cleared
+      // state and emitted null synchronously, avoid a duplicate emission by
+      // checking whether _cached is already null.
+      final alreadySignedOut = _cached == null;
       _cancelRefreshTimer();
       _cached = null;
-      _emit(null);
+      if (!alreadySignedOut) {
+        _emit(null);
+      }
       return;
     }
 

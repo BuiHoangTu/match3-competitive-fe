@@ -310,6 +310,10 @@ void main() {
       addTearDown(sub.cancel);
 
       await service.signOut();
+      // Drain the event loop so that the sign-out null event (emitted by
+      // signOut() and the idTokenChanges listener) is delivered to the list
+      // before we clear it. Without this, the null arrives after clear().
+      await Future<void>.delayed(Duration.zero);
       emitted.clear(); // Discard the sign-out null event.
 
       // If the timer were still running and fired, it would call _forceRefresh

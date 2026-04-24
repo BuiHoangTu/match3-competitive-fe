@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:io' show Platform;
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../errors/auth_errors.dart';
 
@@ -22,9 +23,6 @@ import '../errors/auth_errors.dart';
 // to your flutter run / flutter test invocation.
 // ---------------------------------------------------------------------------
 
-const bool kAuthStubMode =
-    String.fromEnvironment('AUTH_MODE') == 'stub';
-
 // sign_in_with_apple is a compile-time dependency. Unit tests bypass the real
 // plugin via AUTH_MODE=stub (see [kAuthStubMode]). On iOS/macOS this calls the
 // native Sign in with Apple sheet; on Android the platform guard in
@@ -34,7 +32,8 @@ const bool kAuthStubMode =
 // NOTE: sign_in_with_apple must be in pubspec.yaml and the iOS entitlement
 // must be configured (T-v0.6-C02) before deploying to a real device.
 
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+const bool kAuthStubMode =
+    String.fromEnvironment('AUTH_MODE') == 'stub';
 
 /// Generates a cryptographically random nonce and returns it as a hex string.
 String _generateNonce([int length = 32]) {

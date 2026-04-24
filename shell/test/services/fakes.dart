@@ -21,6 +21,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth_platform_interface/src/pigeon/messages.pigeon.dart'
+    show PigeonIdTokenResult;
 import 'package:google_sign_in/google_sign_in.dart';
 
 // ---------------------------------------------------------------------------
@@ -54,17 +56,19 @@ String buildFakeJwt({
 /// Wraps [IdTokenResult] with test-controlled values.
 ///
 /// [IdTokenResult] is a concrete class whose only public constructor accepts
-/// the raw map that the native SDK plugin returns — we mirror that structure.
+/// a [PigeonIdTokenResult] from the native plugin layer. In
+/// firebase_auth_platform_interface >=7.x the old Map-based constructor was
+/// replaced with this Pigeon-generated struct. We mirror the struct directly.
 class FakeIdTokenResult extends IdTokenResult {
   FakeIdTokenResult({required String token, required DateTime expirationTime})
-      : super({
-          'token': token,
-          'authTimestamp': DateTime.now().millisecondsSinceEpoch,
-          'issuedAtTimestamp': DateTime.now().millisecondsSinceEpoch,
-          'expirationTimestamp': expirationTime.millisecondsSinceEpoch,
-          'signInProvider': 'apple.com',
-          'claims': <String, dynamic>{},
-        });
+      : super(PigeonIdTokenResult(
+          token: token,
+          expirationTimestamp: expirationTime.millisecondsSinceEpoch,
+          authTimestamp: DateTime.now().millisecondsSinceEpoch,
+          issuedAtTimestamp: DateTime.now().millisecondsSinceEpoch,
+          signInProvider: 'apple.com',
+          claims: <String?, Object?>{},
+        ));
 }
 
 // ---------------------------------------------------------------------------
