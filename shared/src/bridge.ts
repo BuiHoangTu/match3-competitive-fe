@@ -10,7 +10,7 @@
 /** All bridge message type names as a const object. */
 export const BridgeMessageType = {
   // shell → game
-  SET_AUTH_TOKEN: "setAuthToken",
+  START_MATCH: "startMatch",
   APP_LIFECYCLE: "appLifecycle",
   REQUEST_LEAVE_MATCH: "requestLeaveMatch",
   // game → shell
@@ -25,7 +25,7 @@ export type BridgeMessageTypeName =
 
 // Re-export all types from bridge.d.ts
 export type {
-  SetAuthTokenMessage,
+  StartMatchMessage,
   AppLifecycleMessage,
   RequestLeaveMatchMessage,
   ReadyMessage,

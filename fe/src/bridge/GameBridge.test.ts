@@ -54,16 +54,15 @@ describe("GameBridge", () => {
   // Incoming message dispatch (shell → game)
   // -------------------------------------------------------------------------
 
-  it("dispatches setAuthToken payload to registered handler", () => {
+  it("dispatches startMatch payload to registered handler", () => {
     const handler = vi.fn();
-    GameBridge.onSetAuthToken(handler);
+    GameBridge.onStartMatch(handler);
 
     const msg = JSON.stringify({
-      type: BridgeMessageType.SET_AUTH_TOKEN,
+      type: BridgeMessageType.START_MATCH,
       version: "1",
       payload: {
-        token: "tok-xyz",
-        userId: "user-123",
+        roomToken: "room.jwt.xyz",
         expiresAt: 9999999999,
       },
     });
@@ -72,8 +71,7 @@ describe("GameBridge", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(handler).toHaveBeenCalledWith({
-      token: "tok-xyz",
-      userId: "user-123",
+      roomToken: "room.jwt.xyz",
       expiresAt: 9999999999,
     });
   });
@@ -112,14 +110,14 @@ describe("GameBridge", () => {
   it("calls all registered handlers for the same message type", () => {
     const h1 = vi.fn();
     const h2 = vi.fn();
-    GameBridge.onSetAuthToken(h1);
-    GameBridge.onSetAuthToken(h2);
+    GameBridge.onStartMatch(h1);
+    GameBridge.onStartMatch(h2);
 
     GameBridge._testInjectMessage(
       JSON.stringify({
-        type: BridgeMessageType.SET_AUTH_TOKEN,
+        type: BridgeMessageType.START_MATCH,
         version: "1",
-        payload: { token: "t", userId: "u", expiresAt: 1 },
+        payload: { roomToken: "room.jwt.t", expiresAt: 1 },
       })
     );
 
@@ -129,7 +127,7 @@ describe("GameBridge", () => {
 
   it("silently ignores malformed (non-JSON) messages", () => {
     const handler = vi.fn();
-    GameBridge.onSetAuthToken(handler);
+    GameBridge.onStartMatch(handler);
 
     // Should not throw
     expect(() => GameBridge._testInjectMessage("not-json")).not.toThrow();
@@ -138,7 +136,7 @@ describe("GameBridge", () => {
 
   it("silently ignores messages with unknown type", () => {
     const handler = vi.fn();
-    GameBridge.onSetAuthToken(handler);
+    GameBridge.onStartMatch(handler);
 
     GameBridge._testInjectMessage(
       JSON.stringify({ type: "unknownMessageType", version: "1", payload: {} })
@@ -147,7 +145,7 @@ describe("GameBridge", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("silently ignores non-string input", () => {
+  it("silently ignores non-object JSON input", () => {
     // _testInjectMessage only accepts strings, so we test that null-ish input
     // to _dispatch (via the string path) is handled gracefully.
     expect(() =>
@@ -213,27 +211,26 @@ describe("GameBridge", () => {
   });
 
   // -------------------------------------------------------------------------
-  // T-v0.6-B07: setAuthToken → SyncClient integration (logic level)
+  // T-v0.6-B01b / B07: startMatch → SyncClient integration (logic level)
   // -------------------------------------------------------------------------
 
-  it("setAuthToken handler receives token, userId, expiresAt fields", () => {
-    const captured: { token: string; userId: string; expiresAt: number }[] = [];
-    GameBridge.onSetAuthToken((p) => {
+  it("startMatch handler receives roomToken and expiresAt fields", () => {
+    const captured: { roomToken: string; expiresAt: number }[] = [];
+    GameBridge.onStartMatch((p) => {
       captured.push(p);
     });
 
     GameBridge._testInjectMessage(
       JSON.stringify({
-        type: BridgeMessageType.SET_AUTH_TOKEN,
+        type: BridgeMessageType.START_MATCH,
         version: "1",
-        payload: { token: "jwt.xxx", userId: "uid-42", expiresAt: 1700000000 },
+        payload: { roomToken: "room.jwt.xxx", expiresAt: 1700000000 },
       })
     );
 
     expect(captured).toHaveLength(1);
     expect(captured[0]).toEqual({
-      token: "jwt.xxx",
-      userId: "uid-42",
+      roomToken: "room.jwt.xxx",
       expiresAt: 1700000000,
     });
   });

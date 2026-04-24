@@ -8,7 +8,7 @@
  *
  * Usage:
  *   import { GameBridge } from './bridge/GameBridge.js';
- *   GameBridge.onSetAuthToken(({ token, userId, expiresAt }) => { ... });
+ *   GameBridge.onStartMatch(({ roomToken, expiresAt }) => { ... });
  *   GameBridge.emitMatchEnded('W', { self: 120, opponent: 80 });
  *
  * Transport selection (in priority order):
@@ -22,7 +22,7 @@
 
 import {
   BridgeMessageType,
-  type SetAuthTokenMessage,
+  type StartMatchMessage,
   type AppLifecycleMessage,
   type MatchEndedMessage,
   type ShellToGameMessage,
@@ -32,11 +32,11 @@ import {
 // Internal state
 // ---------------------------------------------------------------------------
 
-type SetAuthTokenHandler = (payload: SetAuthTokenMessage["payload"]) => void;
+type StartMatchHandler = (payload: StartMatchMessage["payload"]) => void;
 type AppLifecycleHandler = (payload: AppLifecycleMessage["payload"]) => void;
 type RequestLeaveMatchHandler = () => void;
 
-let _setAuthTokenHandlers: SetAuthTokenHandler[] = [];
+let _startMatchHandlers: StartMatchHandler[] = [];
 let _appLifecycleHandlers: AppLifecycleHandler[] = [];
 let _requestLeaveMatchHandlers: RequestLeaveMatchHandler[] = [];
 
@@ -91,10 +91,10 @@ function _dispatch(raw: unknown): void {
   const typed = msg as ShellToGameMessage;
 
   switch (typed.type) {
-    case BridgeMessageType.SET_AUTH_TOKEN: {
-      // After this case, TypeScript narrows typed to SetAuthTokenMessage.
-      const setMsg = typed as SetAuthTokenMessage;
-      for (const h of _setAuthTokenHandlers) h(setMsg.payload);
+    case BridgeMessageType.START_MATCH: {
+      // After this case, TypeScript narrows typed to StartMatchMessage.
+      const startMsg = typed as StartMatchMessage;
+      for (const h of _startMatchHandlers) h(startMsg.payload);
       break;
     }
     case BridgeMessageType.APP_LIFECYCLE: {
@@ -195,11 +195,11 @@ export const GameBridge = {
   // -------------------------------------------------------------------------
 
   /**
-   * Register a handler that fires when the shell sends setAuthToken.
+   * Register a handler that fires when the shell sends startMatch.
    * Multiple handlers may be registered; all are called in registration order.
    */
-  onSetAuthToken(handler: SetAuthTokenHandler): void {
-    _setAuthTokenHandlers.push(handler);
+  onStartMatch(handler: StartMatchHandler): void {
+    _startMatchHandlers.push(handler);
   },
 
   /** Register a handler for appLifecycle messages. */
@@ -219,7 +219,7 @@ export const GameBridge = {
   /**
    * game → shell
    * Emits the `ready` signal. Call exactly once after Phaser finishes its
-   * initial scene setup. The shell will not send setAuthToken before this.
+   * initial scene setup. The shell will not send startMatch before this.
    */
   emitReady(): void {
     _send({
@@ -250,7 +250,7 @@ export const GameBridge = {
    * game → shell
    * Emits `authTokenRejected`. Call when the server returns an auth rejection.
    * Disconnect the socket before calling this; do not auto-retry.
-   * The shell is responsible for refresh + re-call to setAuthToken.
+   * The shell is responsible for refresh + re-call to startMatch.
    */
   emitAuthTokenRejected(): void {
     _send({
@@ -275,7 +275,7 @@ export const GameBridge = {
 
   /** Reset all handler lists and initialised flag. For use in tests only. */
   _testReset(): void {
-    _setAuthTokenHandlers = [];
+    _startMatchHandlers = [];
     _appLifecycleHandlers = [];
     _requestLeaveMatchHandlers = [];
     _initialised = false;

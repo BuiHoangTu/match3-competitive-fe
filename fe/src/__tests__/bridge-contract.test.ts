@@ -37,7 +37,7 @@ describe("bridge contract — message name parity", () => {
   });
 
   it("shell→game names are present", () => {
-    expect(Object.values(BridgeMessageType)).toContain("setAuthToken");
+    expect(Object.values(BridgeMessageType)).toContain("startMatch");
     expect(Object.values(BridgeMessageType)).toContain("appLifecycle");
     expect(Object.values(BridgeMessageType)).toContain("requestLeaveMatch");
   });

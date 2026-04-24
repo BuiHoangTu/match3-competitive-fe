@@ -32,18 +32,22 @@
 
 /**
  * shell → game
- * Called on init and on each token refresh.
- * The game view stores the token and attaches it to the next Socket.IO
- * handshake. Never logs the token value.
+ * Sent by the shell after receiving a room-scoped JWT from the matchmaking
+ * endpoint. The game view stores the token and uses it as the Socket.IO
+ * handshake auth credential. Called exactly once per match; re-sent on token
+ * refresh (authTokenRejected → shell re-requests → startMatch again).
+ * Never logs the roomToken value (log only expiresAt for correlation).
  */
-export interface SetAuthTokenMessage {
-  type: typeof BridgeMessageType.SET_AUTH_TOKEN;
+export interface StartMatchMessage {
+  type: typeof BridgeMessageType.START_MATCH;
   version: "1";
   payload: {
-    /** Firebase Auth JWT. */
-    token: string;
-    /** Stable user identifier from the identity provider. */
-    userId: string;
+    /**
+     * Server-issued room-scoped JWT. Carries {roomId, userId, slot, seed, exp}
+     * as claims. The game view treats it as opaque and attaches it verbatim to
+     * the Socket.IO handshake auth object.
+     */
+    roomToken: string;
     /** Token expiry as a Unix timestamp in seconds. */
     expiresAt: number;
   };
@@ -81,7 +85,7 @@ export interface RequestLeaveMatchMessage {
 /**
  * game → shell
  * The game view has loaded Phaser and is ready to receive the first
- * `setAuthToken` call. The shell must not send `setAuthToken` before this
+ * `startMatch` call. The shell must not send `startMatch` before this
  * event is received.
  */
 export interface ReadyMessage {
@@ -92,9 +96,9 @@ export interface ReadyMessage {
 
 /**
  * game → shell
- * The Socket.IO server rejected the auth token (e.g. expired between
- * refreshes). The shell must trigger a token refresh and call `setAuthToken`
- * again with the new token.
+ * The Socket.IO server rejected the room token (e.g. expired mid-match).
+ * The shell must request a fresh room token from the matchmaking endpoint's
+ * rejoin path and call `startMatch` again with the new token.
  */
 export interface AuthTokenRejectedMessage {
   type: typeof BridgeMessageType.AUTH_TOKEN_REJECTED;
@@ -128,7 +132,7 @@ export interface MatchEndedMessage {
 
 /** All shell → game messages. */
 export type ShellToGameMessage =
-  | SetAuthTokenMessage
+  | StartMatchMessage
   | AppLifecycleMessage
   | RequestLeaveMatchMessage;
 

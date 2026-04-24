@@ -66,7 +66,7 @@ describe("SyncClient", () => {
 
   // 1. connect() resolves when the socket emits "connect"
   it("connect() resolves when socket emits connect", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const connectPromise = client.connect();
 
     // Simulate the socket firing "connect"
@@ -78,7 +78,7 @@ describe("SyncClient", () => {
 
   // 2. connect() rejects on connect_error
   it("connect() rejects on connect_error", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const connectPromise = client.connect();
 
     trigger("connect_error", new Error("refused"));
@@ -89,7 +89,7 @@ describe("SyncClient", () => {
 
   // 3. matchmake() emits the "matchmake" event
   it("matchmake() emits matchmake event", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -101,7 +101,7 @@ describe("SyncClient", () => {
 
   // 4. sendMove() emits "move" with the correct payload
   it("sendMove() emits move with correct payload", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -119,7 +119,7 @@ describe("SyncClient", () => {
 
   // 5. onMatchFound callback fires with correct args and sets roomId/seed
   it("onMatchFound fires callback and sets roomId/seed", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -140,7 +140,7 @@ describe("SyncClient", () => {
 
   // 6. onMoveRejected callback fires with the reason string
   it("onMoveRejected fires callback with reason", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -155,7 +155,7 @@ describe("SyncClient", () => {
 
   // 7. disconnect() marks connected false
   it("disconnect() marks client as disconnected", async () => {
-    client.setAuthToken("test-token");
+    client.startMatch("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -171,7 +171,7 @@ describe("SyncClient", () => {
   // -------------------------------------------------------------------------
 
   // 8. connect() is deferred when no token has been set
-  it("connect() is deferred until setAuthToken() fires", async () => {
+  it("connect() is deferred until startMatch() fires", async () => {
     // No token set — io() should NOT be called yet.
     const connectPromise = client.connect();
 
@@ -179,7 +179,7 @@ describe("SyncClient", () => {
     expect(mockConnect).not.toHaveBeenCalled();
 
     // Now deliver the token.
-    client.setAuthToken("test-jwt-token");
+    client.startMatch("test-jwt-token");
 
     // io() should have been called now.
     expect(mockIo).toHaveBeenCalledOnce();
@@ -192,7 +192,7 @@ describe("SyncClient", () => {
 
   // 9. connect() fires immediately when token was pre-set
   it("connect() fires immediately when token is already set", async () => {
-    client.setAuthToken("pre-set-token");
+    client.startMatch("pre-set-token");
 
     const connectPromise = client.connect();
 
@@ -206,7 +206,7 @@ describe("SyncClient", () => {
 
   // 10. io() receives auth: { token } in handshake options
   it("io() receives auth: { token } in handshake options", async () => {
-    client.setAuthToken("firebase-jwt-abc");
+    client.startMatch("firebase-jwt-abc");
     const connectPromise = client.connect();
 
     expect(mockIo).toHaveBeenCalledWith(
@@ -218,12 +218,12 @@ describe("SyncClient", () => {
     await connectPromise;
   });
 
-  // 11. setAuthToken() called after connect() pending — resolves the promise
-  it("setAuthToken() after connect() pending resolves the connect promise", async () => {
+  // 11. startMatch() called after connect() pending — resolves the promise
+  it("startMatch() after connect() pending resolves the connect promise", async () => {
     const connectPromise = client.connect();
 
     // Token arrives later (simulating shell delivering it asynchronously).
-    client.setAuthToken("late-token");
+    client.startMatch("late-token");
 
     trigger("connect");
     await expect(connectPromise).resolves.toBeUndefined();

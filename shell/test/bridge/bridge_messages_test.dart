@@ -6,7 +6,7 @@
 /// drift on either side breaks a test immediately.
 import 'dart:io';
 
-import 'package:test/test.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 import '../../lib/bridge/bridge_messages.dart';
 
@@ -44,7 +44,7 @@ void main() {
     });
 
     test('shell→game names are present', () {
-      expect(BridgeMessageType.all, contains(BridgeMessageType.setAuthToken));
+      expect(BridgeMessageType.all, contains(BridgeMessageType.startMatch));
       expect(BridgeMessageType.all, contains(BridgeMessageType.appLifecycle));
       expect(
         BridgeMessageType.all,
@@ -62,17 +62,15 @@ void main() {
     });
   });
 
-  group('SetAuthTokenMessage', () {
+  group('StartMatchMessage', () {
     test('round-trips through JSON', () {
-      const msg = SetAuthTokenMessage(
-        token: 'tok.abc.def',
-        userId: 'user-123',
+      const msg = StartMatchMessage(
+        roomToken: 'room.jwt.abc.def',
         expiresAt: 9999999,
       );
       final json = msg.toJson();
-      final decoded = BridgeMessage.fromJson(json) as SetAuthTokenMessage;
-      expect(decoded.token, equals(msg.token));
-      expect(decoded.userId, equals(msg.userId));
+      final decoded = BridgeMessage.fromJson(json) as StartMatchMessage;
+      expect(decoded.roomToken, equals(msg.roomToken));
       expect(decoded.expiresAt, equals(msg.expiresAt));
       expect(decoded.version, equals('1'));
     });

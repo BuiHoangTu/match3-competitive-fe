@@ -8,7 +8,7 @@
 /// Serialisation uses [dart:convert] (stdlib) — no external packages required.
 ///
 /// Direction labels:
-///   - Shell → game: [SetAuthTokenMessage], [AppLifecycleMessage],
+///   - Shell → game: [StartMatchMessage], [AppLifecycleMessage],
 ///     [RequestLeaveMatchMessage].
 ///   - Game → shell: [ReadyMessage], [AuthTokenRejectedMessage],
 ///     [MatchEndedMessage].
@@ -26,7 +26,7 @@ import 'dart:convert';
 /// All bridge message type name constants.
 abstract final class BridgeMessageType {
   // shell → game
-  static const String setAuthToken = 'setAuthToken';
+  static const String startMatch = 'startMatch';
   static const String appLifecycle = 'appLifecycle';
   static const String requestLeaveMatch = 'requestLeaveMatch';
 
@@ -38,7 +38,7 @@ abstract final class BridgeMessageType {
   /// All valid message type names. Used by tests to assert parity with the TS
   /// contract and the canonical fixture file.
   static const Set<String> all = {
-    setAuthToken,
+    startMatch,
     appLifecycle,
     requestLeaveMatch,
     ready,
@@ -73,8 +73,8 @@ sealed class BridgeMessage {
     final map = jsonDecode(source) as Map<String, dynamic>;
     final type = map['type'] as String?;
     switch (type) {
-      case BridgeMessageType.setAuthToken:
-        return SetAuthTokenMessage.fromMap(map);
+      case BridgeMessageType.startMatch:
+        return StartMatchMessage.fromMap(map);
       case BridgeMessageType.appLifecycle:
         return AppLifecycleMessage.fromMap(map);
       case BridgeMessageType.requestLeaveMatch:
@@ -100,31 +100,29 @@ sealed class BridgeMessage {
 
 /// shell → game
 ///
-/// Called on init and on each token refresh. The game view stores the token
-/// and attaches it to the next Socket.IO handshake. Never log the [token]
-/// value.
-final class SetAuthTokenMessage extends BridgeMessage {
-  const SetAuthTokenMessage({
-    required this.token,
-    required this.userId,
+/// Sent after the shell receives a room-scoped JWT from the matchmaking
+/// endpoint. The game view stores the token and uses it as the Socket.IO
+/// handshake auth credential. Called exactly once per match; re-sent on token
+/// refresh (authTokenRejected → shell re-requests → startMatch again).
+/// Never log the [roomToken] value — log only [expiresAt] for correlation.
+final class StartMatchMessage extends BridgeMessage {
+  const StartMatchMessage({
+    required this.roomToken,
     required this.expiresAt,
     super.version,
-  }) : super(type: BridgeMessageType.setAuthToken);
+  }) : super(type: BridgeMessageType.startMatch);
 
-  /// Firebase Auth JWT.
-  final String token;
-
-  /// Stable user identifier from the identity provider.
-  final String userId;
+  /// Server-issued room-scoped JWT. Carries {roomId, userId, slot, seed, exp}
+  /// as claims. The game view treats it as opaque.
+  final String roomToken;
 
   /// Token expiry as a Unix timestamp in seconds.
   final int expiresAt;
 
-  factory SetAuthTokenMessage.fromMap(Map<String, dynamic> map) {
+  factory StartMatchMessage.fromMap(Map<String, dynamic> map) {
     final payload = map['payload'] as Map<String, dynamic>;
-    return SetAuthTokenMessage(
-      token: payload['token'] as String,
-      userId: payload['userId'] as String,
+    return StartMatchMessage(
+      roomToken: payload['roomToken'] as String,
       expiresAt: payload['expiresAt'] as int,
       version: map['version'] as String? ?? '1',
     );
@@ -135,8 +133,7 @@ final class SetAuthTokenMessage extends BridgeMessage {
         'type': type,
         'version': version,
         'payload': {
-          'token': token,
-          'userId': userId,
+          'roomToken': roomToken,
           'expiresAt': expiresAt,
         },
       };
@@ -219,7 +216,7 @@ final class RequestLeaveMatchMessage extends BridgeMessage {
 /// game → shell
 ///
 /// The game view has loaded Phaser and is ready to receive the first
-/// [SetAuthTokenMessage]. The shell must not send [SetAuthTokenMessage] before
+/// [StartMatchMessage]. The shell must not send [StartMatchMessage] before
 /// this event is received.
 final class ReadyMessage extends BridgeMessage {
   const ReadyMessage({super.version}) : super(type: BridgeMessageType.ready);
@@ -238,9 +235,9 @@ final class ReadyMessage extends BridgeMessage {
 
 /// game → shell
 ///
-/// The Socket.IO server rejected the auth token (e.g. expired between
-/// refreshes). The shell must trigger a token refresh and call
-/// [SetAuthTokenMessage] again with the new token.
+/// The Socket.IO server rejected the room token (e.g. expired mid-match).
+/// The shell must request a fresh room token from the matchmaking endpoint's
+/// rejoin path and call [StartMatchMessage] again with the new token.
 final class AuthTokenRejectedMessage extends BridgeMessage {
   const AuthTokenRejectedMessage({super.version})
       : super(type: BridgeMessageType.authTokenRejected);

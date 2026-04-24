@@ -1,4 +1,4 @@
-setAuthToken
+startMatch
 appLifecycle
 requestLeaveMatch
 ready

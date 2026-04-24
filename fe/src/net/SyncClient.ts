@@ -20,12 +20,12 @@ export class SyncClient {
   private socket: Socket | null = null;
   private readonly serverUrl: string;
 
-  /** Auth token received from the shell via the bridge. */
-  private authToken: string | null = null;
+  /** Room token received from the shell via the bridge startMatch message. */
+  private roomToken: string | null = null;
   /**
    * Queued connect request: if connect() is called before the token arrives,
    * the resolve/reject pair is stored here and the actual io() call is deferred
-   * until setAuthToken() fires.
+   * until startMatch() fires.
    */
   private pendingConnect: {
     resolve: () => void;
@@ -47,14 +47,14 @@ export class SyncClient {
   }
 
   /**
-   * Provide the Firebase Auth token that must be attached to the Socket.IO
+   * Provide the room-scoped JWT that must be attached to the Socket.IO
    * handshake. If connect() was already called (and is waiting), the
    * connection is initiated immediately with this token.
    *
-   * Called by the bridge setAuthToken handler (T-v0.6-B07).
+   * Called by the bridge startMatch handler (T-v0.6-B07, renamed B01b).
    */
-  setAuthToken(token: string): void {
-    this.authToken = token;
+  startMatch(roomToken: string): void {
+    this.roomToken = roomToken;
     if (this.pendingConnect) {
       const { resolve, reject } = this.pendingConnect;
       this.pendingConnect = null;
@@ -85,16 +85,16 @@ export class SyncClient {
   /**
    * Initiate the Socket.IO connection.
    *
-   * If an auth token has already been set (via setAuthToken()), the connection
+   * If a room token has already been set (via startMatch()), the connection
    * is established immediately with `auth: { token }` in the handshake.
    *
    * If no token has been set yet, the connection is queued and will be
-   * initiated automatically when setAuthToken() is called. This ensures the
+   * initiated automatically when startMatch() is called. This ensures the
    * game never connects anonymously (AR-3, MR-7(v)).
    */
   connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      if (this.authToken !== null) {
+      if (this.roomToken !== null) {
         this._doConnect(resolve, reject);
       } else {
         // Defer until the bridge delivers the token.
@@ -107,7 +107,7 @@ export class SyncClient {
   private _doConnect(resolve: () => void, reject: (err: Error) => void): void {
     this.socket = io(this.serverUrl, {
       autoConnect: false,
-      auth: { token: this.authToken ?? undefined },
+      auth: { token: this.roomToken ?? undefined },
     });
 
     this.socket.on("connect", () => {
