@@ -161,3 +161,13 @@ Both players play on **the same board**. There is no separate opponent board or 
 | App shell (iOS + Android + Web) | Flutter + Dart — decided universal shell, embeds the Phaser game view via `webview_flutter` / `HtmlElementView`. See [system-design § 2.1](specification/system-design.md#21-client-shell-and-embedded-game-view). | v0.6 planned |
 | Identity | Firebase Auth (Apple + Google providers) — JWT verified on Socket.IO handshake | v0.6 planned |
 | Persistence | Postgres — `users`, `match_history` | v0.6 planned |
+
+---
+
+# Commit Conventions
+
+- **Keep commit messages short.** Title line under 70 characters; one or two bullet points in body if needed.
+- **If a single change touches many files or layers, split into 2–3 focused commits** rather than one large message. Example: auth service + bridge integration = two separate commits, each with its own focused message.
+- **When work spans multiple independent tracks,** commit each track separately (auth service separately from bridge separately from spec updates).
+- **Message format:** `<type>(<scope>): <short summary>` (e.g. `feat(shell): T-v0.6-C05 auth service...` or `chore: update spec snapshot`).
+- **When completing a task,** include the task ID in the message (e.g. `T-v0.6-C05`, `T-v0.5-11`) for traceability.
