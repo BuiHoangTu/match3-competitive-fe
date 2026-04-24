@@ -326,16 +326,29 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B01** (TODO) · Bridge contract types
+**T-v0.6-B01** (DONE, NEEDS REVISION) · Bridge contract types
 - **Req:** AR-3 · **Size:** S · **Deps:** —
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** `shared/src/protocol.d.ts` (adjacent pattern).
 - **Outputs:** `shared/src/bridge.d.ts` with TypeScript declarations for every message listed in § 2.2. `shell/lib/bridge/bridge_messages.dart` with Dart equivalents.
-- **Implementation Notes:** Keep the set closed — only the six messages in § 2.2. No gameplay events. Version field on every message for forward-compat.
+- **Implementation Notes:** Keep the set closed — only the six messages in § 2.2. No gameplay events. Version field on every message for forward-compat. **Revision note (2026-04-24):** The original bridge used `setAuthToken` carrying a Firebase idToken. Spec updated to use `startMatch(roomToken, expiresAt)` where `roomToken` is a server-issued room-scoped JWT. A follow-up task T-v0.6-B01b is filed to rename message types on both sides.
 - **Acceptance:**
   - TS declarations compile (`npx tsc --project shared/tsconfig.json --noEmit`).
   - Dart types compile in `shell/`.
   - Unit test asserts message-name enum matches across TS and Dart (string compare in a small integration fixture).
+
+---
+
+**T-v0.6-B01b** (TODO) · Rename bridge auth message to `startMatch`
+- **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B01
+- **Context:** [system-design § 2.2 revision](system-design.md#22-shellgame-bridge-contract); spec changed 2026-04-24 to pass a room-scoped token instead of a Firebase idToken across the bridge.
+- **Inputs:** `shared/src/bridge.d.ts`, `shared/src/bridge.ts`, `shell/lib/bridge/bridge_messages.dart`.
+- **Outputs:** `SET_AUTH_TOKEN` → `START_MATCH`; `SetAuthTokenMessage` → `StartMatchMessage` with payload `{ roomToken: string, expiresAt: number }` (drop `userId` — it's inside the token). Update both TS and Dart sides. Update the name-parity test.
+- **Implementation Notes:** This is a breaking change for any caller — but the only current callers are `GameBridge.onSetAuthToken` (rename to `onStartMatch`) and `SyncClient` (rename `setAuthToken(token)` to `startMatch(roomToken)`). Keep payloads minimal: the roomToken is self-describing.
+- **Acceptance:**
+  - Name-parity test passes with the new name.
+  - `fe` tests pass (update `GameBridge.test.ts` and `SyncClient.test.ts`).
+  - `shell/test/services/` tests pass.
 
 ---
 
@@ -363,15 +376,16 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B04** (TODO) · Shell → `setAuthToken`
-- **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03
+**T-v0.6-B04** (TODO) · Shell → `startMatch`
+- **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03, T-v0.6-B01b, T-v0.6-D09
 - **Context:** [system-design § 2.2 and § 2.3](system-design.md#22-shellgame-bridge-contract).
-- **Inputs:** Bridge transport from B02/B03.
-- **Outputs:** Dart helper in `shell/lib/bridge/` exposing `sendAuthToken(token, userId, expiresAt)`.
-- **Implementation Notes:** Emits one message per refresh. Never emits a plaintext token into logs.
+- **Inputs:** Bridge transport from B02/B03, room token from matchmaking endpoint (D09).
+- **Outputs:** Dart helper in `shell/lib/bridge/` exposing `sendStartMatch(roomToken, expiresAt)`. Called exactly once per match, after shell receives 200 from `/matchmaking/join` (or `/matchmaking/resume`).
+- **Implementation Notes:** Emits a single message. Never emits the roomToken value into logs (log only `expiresAt` + a short hash prefix for correlation). The Firebase idToken MUST NOT be passed to this helper or across the bridge at all.
 - **Acceptance:**
-  - Unit test: emission carries the three fields.
+  - Unit test: emission carries `{ roomToken, expiresAt }`.
   - Log inspection: token value not present in any log.
+  - Type test: passing a Firebase-style token shape (with `userId` field) is rejected at compile time.
 
 ---
 
@@ -397,15 +411,15 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B07** (DONE) · Game → attach token to Socket.IO handshake
+**T-v0.6-B07** (DONE, SEMANTICS UPDATED) · Game → attach token to Socket.IO handshake
 - **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** T-v0.6-B04
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `fe/src/net/SyncClient.ts`, bridge JS adapter.
 - **Outputs:** `SyncClient` accepts a token from the bridge and sets `auth: { token }` on `io(...)`.
-- **Implementation Notes:** If no token has arrived yet, queue the connect attempt until `setAuthToken` fires. Do not connect anonymously.
+- **Implementation Notes:** If no token has arrived yet, queue the connect attempt until `setAuthToken`/`startMatch` fires. Do not connect anonymously. **Spec revision (2026-04-24):** The token received here is now a **room token** (D11), not a Firebase idToken. The code change is invariant to this — the token is opaque to `SyncClient`. A follow-up in T-v0.6-B01b renames the bridge handler from `setAuthToken` to `startMatch` for clarity.
 - **Acceptance:**
-  - Unit test: connect is deferred until token is set.
-  - Integration: socket handshake includes the token.
+  - Unit test: connect is deferred until token is set. ✅
+  - Integration: socket handshake includes the token. ✅
 
 ---
 
@@ -566,27 +580,28 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D01** (TODO) · JWT verification middleware
+**T-v0.6-D01** (DONE) · Firebase idToken verification middleware
 - **Req:** AR-3, MR-7(v) · **Size:** M · **Deps:** —
 - **Context:** [system-design § 2.3 and § 8 "Security posture"](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `firebase-admin` npm package.
 - **Outputs:** `be/src/AuthMiddleware.ts` exporting `verifyToken(token) → {userId, claims}` with caching.
-- **Implementation Notes:** Use `firebase-admin/auth` `verifyIdToken`. Cache verified results for TTL from `exp - now` or at most 5 min.
+- **Implementation Notes:** Use `firebase-admin/auth` `verifyIdToken`. Cache verified results for TTL from `exp - now` or at most 5 min. **Scope note (2026-04-24):** This middleware verifies **Firebase idTokens** and is used by the HTTP matchmaking endpoints (D09/D10). Socket handshakes verify **room tokens** via D11/D12 instead; they do NOT call `verifyIdToken` per connect.
 - **Acceptance:**
   - Unit test: valid, expired, and tampered tokens produce correct outcomes.
   - Cache test: repeat verification within TTL returns from cache.
 
 ---
 
-**T-v0.6-D02** (TODO) · Handshake integration
-- **Req:** AR-1, MR-7(v) · **Size:** S · **Deps:** T-v0.6-D01
+**T-v0.6-D02** (TODO, REVISED) · Socket handshake verifies room token
+- **Req:** AR-1, MR-7(v) · **Size:** S · **Deps:** T-v0.6-D11
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
-- **Inputs:** `be/src/server.ts`.
-- **Outputs:** Socket.IO `use` middleware that rejects handshakes lacking a valid token.
-- **Implementation Notes:** Pull token from `socket.handshake.auth.token`. On rejection emit `connect_error` with a machine-readable reason.
+- **Inputs:** `be/src/server.ts`, RoomTokenSigner from D11.
+- **Outputs:** Socket.IO `use` middleware that (a) extracts `socket.handshake.auth.token` as a room token, (b) verifies its HMAC signature locally (no Firebase call), (c) checks `exp > now`, (d) confirms the room still exists and the user slot matches, (e) attaches `{roomId, userId, slot}` to `socket.data`, (f) joins the socket to `io.to(roomId)` atomically.
+- **Implementation Notes:** Do NOT call `firebase-admin` here — the Firebase idToken was already verified when D09 signed this room token. Pull token from `socket.handshake.auth.token`. On rejection emit `connect_error` with a machine-readable reason (`no_token`, `invalid_token`, `expired_token`, `room_closed`).
 - **Acceptance:**
-  - Integration test: connecting without token fails with a specific error.
-  - Connecting with a valid token succeeds.
+  - Integration test: connecting without a token fails with `no_token`.
+  - Connecting with a tampered token fails with `invalid_token`.
+  - Connecting with a valid token joins the socket to the correct room and emits `match_start`.
 
 ---
 
@@ -653,6 +668,59 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Implementation Notes:** Use signed fixture tokens with a fake Admin SDK.
 - **Acceptance:**
   - `be` test suite includes at least: valid / expired / tampered / missing-claim cases. All green.
+
+---
+
+**T-v0.6-D09** (TODO) · HTTP `POST /matchmaking/join` endpoint
+- **Req:** AR-1, AR-3, MR-1 · **Size:** M · **Deps:** T-v0.6-D01, T-v0.6-D11
+- **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint); [§ 4.4](system-design.md#44-matchmaking-with-bot-fallback-mr-1).
+- **Inputs:** `be/src/server.ts`, `AuthMiddleware` (D01), `WaitingQueue`, `RoomManager`, `BotManager`, `RoomTokenSigner` (D11).
+- **Outputs:** Express-style HTTP route (or Socket.IO engine's HTTP upgrade) at `POST /matchmaking/join`. Verifies `Authorization: Bearer <firebaseIdToken>` via D01 → `userId`. Enqueues into `WaitingQueue`. Long-polls up to `BOT_WAIT_MS` (5 s). Pairs with a waiting human if one is present; otherwise falls back to bot via `BotManager`. Creates a `Room` and signs a room token via D11. Responds with `{ roomToken, expiresAt, mode, opponent? }`.
+- **Implementation Notes:** Use Node's built-in `http` server the Socket.IO instance is already attached to — route HTTP requests via a `request` listener. JSON body parsing kept manual (no express added). AR-7: reject with 409 if the userId already has an active room (unless the endpoint is called as resume — that's D10). Do not hold the HTTP request past `BOT_WAIT_MS` + a small buffer.
+- **Acceptance:**
+  - Unit test: two concurrent requests with matching mode pair up; response contains a signed room token for each.
+  - Unit test: single request with no opponent gets a bot match after `BOT_WAIT_MS`.
+  - Unit test: missing or invalid idToken returns 401.
+  - Unit test: userId with an active room gets 409.
+
+---
+
+**T-v0.6-D10** (TODO) · HTTP `POST /matchmaking/resume` endpoint
+- **Req:** AR-3, MR-6 · **Size:** S · **Deps:** T-v0.6-D09, T-v0.6-D11
+- **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint).
+- **Inputs:** `RoomManager`, `RoomTokenSigner` (D11), `AuthMiddleware` (D01).
+- **Outputs:** `POST /matchmaking/resume` with body `{ roomId }`. Verifies idToken, confirms userId is a slot in the room, signs a fresh room token for that slot, responds `{ roomToken, expiresAt }`.
+- **Implementation Notes:** Does NOT reset the match state — the board/moves/clocks are unchanged. Returns 410 Gone if the room is closed or its rejoin window has passed.
+- **Acceptance:**
+  - Unit test: valid resume returns a new room token for the same roomId/slot.
+  - Unit test: resume for a closed room returns 410.
+  - Unit test: userId not a slot in the room → 403.
+
+---
+
+**T-v0.6-D11** (TODO) · `RoomTokenSigner` (HMAC-SHA256)
+- **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** —
+- **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
+- **Inputs:** Node's built-in `crypto` module; existing `RejoinManager` (same HMAC pattern).
+- **Outputs:** `be/src/RoomTokenSigner.ts` exporting `sign({ roomId, userId, slot, seed, ttlMs }) → string` and `verify(token) → { roomId, userId, slot, seed, exp } | null`. JWT-like format: `base64url(payload) + "." + base64url(hmac)`. Secret loaded from `ROOM_TOKEN_SECRET` env var (fail fast if missing in prod mode).
+- **Implementation Notes:** Not a full JWT library — fixed algorithm (HS256), fixed claim set, no `alg` header confusion. Short payload (few hundred bytes base64-encoded). TTL default: `ROOM_TOKEN_TTL_MS = 5 * 60 * 1000`. `verify` rejects on: bad format, bad signature, `exp` in the past, unknown fields.
+- **Acceptance:**
+  - Unit test: round-trip sign→verify yields the input payload.
+  - Unit test: tampered payload or signature → verify returns null.
+  - Unit test: expired token → verify returns null.
+  - Unit test: verify is constant-time (use `crypto.timingSafeEqual`).
+
+---
+
+**T-v0.6-D12** (TODO) · Wire bot-fallback through matchmaking endpoint
+- **Req:** MR-1 · **Size:** S · **Deps:** T-v0.6-D09
+- **Context:** [system-design § 4.4](system-design.md#44-matchmaking-with-bot-fallback-mr-1).
+- **Inputs:** Existing `BotManager`, `/matchmaking/join` handler (D09).
+- **Outputs:** `/matchmaking/join` timeout path calls `BotManager.createBotMatchForUser(userId, mode)` and signs a room token for the single human slot (slot 0); the bot occupies slot 1 with a synthetic userId (e.g. `BOT_USER_ID`). Previous socket-level `BotManager.createBotMatch(socketId)` is deprecated but retained for existing tests during v0.6 transition.
+- **Implementation Notes:** The socket-level bot creation flow from v0.4/v0.5 still exists; this task only adds the HTTP-triggered path. Don't delete the old path until A09 (LobbyScene retired) lands.
+- **Acceptance:**
+  - Unit test: `POST /matchmaking/join` with no opponent available gets a bot room after `BOT_WAIT_MS`.
+  - Unit test: the bot plays moves against the human via the existing BotManager tick loop.
 
 ---
 

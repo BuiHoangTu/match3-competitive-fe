@@ -119,20 +119,23 @@ The reason for this split: the latency-sensitive loop ([NFR-2](requirement.md#pe
 The bridge is deliberately tiny. If a new feature wants to add a gameplay-adjacent event to the bridge, it is almost certainly the wrong design — look for a way to route it through the server instead.
 
 **Shell → game (shell-initiated):**
-- `setAuthToken(token: string, userId: string, expiresAt: number)` — called on init and on each refresh. Game view stores the token and attaches it to the next Socket.IO handshake.
+- `startMatch(roomToken: string, expiresAt: number)` — called after the shell has obtained a room-scoped token from the matchmaking endpoint (§ 2.4). Game view stores the token and connects the Socket.IO handshake with it. The token itself carries `{roomId, userId, slot, seed, exp}` — the game view treats it as opaque, just attaches it to the handshake.
 - `appLifecycle(state: "foreground" | "background" | "pause" | "resume")` — allows the game view to pause animations and timers during background, and to trigger a reconnect probe on resume.
 - `requestLeaveMatch()` — user tapped "leave match" in the shell UI; game view should gracefully end the current match.
 
 **Game → shell (game-initiated):**
 - `matchEnded(outcome: "W" | "L" | "D", scores: {self: number, opponent: number})` — shell shows the result screen in native Widgets and a "play again" button.
-- `authTokenRejected()` — server rejected the token (expired between refreshes); shell triggers a refresh and calls `setAuthToken` again.
-- `ready()` — game view has loaded and is ready to receive the first `setAuthToken` call.
+- `authTokenRejected()` — server rejected the room token (usually TTL-expired on a long match); shell re-requests a room token via the matchmaking endpoint's rejoin path and calls `startMatch` again.
+- `ready()` — game view has loaded and is ready to receive the first `startMatch` call.
 
-**Explicitly NOT on the bridge:** moves, clock ticks, opponent state, cascade events, scores during play, seed, room id. All of that stays inside the game view's socket.
+**Explicitly NOT on the bridge:** moves, clock ticks, opponent state, cascade events, scores during play, seed (it's inside the room token), room id (also inside the token). All of that stays inside the game view's socket. The **Firebase idToken never crosses the bridge** — the shell uses it to authenticate matchmaking HTTP calls; the game view only ever sees the server-issued room token.
 
 ### 2.3 Identity data flow
 
-The identity provider (Firebase Auth) handles Apple + Google OAuth, issues a JWT, and exposes a verification endpoint the server uses to validate tokens. The server itself never handles OAuth redirects.
+Two distinct tokens, two distinct roles. The **Firebase idToken** proves who the user is and never leaves the shell. The **room token** proves this user is entitled to a specific match and is the only credential the game view ever sees.
+
+- **Firebase idToken** — issued by Firebase Auth after Apple/Google OAuth. Long-lived (1 h). Carries `{userId, email, claims}`. Used by the shell to authenticate HTTP calls to the matchmaking endpoint. Server verifies it via `firebase-admin.verifyIdToken()`.
+- **Room token** — issued by *our server* after matchmaking succeeds. Short-lived (5 min, covers a match + slack). Carries `{roomId, userId, slot, seed, exp}`. Signed with a server-side HMAC secret. Used by the game view for the Socket.IO handshake. Server verifies it with a local HMAC check (no Firebase call per event).
 
 ```mermaid
 sequenceDiagram
@@ -145,24 +148,55 @@ sequenceDiagram
     U->>Shell: tap "Sign in with Apple"
     Shell->>IdP: OAuth via native plugin
     IdP-->>Shell: id_token + userId
-    Shell->>GV: bridge: setAuthToken(token, userId, expiresAt)
+    Note over Shell: idToken stays on shell;<br/>never crosses the bridge
     U->>Shell: tap "Find match"
-    Shell->>GV: bridge: start matchmaking flow
-    GV->>S: Socket.IO connect (auth: {token})
-    S->>IdP: verify JWT
-    IdP-->>S: valid (userId, claims)
-    S-->>GV: connected, ready for matchmaking
-    Note over Shell,GV: Later — token expires
+    Shell->>S: POST /matchmaking/join<br/>Authorization: Bearer idToken
+    S->>IdP: verify idToken
+    IdP-->>S: valid (userId)
+    S->>S: enqueue in WaitingQueue<br/>(long-poll up to BOT_WAIT_MS)
+    S->>S: match found → create room<br/>sign roomToken {roomId, userId, slot, seed, exp}
+    S-->>Shell: 200 { roomToken, expiresAt }
+    Shell->>GV: bridge: startMatch(roomToken, expiresAt)
+    GV->>S: Socket.IO connect<br/>auth: { token: roomToken }
+    S->>S: verify HMAC locally → decode {roomId, slot}
+    S->>GV: place in room<br/>emit match_start {seed, firstPlayerId}
+    Note over Shell,GV: Later — room token nears expiry during a long match
     GV->>S: next move (stale token)
     S-->>GV: auth_token_rejected
     GV->>Shell: bridge: authTokenRejected()
-    Shell->>IdP: refresh token
-    IdP-->>Shell: new id_token
-    Shell->>GV: bridge: setAuthToken(...)
-    GV->>S: reconnect with fresh token
+    Shell->>S: POST /matchmaking/resume<br/>Authorization: Bearer idToken<br/>body: { roomId }
+    S-->>Shell: 200 { roomToken, expiresAt } (new)
+    Shell->>GV: bridge: startMatch(roomToken, expiresAt)
+    GV->>S: reconnect with fresh room token
 ```
 
-The "token refresh while connected" flow is the subtle part and is explicitly tested in v0.6 — if it is broken, long matches drop on the token TTL boundary.
+The "token refresh while connected" flow is the subtle part and is explicitly tested in v0.6 — if it is broken, long matches drop on the token TTL boundary. Critically, refreshing the Firebase idToken (shell-internal, automatic) does NOT trigger a new `startMatch` — the room token is independent of idToken expiry.
+
+### 2.4 Matchmaking endpoint
+
+A small HTTP surface on the same Node server that owns the Socket.IO gameplay. Kept separate from the socket because (a) matchmaking is request/response, not streaming, and (b) the shell should not need a persistent socket just to find a game.
+
+**`POST /matchmaking/join`**
+- Auth: `Authorization: Bearer <firebaseIdToken>`
+- Body: `{ mode: "turn_based" | "pve" | "solo" }`
+- Behaviour: long-poll up to `BOT_WAIT_MS` (5 s). If a human is waiting for the same mode, pair them. Otherwise fall back to a bot room. In either case, create the room, sign a room token, and return.
+- Response (200): `{ roomToken: string, expiresAt: number, mode, opponent?: { displayName } }`
+- Errors: 401 invalid/missing idToken; 409 user already in an active match (AR-7); 503 shutdown draining.
+
+**`POST /matchmaking/resume`**
+- Auth: `Authorization: Bearer <firebaseIdToken>`
+- Body: `{ roomId: string }`
+- Behaviour: if the caller's userId matches a slot in an existing open room (inside the rejoin window per MR-6), sign a fresh room token for that room. Otherwise return 410 Gone so the shell knows to route to home.
+- Response (200): `{ roomToken, expiresAt }`
+- Errors: 401 invalid idToken; 403 userId not a slot in this room; 410 room closed/timed-out.
+
+**Room token format** (opaque to the game view, structured for the server):
+```
+roomToken = HMAC-SHA256(secret, base64url(header) + "." + base64url(payload))
+payload = { roomId, userId, slot: 0|1, seed, iat, exp }
+```
+
+TTL is 5 minutes by default — long enough for a normal match plus turn timers, short enough to bound damage if leaked. The token is bearer-style; possession of it = rights to the match slot. Leaks are mitigated by (a) TLS transport, (b) short TTL, (c) binding to a specific userId slot (a stolen token still can only play *as that user*, cannot steal identity).
 
 ---
 
@@ -237,6 +271,8 @@ sequenceDiagram
 
 Local move UX is unchanged; only the submit-and-confirm edges differ. The server is authoritative for turn order ([MR-4](requirement.md#2-multiplayer--networking-requirements)) and clocks ([MR-5](requirement.md#2-multiplayer--networking-requirements)); it relays a validated move to both clients so each replays it into its local engine.
 
+From v0.6 onward, by the time either client's socket connects it already carries a room token that names its `roomId` and `slot`. The server decodes the token at handshake and places the socket in its room atomically — there is no client-side `join_queue` event. The game view's first observable socket message is `match_start` for its room.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -245,13 +281,15 @@ sequenceDiagram
     participant S as Server
     participant CB as Client B
     actor B as Player B
-    Note over A,B: match start — server emits seed + first turn
+    Note over A,B: both clients already hold room tokens from § 2.4
+    CA->>S: Socket.IO connect<br/>auth: { token: roomTokenA }
     S->>CA: match_start {seed, firstPlayerId}
+    CB->>S: Socket.IO connect<br/>auth: { token: roomTokenB }
     S->>CB: match_start {seed, firstPlayerId}
     A->>CA: swap (a, b)
     CA->>CA: optimistic local animation
     CA->>S: submit_move {a, b}
-    S->>S: Validator: bounds + adjacency + turn + room
+    S->>S: Validator: bounds + adjacency + turn + room + slot-ownership
     alt invalid
         S-->>CA: move_rejected
         CA->>CA: reconcile (revert optimistic)
@@ -306,18 +344,26 @@ The v0.5 rejoin implementation used an HMAC token keyed by `(roomId, socketId, e
 
 ### 4.4 Matchmaking with bot fallback ([MR-1](requirement.md#2-multiplayer--networking-requirements))
 
+From v0.6, matchmaking is an HTTP request/response against `/matchmaking/join` (§ 2.4) rather than a socket event. Waiting happens inside the server holding the request open; the shell sees a single synchronous answer containing a signed room token.
+
 ```mermaid
 flowchart LR
-    In[Player requests<br/>vs Human] --> Q{Waiting player<br/>available?}
-    Q -- yes --> Pair[Pair + create room<br/>emit match_start]
-    Q -- no --> Wait[Enqueue in<br/>WaitingQueue]
+    In[Shell POST<br/>/matchmaking/join<br/>+ firebase idToken] --> Verify[AuthMiddleware<br/>verify idToken]
+    Verify --> Q{Waiting player<br/>available for mode?}
+    Q -- yes --> Pair[Pair + create room]
+    Q -- no --> Wait[Hold request<br/>long-poll BOT_WAIT_MS]
     Wait --> T{Human arrives<br/>within bound?}
     T -- yes --> Pair
     T -- no, timeout --> BotRoom[Create bot room<br/>server-side BotPlayer]
     BotRoom --> Pair
+    Pair --> Sign[Sign roomToken<br/>HMAC + claims]
+    Sign --> Resp[200 OK<br/>to shell]
+    Resp --> Bridge[Shell → game view<br/>bridge: startMatch]
+    Bridge --> Sock[Game view socket connect<br/>with roomToken]
+    Sock --> Start[Server emits<br/>match_start]
 ```
 
-The bot fallback reuses the same `RoomManager` pipeline as a human match. From the client's perspective the two flows are indistinguishable — which is exactly why v0.3 (local bot) generalises cleanly to v0.4 (server with bot fallback).
+The bot fallback reuses the same `RoomManager` pipeline as a human match. From the client's perspective the two flows are indistinguishable — which is exactly why v0.3 (local bot) generalises cleanly to v0.4 (server with bot fallback). The shell receives the same `roomToken` shape regardless of opponent type.
 
 ---
 
