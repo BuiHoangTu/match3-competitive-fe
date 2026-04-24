@@ -68,7 +68,7 @@ STOP and hand back to a human reviewer if any of these occur:
 
 ---
 
-## Status snapshot (as of 2026-04-20)
+## Status snapshot (as of 2026-04-24)
 
 | Milestone | Status | Notes |
 |---|---|---|
@@ -76,8 +76,8 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.2 Practice mode | DONE | GameLoopController + TileSpritePool + GameScene wired; tweens in place |
 | v0.3 vs Bot | DONE | LobbyScene, ResultScene, BotPlayer, local TimerManager |
 | v0.4 vs Human online | DONE | `be/` server with WaitingQueue, RoomManager, Validator, TimerManager, BotManager; SyncClient |
-| v0.5 Robustness | PARTIAL | RejoinManager (HMAC, socket-keyed) landed; latency harness + NFR-4 assertion + idle-match cleanup still open |
-| v0.6 Flutter shell + Accounts | TODO | Biggest remaining milestone; see sub-tracks A–I below |
+| v0.5 Robustness | DONE | All T-v0.5-01..04 + T-v0.5-10..15 shipped; 36 be tests green; NFR-4 ≤2s, NFR-3/6 100-iter desync=0 |
+| v0.6 Flutter shell + Accounts | PARTIAL | Sub-tracks A, B, C (partial), D, E landed on master; F–I still open |
 | v0.7 Accessibility | TODO | Deferred until Flutter shell lands so audit runs against final UI |
 | v1.0 Public launch | TODO | Infra + store releases + observability |
 
@@ -147,7 +147,9 @@ Completed tasks; not for agent execution. `Outputs` records where the code lande
 
 ---
 
-## v0.5 — Robustness: reconnection + degraded networks  *(PARTIAL)*
+## v0.5 — Robustness: reconnection + degraded networks  *(DONE)*
+
+All tasks shipped on master (commits 9d92fb5, 2d68c9f, 38df0ed — 2026-04-20). `be` test suite: 36 tests, 7 files, all pass. Exit criteria met.
 
 ### Completed
 
@@ -155,87 +157,12 @@ Completed tasks; not for agent execution. `Outputs` records where the code lande
 - **T-v0.5-02** · Full-state replay on rejoin · Req: MR-6, NFR-4 · Outputs: `be/src/RejoinManager.ts`, `be/src/RoomManager.ts`
 - **T-v0.5-03** · Room cleanup when both gone past window · Req: MR-6, FR-7(b) · Outputs: `be/src/RoomManager.ts`
 - **T-v0.5-04** · Move cap + membership guard · Req: MR-7 · Outputs: `be/src/validator.ts`, `be/src/RoomManager.ts`
-
-### Remaining
-
----
-
-**T-v0.5-10** (TODO) · Opponent-reconnecting indicator
-- **Req:** MR-6 · **Size:** S · **Deps:** —
-- **Context:** [system-design § 4.3](system-design.md#43-reconnection-v05-mr-6); MR-6 requires clear status to the remaining player while the other is away.
-- **Inputs:** `fe/src/scenes/GameScene.ts`, `fe/src/net/SyncClient.ts`, existing server events for disconnect/reconnect.
-- **Outputs:** Small text/icon indicator in the info panel region of `GameScene`; `SyncClient` handler wiring.
-- **Implementation Notes:** Show "Opponent reconnecting…" when the opponent's socket drops and the rejoin window is still open. Hide on opponent rejoin or match end. No new wire events — reuse existing disconnect/reconnect signals. Do not pause the active player's clock (server owns the clock).
-- **Acceptance:**
-  - Closing player A's browser tab causes player B's screen to show the indicator within 2 s.
-  - Reopening A's tab within the rejoin window removes the indicator within 2 s of A's rejoin.
-  - The match clock on B continues ticking during the disconnect if A was the active player.
-
----
-
-**T-v0.5-11** (TODO) · Network-latency test harness
-- **Req:** NFR-3 · **Size:** M · **Deps:** —
-- **Context:** [system-design § 4.2](system-design.md#42-online-move-vs-human--the-transport-change-from-v03--v04); NFR-3 requires graceful degradation at 100/300/500 ms RTT.
-- **Inputs:** Existing `be/src/server.ts` and `fe/src/net/SyncClient.ts`.
-- **Outputs:** New `be/src/__tests__/latency-harness.ts` (or similar) using a local proxy/middleware that injects configurable delay on socket events. Documented usage in `be/README.md` or `CLAUDE.md`.
-- **Implementation Notes:** Prefer an in-process delay wrapper around the Socket.IO server's emit/receive rather than a real network-level tool. Delay config exposed via env var (e.g. `SIM_RTT_MS=300`). Harness runs two in-process clients (Node) rather than real browsers.
-- **Acceptance:**
-  - Running the harness with `SIM_RTT_MS=300` and a scripted 50-move match completes with no thrown errors.
-  - Harness exposes a programmatic knob (env var or API) for 0 / 100 / 300 / 500 ms.
-  - Harness output includes per-move roundtrip timing in logs.
-
----
-
-**T-v0.5-12** (TODO) · No-desync assertion at 300 ms RTT
-- **Req:** NFR-3, NFR-6 · **Size:** S · **Deps:** T-v0.5-11
-- **Context:** [system-design § 8 "Determinism checks"](system-design.md#8-cross-cutting-concerns).
-- **Inputs:** Harness from T-v0.5-11; shared engine.
-- **Outputs:** Automated test in `be/src/__tests__/` that drives a 50-move match through the harness at 300 ms and asserts both clients end on cell-identical board state.
-- **Implementation Notes:** Compare final `Board` serialisation (JSON stringify of cells + refill counters) between the two clients. Run the test 100× in a tight loop to catch non-determinism under timing pressure. Do not touch the real network stack.
-- **Acceptance:**
-  - Test runs 100 iterations, all pass, CI exit code 0.
-  - Test fails deterministically if a mutation is introduced that reads wall-clock time in board-affecting code.
-
----
-
-**T-v0.5-13** (TODO) · Idle-match timeout
-- **Req:** FR-7(b) · **Size:** S · **Deps:** —
-- **Context:** [system-design § 8 "Failure modes"](system-design.md#8-cross-cutting-concerns); prevents zombie rooms if both players are connected but silent.
-- **Inputs:** `be/src/RoomManager.ts`.
-- **Outputs:** Idle-match timeout field on rooms + periodic sweep. New constant in `be/src/constants.ts`.
-- **Implementation Notes:** Timeout resets on any valid move; default 30 min of silence closes the match with a DRAW per FR-7(b). Do not conflate with the reconnection window (that one fires only on disconnect).
-- **Acceptance:**
-  - Unit test: a room with no moves for the timeout duration is closed and emits `game_over`.
-  - Unit test: a room that receives a move resets the idle counter.
-  - Sweep interval is at least 10× smaller than the timeout to keep jitter low.
-
----
-
-**T-v0.5-14** (TODO) · Structured lifecycle logs
-- **Req:** — · **Size:** S · **Deps:** —
-- **Context:** [planning § 2 v0.5 deliverables](planning.md#v05--robustness-reconnection-degraded-networks-error-recovery) calls for server-side logging of match lifecycle for post-hoc debugging.
-- **Inputs:** Existing server files.
-- **Outputs:** A thin logger module `be/src/logger.ts` (JSON lines to stdout) and call sites at: match_created, player_joined, move_submitted, move_rejected, disconnect, rejoin, match_ended.
-- **Implementation Notes:** No new logging library — plain `JSON.stringify` to stdout is acceptable for the closed beta. Every log line includes `matchId` where applicable and a `ts` ISO timestamp.
-- **Acceptance:**
-  - Running a match produces at least one log line per event type above.
-  - Each line is valid JSON (checked by `JSON.parse` in a test helper).
-
----
-
-**T-v0.5-15** (TODO) · NFR-4 reconnect-to-resume ≤ 2 s assertion
-- **Req:** NFR-4 · **Size:** S · **Deps:** T-v0.5-02
-- **Context:** [system-design § 4.3](system-design.md#43-reconnection-v05-mr-6); NFR-4 gives ~2 s budget from reconnect to correct state.
-- **Inputs:** `be/src/RejoinManager.ts`, `be/src/RoomManager.ts`, `fe/src/net/SyncClient.ts`.
-- **Outputs:** Automated test under `be/src/__tests__/` that disconnects a client mid-match, reconnects it, and measures time-to-correct-state.
-- **Implementation Notes:** Correct state = client's engine replays the move log and ends on identical board state to the server's authoritative copy. Time measured from reconnect `connect` event to local engine completing the replay.
-- **Acceptance:**
-  - Test passes with a measured duration ≤ 2000 ms on the reference machine (or CI box).
-  - Test includes a failure mode demonstration (assert fails when replay is artificially delayed).
-
----
-
-**Exit criteria for v0.5:** all `Remaining` tasks above marked `DONE`; `T-v0.5-12` 100-iteration run is green in CI; `T-v0.5-15` passes on CI.
+- **T-v0.5-10** · Opponent-reconnecting indicator · Req: MR-6 · Outputs: `fe/src/scenes/GameScene.ts`, `fe/src/net/SyncClient.ts`
+- **T-v0.5-11** · Network-latency test harness · Req: NFR-3 · Outputs: `be/src/__tests__/latency-harness.ts`, `be/README.md`
+- **T-v0.5-12** · No-desync assertion at 300 ms RTT · Req: NFR-3, NFR-6 · Outputs: `be/src/__tests__/no-desync.test.ts`
+- **T-v0.5-13** · Idle-match timeout · Req: FR-7(b) · Outputs: `be/src/IdleSweeper.ts`, `be/src/__tests__/IdleSweeper.test.ts`, `be/src/constants.ts`
+- **T-v0.5-14** · Structured lifecycle logs · Outputs: `be/src/logger.ts`, `be/src/__tests__/logger.test.ts`
+- **T-v0.5-15** · NFR-4 reconnect-to-resume ≤ 2 s assertion · Req: NFR-4 · Outputs: `be/src/__tests__/rejoin-latency.test.ts`
 
 ---
 
@@ -470,7 +397,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B07** (TODO) · Game → attach token to Socket.IO handshake
+**T-v0.6-B07** (DONE) · Game → attach token to Socket.IO handshake
 - **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** T-v0.6-B04
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `fe/src/net/SyncClient.ts`, bridge JS adapter.
@@ -493,7 +420,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B09** (TODO) · Game → `matchEnded`
+**T-v0.6-B09** (DONE) · Game → `matchEnded`
 - **Req:** FR-7 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03
 - **Context:** [system-design § 2.2 game-initiated messages](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** `fe/src/scenes/GameScene.ts`, existing `game_over` event from server.
