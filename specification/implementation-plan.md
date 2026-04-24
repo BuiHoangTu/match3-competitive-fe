@@ -339,7 +339,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B01b** (TODO) · Rename bridge auth message to `startMatch`
+**T-v0.6-B01b** (DONE) · Rename bridge auth message to `startMatch`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B01
 - **Context:** [system-design § 2.2 revision](system-design.md#22-shellgame-bridge-contract); spec changed 2026-04-24 to pass a room-scoped token instead of a Firebase idToken across the bridge.
 - **Inputs:** `shared/src/bridge.d.ts`, `shared/src/bridge.ts`, `shell/lib/bridge/bridge_messages.dart`.
@@ -592,7 +592,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D02** (TODO, REVISED) · Socket handshake verifies room token
+**T-v0.6-D02** (DONE, REVISED) · Socket handshake verifies room token
 - **Req:** AR-1, MR-7(v) · **Size:** S · **Deps:** T-v0.6-D11
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `be/src/server.ts`, RoomTokenSigner from D11.
@@ -671,7 +671,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D09** (TODO) · HTTP `POST /matchmaking/join` endpoint
+**T-v0.6-D09** (DONE) · HTTP `POST /matchmaking/join` endpoint
 - **Req:** AR-1, AR-3, MR-1 · **Size:** M · **Deps:** T-v0.6-D01, T-v0.6-D11
 - **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint); [§ 4.4](system-design.md#44-matchmaking-with-bot-fallback-mr-1).
 - **Inputs:** `be/src/server.ts`, `AuthMiddleware` (D01), `WaitingQueue`, `RoomManager`, `BotManager`, `RoomTokenSigner` (D11).
@@ -685,7 +685,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D10** (TODO) · HTTP `POST /matchmaking/resume` endpoint
+**T-v0.6-D10** (DONE) · HTTP `POST /matchmaking/resume` endpoint
 - **Req:** AR-3, MR-6 · **Size:** S · **Deps:** T-v0.6-D09, T-v0.6-D11
 - **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint).
 - **Inputs:** `RoomManager`, `RoomTokenSigner` (D11), `AuthMiddleware` (D01).
@@ -698,7 +698,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D11** (TODO) · `RoomTokenSigner` (HMAC-SHA256)
+**T-v0.6-D11** (DONE) · `RoomTokenSigner` (HMAC-SHA256)
 - **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** —
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** Node's built-in `crypto` module; existing `RejoinManager` (same HMAC pattern).
@@ -712,7 +712,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D12** (TODO) · Wire bot-fallback through matchmaking endpoint
+**T-v0.6-D12** (DONE) · Wire bot-fallback through matchmaking endpoint
 - **Req:** MR-1 · **Size:** S · **Deps:** T-v0.6-D09
 - **Context:** [system-design § 4.4](system-design.md#44-matchmaking-with-bot-fallback-mr-1).
 - **Inputs:** Existing `BotManager`, `/matchmaking/join` handler (D09).
