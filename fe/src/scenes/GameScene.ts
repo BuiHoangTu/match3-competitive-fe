@@ -17,6 +17,7 @@ import type {
   RejoinOkPayload,
 } from "../net/SyncClient.js";
 import { BotPlayer } from "../bot/BotPlayer.js";
+import { GameBridge } from "../bridge/GameBridge.js";
 
 // -------------------------------------------------------------------------
 // Layout
@@ -404,8 +405,38 @@ export class GameScene extends Phaser.Scene {
     if (this.state === "game_over") return;
     this.state = "game_over";
     this.stopTurnTimer();
+
+    // Disable all further input immediately — no moves after match ends.
+    this.input.off(
+      Phaser.Input.Events.POINTER_DOWN,
+      this.handlePointerDown,
+      this
+    );
+
     // B1: game is over — no need for a rejoin token anymore
     SyncClient.clearRejoinToken();
+
+    // ResultScene adds timeBonus to myScore internally, so pass them separately.
+    // For the bridge, compute the final totals the same way ResultScene does.
+    const finalMyScore = this.myScore + timeBonus;
+    const finalOpponentScore = this.opponentScore;
+
+    // Emit matchEnded to the shell (game → shell) before transitioning.
+    // Outcome is from the local player's perspective.
+    // Fires exactly once per match (guarded by the game_over state check above).
+    let outcome: "W" | "L" | "D";
+    if (finalMyScore > finalOpponentScore) {
+      outcome = "W";
+    } else if (finalMyScore < finalOpponentScore) {
+      outcome = "L";
+    } else {
+      outcome = "D";
+    }
+    GameBridge.emitMatchEnded(outcome, {
+      self: finalMyScore,
+      opponent: finalOpponentScore,
+    });
+
     this.scene.start("ResultScene", {
       myScore: this.myScore,
       opponentScore: this.opponentScore,

@@ -4,28 +4,34 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock socket.io-client — use vi.hoisted so vars are available before hoisting
 // ---------------------------------------------------------------------------
 
-const { mockEmit, mockOn, mockConnect, mockDisconnect, getListeners, resetListeners } =
+const { mockEmit, mockOn, mockConnect, mockDisconnect, mockIo, getListeners, resetListeners } =
   vi.hoisted(() => {
     const listeners: Record<string, ((...args: unknown[]) => void) | undefined> = {};
+    const mockEmit = vi.fn();
+    const mockOn = vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+      listeners[event] = cb;
+    });
+    const mockConnect = vi.fn();
+    const mockDisconnect = vi.fn();
+    const mockIo = vi.fn(() => ({
+      emit: mockEmit,
+      on: mockOn,
+      connect: mockConnect,
+      disconnect: mockDisconnect,
+    }));
     return {
-      mockEmit: vi.fn(),
-      mockOn: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
-        listeners[event] = cb;
-      }),
-      mockConnect: vi.fn(),
-      mockDisconnect: vi.fn(),
+      mockEmit,
+      mockOn,
+      mockConnect,
+      mockDisconnect,
+      mockIo,
       getListeners: () => listeners,
       resetListeners: () => { for (const k of Object.keys(listeners)) delete listeners[k]; },
     };
   });
 
 vi.mock("socket.io-client", () => ({
-  io: vi.fn(() => ({
-    emit: mockEmit,
-    on: mockOn,
-    connect: mockConnect,
-    disconnect: mockDisconnect,
-  })),
+  io: mockIo,
 }));
 
 // Helper: trigger a registered socket event
@@ -53,12 +59,14 @@ describe("SyncClient", () => {
     mockOn?.mockClear();
     mockConnect?.mockClear();
     mockDisconnect?.mockClear();
+    mockIo?.mockClear();
 
     client = new SyncClient("http://localhost:3001");
   });
 
   // 1. connect() resolves when the socket emits "connect"
   it("connect() resolves when socket emits connect", async () => {
+    client.setAuthToken("test-token");
     const connectPromise = client.connect();
 
     // Simulate the socket firing "connect"
@@ -70,6 +78,7 @@ describe("SyncClient", () => {
 
   // 2. connect() rejects on connect_error
   it("connect() rejects on connect_error", async () => {
+    client.setAuthToken("test-token");
     const connectPromise = client.connect();
 
     trigger("connect_error", new Error("refused"));
@@ -80,6 +89,7 @@ describe("SyncClient", () => {
 
   // 3. matchmake() emits the "matchmake" event
   it("matchmake() emits matchmake event", async () => {
+    client.setAuthToken("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -91,6 +101,7 @@ describe("SyncClient", () => {
 
   // 4. sendMove() emits "move" with the correct payload
   it("sendMove() emits move with correct payload", async () => {
+    client.setAuthToken("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -108,6 +119,7 @@ describe("SyncClient", () => {
 
   // 5. onMatchFound callback fires with correct args and sets roomId/seed
   it("onMatchFound fires callback and sets roomId/seed", async () => {
+    client.setAuthToken("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -128,6 +140,7 @@ describe("SyncClient", () => {
 
   // 6. onMoveRejected callback fires with the reason string
   it("onMoveRejected fires callback with reason", async () => {
+    client.setAuthToken("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -142,6 +155,7 @@ describe("SyncClient", () => {
 
   // 7. disconnect() marks connected false
   it("disconnect() marks client as disconnected", async () => {
+    client.setAuthToken("test-token");
     const p = client.connect();
     trigger("connect");
     await p;
@@ -150,5 +164,69 @@ describe("SyncClient", () => {
 
     expect(client.connected).toBe(false);
     expect(mockDisconnect).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // T-v0.6-B07: auth token + deferred connect
+  // -------------------------------------------------------------------------
+
+  // 8. connect() is deferred when no token has been set
+  it("connect() is deferred until setAuthToken() fires", async () => {
+    // No token set — io() should NOT be called yet.
+    const connectPromise = client.connect();
+
+    expect(mockIo).not.toHaveBeenCalled();
+    expect(mockConnect).not.toHaveBeenCalled();
+
+    // Now deliver the token.
+    client.setAuthToken("test-jwt-token");
+
+    // io() should have been called now.
+    expect(mockIo).toHaveBeenCalledOnce();
+
+    // Simulate the socket emitting "connect".
+    trigger("connect");
+    await expect(connectPromise).resolves.toBeUndefined();
+    expect(client.connected).toBe(true);
+  });
+
+  // 9. connect() fires immediately when token was pre-set
+  it("connect() fires immediately when token is already set", async () => {
+    client.setAuthToken("pre-set-token");
+
+    const connectPromise = client.connect();
+
+    // io() should be called synchronously.
+    expect(mockIo).toHaveBeenCalledOnce();
+
+    trigger("connect");
+    await expect(connectPromise).resolves.toBeUndefined();
+    expect(client.connected).toBe(true);
+  });
+
+  // 10. io() receives auth: { token } in handshake options
+  it("io() receives auth: { token } in handshake options", async () => {
+    client.setAuthToken("firebase-jwt-abc");
+    const connectPromise = client.connect();
+
+    expect(mockIo).toHaveBeenCalledWith(
+      "http://localhost:3001",
+      expect.objectContaining({ auth: { token: "firebase-jwt-abc" } })
+    );
+
+    trigger("connect");
+    await connectPromise;
+  });
+
+  // 11. setAuthToken() called after connect() pending — resolves the promise
+  it("setAuthToken() after connect() pending resolves the connect promise", async () => {
+    const connectPromise = client.connect();
+
+    // Token arrives later (simulating shell delivering it asynchronously).
+    client.setAuthToken("late-token");
+
+    trigger("connect");
+    await expect(connectPromise).resolves.toBeUndefined();
+    expect(client.connected).toBe(true);
   });
 });

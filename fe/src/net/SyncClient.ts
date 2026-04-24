@@ -20,6 +20,18 @@ export class SyncClient {
   private socket: Socket | null = null;
   private readonly serverUrl: string;
 
+  /** Auth token received from the shell via the bridge. */
+  private authToken: string | null = null;
+  /**
+   * Queued connect request: if connect() is called before the token arrives,
+   * the resolve/reject pair is stored here and the actual io() call is deferred
+   * until setAuthToken() fires.
+   */
+  private pendingConnect: {
+    resolve: () => void;
+    reject: (err: Error) => void;
+  } | null = null;
+
   roomId: string | null = null;
   seed: number | null = null;
   connected: boolean = false;
@@ -32,6 +44,22 @@ export class SyncClient {
 
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
+  }
+
+  /**
+   * Provide the Firebase Auth token that must be attached to the Socket.IO
+   * handshake. If connect() was already called (and is waiting), the
+   * connection is initiated immediately with this token.
+   *
+   * Called by the bridge setAuthToken handler (T-v0.6-B07).
+   */
+  setAuthToken(token: string): void {
+    this.authToken = token;
+    if (this.pendingConnect) {
+      const { resolve, reject } = this.pendingConnect;
+      this.pendingConnect = null;
+      this._doConnect(resolve, reject);
+    }
   }
 
   get myId(): string | null {
@@ -54,22 +82,45 @@ export class SyncClient {
     }
   }
 
+  /**
+   * Initiate the Socket.IO connection.
+   *
+   * If an auth token has already been set (via setAuthToken()), the connection
+   * is established immediately with `auth: { token }` in the handshake.
+   *
+   * If no token has been set yet, the connection is queued and will be
+   * initiated automatically when setAuthToken() is called. This ensures the
+   * game never connects anonymously (AR-3, MR-7(v)).
+   */
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.socket = io(this.serverUrl, { autoConnect: false });
-
-      this.socket.on("connect", () => {
-        this.connected = true;
-        resolve();
-      });
-
-      this.socket.on("connect_error", (err: Error) => {
-        this.connected = false;
-        reject(err);
-      });
-
-      this.socket.connect();
+    return new Promise<void>((resolve, reject) => {
+      if (this.authToken !== null) {
+        this._doConnect(resolve, reject);
+      } else {
+        // Defer until the bridge delivers the token.
+        this.pendingConnect = { resolve, reject };
+      }
     });
+  }
+
+  /** Internal: create the socket and initiate the TCP connection. */
+  private _doConnect(resolve: () => void, reject: (err: Error) => void): void {
+    this.socket = io(this.serverUrl, {
+      autoConnect: false,
+      auth: { token: this.authToken ?? undefined },
+    });
+
+    this.socket.on("connect", () => {
+      this.connected = true;
+      resolve();
+    });
+
+    this.socket.on("connect_error", (err: Error) => {
+      this.connected = false;
+      reject(err);
+    });
+
+    this.socket.connect();
   }
 
   disconnect(): void {
