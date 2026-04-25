@@ -17,7 +17,7 @@ export class TimerManager {
     roomId: string,
     player1Id: string,
     player2Id: string,
-    onTimeUp?: (roomId: string) => void
+    onTimeUp?: (roomId: string, loserId: string) => void
   ): void {
     const times: Record<string, number> = {
       [player1Id]: PLAYER_TIME_MS,
@@ -42,7 +42,7 @@ export class TimerManager {
           times: { ...timerState.times },
         });
         logEvent("match_ended", { matchId: roomId, reason: "time_up", loserId });
-        onTimeUp?.(roomId);
+        onTimeUp?.(roomId, loserId);
       }
     }, 1000);
 

@@ -20,6 +20,12 @@ import {
   IDLE_SWEEP_INTERVAL_MS,
 } from "./constants";
 import { logEvent } from "./logger";
+import {
+  type PersistenceAdapter,
+  NullPersistenceAdapter,
+} from "./persistence/PersistenceAdapter";
+import { deleteAccount, tombstoneFor } from "./persistence/AccountDeletion";
+import type { MatchOutcome } from "./persistence/MatchHistoryStore";
 
 export interface ServerHandle {
   io: Server;
@@ -43,6 +49,12 @@ export interface ServerOptions {
    * `matchmake` socket event path.
    */
   requireRoomToken?: boolean;
+
+  /**
+   * T-v0.6-E06..E09, F01..F04 · Persistence stores. When omitted a no-op
+   * adapter is used so the server can be constructed in tests without Postgres.
+   */
+  persistence?: PersistenceAdapter;
 }
 
 /**
@@ -56,6 +68,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   // D07: in test environments the legacy matchmake path is still in use;
   // outside tests (and when callers don't opt out) we enforce room tokens.
   const requireRoomToken = opts.requireRoomToken ?? (process.env.NODE_ENV !== "test");
+  const persistence = opts.persistence ?? NullPersistenceAdapter;
   const httpServer = createHttpServer();
   const io = new Server(httpServer, {
     cors: { origin: "*" },
@@ -94,11 +107,22 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
 
   // T-v0.6-D09, D10 — attach HTTP matchmaking endpoints to the same httpServer.
   // Socket.IO ignores non-/socket.io/ URLs; our listener only reacts to
-  // /matchmaking/*, so other listeners are unaffected.
-  const matchmakingHttp = createMatchmakingHttpHandler({ roomManager, matchmaking });
+  // /matchmaking/* and /user/* and /account/*, so other listeners are unaffected.
+  const matchmakingHttp = createMatchmakingHttpHandler({
+    roomManager,
+    matchmaking,
+    persistence,
+  });
   httpServer.on("request", (req, res) => {
-    if (!req.url?.startsWith("/matchmaking/")) return;
-    void matchmakingHttp(req, res);
+    const url = req.url ?? "";
+    if (
+      url.startsWith("/matchmaking/") ||
+      url.startsWith("/user/") ||
+      url.startsWith("/account/")
+    ) {
+      void matchmakingHttp(req, res);
+      return;
+    }
   });
 
   // T-v0.6-D02 / D07 — Room-token handshake middleware.
@@ -139,6 +163,63 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
 
   const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** Wall-clock start times for active matches (roomId → epoch ms). */
+  const matchStartTimes = new Map<string, number>();
+
+  /**
+   * Determine match outcome from final scores and the loserTimeUp field.
+   * loserTimeUp is the socketId of the player whose clock ran out.
+   */
+  function computeOutcome(
+    room: { players: string[]; userIds: [string, string] },
+    p1Score: number,
+    p2Score: number,
+    loserTimeUp?: string
+  ): MatchOutcome {
+    if (loserTimeUp) {
+      // The loser is the player whose timer hit zero.
+      // Map socket id to slot 0/1, then invert to get winner.
+      const loserSlot = room.players.indexOf(loserTimeUp);
+      if (loserSlot === 0) return "P2_WIN";
+      if (loserSlot === 1) return "P1_WIN";
+    }
+    if (p1Score > p2Score) return "P1_WIN";
+    if (p2Score > p1Score) return "P2_WIN";
+    return "DRAW";
+  }
+
+  /**
+   * Insert a match_history row for the given room. Scores default to 0 since
+   * the server does not track client-side scores — the row captures outcome and
+   * duration; score columns can be back-filled when the protocol carries them.
+   */
+  async function recordMatchEnd(
+    roomId: string,
+    room: { players: string[]; userIds: [string, string] },
+    p1Score: number,
+    p2Score: number,
+    outcome: MatchOutcome
+  ): Promise<void> {
+    const startedAt = matchStartTimes.get(roomId) ?? Date.now();
+    matchStartTimes.delete(roomId);
+    const durationMs = Date.now() - startedAt;
+    const endedAt = new Date();
+    try {
+      await persistence.matchHistoryStore.insert({
+        matchId: roomId,
+        p1UserId: room.userIds[0] || null,
+        p2UserId: room.userIds[1] || null,
+        p1Score,
+        p2Score,
+        outcome,
+        durationMs,
+        endedAt,
+      });
+    } catch (err) {
+      console.error("[match_history] insert failed:", (err as Error).message);
+    }
+  }
+
   function roomCleanup(roomId: string): void {
     botManager.cleanup(roomId);
     rejoinManager.cleanupRoom(roomId);
@@ -161,7 +242,11 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     const firstPlayerId = Math.random() < 0.5 ? humanSocketId : BOT_ID;
     room.activePlayer = firstPlayerId;
 
-    timerManager.startRoomTimer(roomId, humanSocketId, BOT_ID, (id) => {
+    matchStartTimes.set(roomId, Date.now());
+    timerManager.startRoomTimer(roomId, humanSocketId, BOT_ID, (id, loserId) => {
+      const r = roomManager.getRoom(id);
+      const outcome = computeOutcome(r ?? { players: [humanSocketId, BOT_ID], userIds: ["", ""] }, 0, 0, loserId);
+      void recordMatchEnd(id, r ?? { players: [humanSocketId, BOT_ID], userIds: ["", ""] }, 0, 0, outcome);
       roomCleanup(id);
       timerManager.scheduleRoomClose(id);
     });
@@ -216,20 +301,30 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
             // Pick starter deterministically for reproducibility: slot 0 goes first.
             room.activePlayer = room.players[0];
           }
+          // Record match start time for duration calculation.
+          if (!matchStartTimes.has(room.id)) {
+            matchStartTimes.set(room.id, Date.now());
+          }
           if (isBotOpponent) {
             botManager.setup(room.id);
             timerManager.startRoomTimer(
               room.id,
               socket.id,
               BOT_ID,
-              (id) => {
+              (id, loserId) => {
+                const r = roomManager.getRoom(id);
+                const outcome = computeOutcome(r ?? { players: room.players, userIds: room.userIds }, 0, 0, loserId);
+                void recordMatchEnd(id, r ?? { players: room.players, userIds: room.userIds }, 0, 0, outcome);
                 roomCleanup(id);
                 timerManager.scheduleRoomClose(id);
               }
             );
           } else if (room.players.length === 2) {
             const [p0, p1] = room.players as [string, string];
-            timerManager.startRoomTimer(room.id, p0, p1, (id) => {
+            timerManager.startRoomTimer(room.id, p0, p1, (id, loserId) => {
+              const r = roomManager.getRoom(id);
+              const outcome = computeOutcome(r ?? { players: [p0, p1], userIds: room.userIds }, 0, 0, loserId);
+              void recordMatchEnd(id, r ?? { players: [p0, p1], userIds: room.userIds }, 0, 0, outcome);
               rejoinManager.cleanupRoom(id);
               timerManager.scheduleRoomClose(id);
             });
@@ -278,7 +373,13 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
         const firstPlayerId = Math.random() < 0.5 ? player1Id : player2Id;
         room.activePlayer = firstPlayerId;
 
-        timerManager.startRoomTimer(roomId, player1Id, player2Id, (id) => {
+        matchStartTimes.set(roomId, Date.now());
+        timerManager.startRoomTimer(roomId, player1Id, player2Id, (id, loserId) => {
+          const r = roomManager.getRoom(id);
+          const pls = r?.players ?? [player1Id, player2Id];
+          const uids = r?.userIds ?? (["", ""] as [string, string]);
+          const outcome = computeOutcome({ players: pls, userIds: uids }, 0, 0, loserId);
+          void recordMatchEnd(id, r ?? { players: pls, userIds: uids }, 0, 0, outcome);
           rejoinManager.cleanupRoom(id);
           timerManager.scheduleRoomClose(id);
         });
@@ -515,6 +616,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
               timerManager.stopTimer(activeRoom.id);
               room.status = "over";
               io.to(activeRoom.id).emit("game_over", {});
+              void recordMatchEnd(activeRoom.id, room, 0, 0, "DRAW");
               timerManager.scheduleRoomClose(activeRoom.id, (id) =>
                 rejoinManager.cleanupRoom(id)
               );

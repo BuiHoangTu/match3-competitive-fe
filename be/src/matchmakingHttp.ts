@@ -1,6 +1,9 @@
 /**
  * T-v0.6-D09 · POST /matchmaking/join
  * T-v0.6-D10 · POST /matchmaking/resume
+ * T-v0.6-E06 · User upsert on join (after token verify)
+ * T-v0.6-E08 · GET /user/history (auth-required, own rows only)
+ * T-v0.6-F01..F04 · POST /account/delete (auth-required, transactional)
  *
  * HTTP endpoints attached to the same httpServer as the Socket.IO engine.
  * We don't add Express — JSON body parsing is done by hand. Requests not
@@ -12,12 +15,15 @@ import { verifyToken, AuthError } from "./AuthMiddleware";
 import type { RoomManager } from "./RoomManager";
 import type { MatchmakingService, MatchmakingMode } from "./MatchmakingService";
 import { AUTH_MISSING_TOKEN, AUTH_INVALID_TOKEN } from "./constants";
+import type { PersistenceAdapter } from "./persistence/PersistenceAdapter";
+import { deleteAccount } from "./persistence/AccountDeletion";
 
 const MAX_BODY_BYTES = 4 * 1024;
 
 export interface MatchmakingHttpDeps {
   roomManager: RoomManager;
   matchmaking: MatchmakingService;
+  persistence: PersistenceAdapter;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -61,6 +67,20 @@ function isValidMode(v: unknown): v is MatchmakingMode {
 export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = req.url ?? "";
+
+    // ── GET /user/history ──────────────────────────────────────────────────────
+    if (url.startsWith("/user/history")) {
+      await handleGetHistory(deps, req, res);
+      return;
+    }
+
+    // ── POST /account/delete ───────────────────────────────────────────────────
+    if (url === "/account/delete") {
+      await handleAccountDelete(deps, req, res);
+      return;
+    }
+
+    // ── /matchmaking/* ─────────────────────────────────────────────────────────
     if (!url.startsWith("/matchmaking/")) return;
 
     if (req.method !== "POST") {
@@ -109,7 +129,7 @@ async function handleJoin(
   body: unknown,
   res: ServerResponse
 ): Promise<void> {
-  const { roomManager, matchmaking } = deps;
+  const { roomManager, matchmaking, persistence } = deps;
   const mode = (body as { mode?: unknown }).mode;
   if (!isValidMode(mode)) {
     sendJson(res, 400, { code: "BAD_MODE" });
@@ -125,6 +145,19 @@ async function handleJoin(
       message: "User already has an active match; call /matchmaking/resume instead",
     });
     return;
+  }
+
+  // T-v0.6-E06: upsert user profile (best-effort — don't fail matchmaking on DB error).
+  const rawBody = body as { displayName?: unknown; avatarUrl?: unknown; provider?: unknown };
+  try {
+    await persistence.userStore.upsert({
+      userId,
+      displayName: typeof rawBody.displayName === "string" ? rawBody.displayName : undefined,
+      avatarUrl: typeof rawBody.avatarUrl === "string" ? rawBody.avatarUrl : undefined,
+      provider: typeof rawBody.provider === "string" ? rawBody.provider : undefined,
+    });
+  } catch (err) {
+    console.error("[user_store] upsert failed (non-fatal):", (err as Error).message);
   }
 
   try {
@@ -170,6 +203,108 @@ async function handleResume(
     mode: result.mode,
     opponent: result.opponent,
   });
+}
+
+/**
+ * T-v0.6-E08 · GET /user/history?limit=20&offset=0
+ *
+ * Returns the caller's own match history. A user can NEVER query another
+ * user's history — userId is always taken from the verified token.
+ */
+async function handleGetHistory(
+  deps: MatchmakingHttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
+    return;
+  }
+
+  const token = extractBearerToken(req);
+  let userId: string;
+  try {
+    const verified = await verifyToken(token);
+    userId = verified.userId;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      sendJson(res, 401, { code: err.code, message: err.message });
+    } else {
+      sendJson(res, 401, { code: AUTH_INVALID_TOKEN, message: "Auth failed" });
+    }
+    return;
+  }
+
+  // Parse query params from URL.
+  const urlObj = new URL(req.url ?? "/user/history", "http://localhost");
+  const limit = Math.min(100, Math.max(1, parseInt(urlObj.searchParams.get("limit") ?? "20", 10) || 20));
+  const offset = Math.max(0, parseInt(urlObj.searchParams.get("offset") ?? "0", 10) || 0);
+
+  try {
+    const rows = await deps.persistence.matchHistoryStore.listForUser(userId, limit, offset);
+    sendJson(res, 200, { rows, limit, offset });
+  } catch (err) {
+    console.error("[match_history] listForUser failed:", (err as Error).message);
+    sendJson(res, 503, { code: "DB_ERROR", message: "Failed to fetch history" });
+  }
+}
+
+/**
+ * T-v0.6-F01..F04 · POST /account/delete
+ *
+ * Auth-required. Runs the GDPR deletion transaction. Rejects if the caller
+ * has an active match (AR-7 interaction).
+ */
+async function handleAccountDelete(
+  deps: MatchmakingHttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
+    return;
+  }
+
+  const token = extractBearerToken(req);
+  let userId: string;
+  try {
+    const verified = await verifyToken(token);
+    userId = verified.userId;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      sendJson(res, 401, { code: err.code, message: err.message });
+    } else {
+      sendJson(res, 401, { code: AUTH_INVALID_TOKEN, message: "Auth failed" });
+    }
+    return;
+  }
+
+  // AR-7: reject if caller has an active match.
+  const activeRoom = deps.roomManager.getRoomByUserId(userId);
+  if (activeRoom) {
+    sendJson(res, 409, {
+      code: "ACTIVE_MATCH",
+      message: "Cannot delete account while in an active match. End or forfeit the match first.",
+    });
+    return;
+  }
+
+  try {
+    const result = await deleteAccount(userId, {
+      userStore: deps.persistence.userStore,
+      matchHistoryStore: deps.persistence.matchHistoryStore,
+      // firebase-admin is optional; the HTTP layer doesn't wire it here so
+      // that unit tests don't need a Firebase project. Production deployments
+      // should pass a firebaseAuth reference through a higher-level factory.
+    });
+    sendJson(res, 200, {
+      deleted: result.deleted,
+      firebaseRevoked: result.firebaseRevoked,
+    });
+  } catch (err) {
+    console.error("[account_deletion] failed:", (err as Error).message);
+    sendJson(res, 500, { code: "DELETION_FAILED", message: "Account deletion failed" });
+  }
 }
 
 /** Expose helpers for tests. */
