@@ -5,7 +5,7 @@
 // Route summary:
 //   /sign-in          → SignInScreen          (public — no guard)
 //   /home             → HomeScreen            (guarded)
-//   /match            → placeholder           (guarded — wired in T-v0.6-A08)
+//   /match            → MatchScreen           (guarded — GameViewHandle via extra)
 //   /result           → ResultScreen          (guarded — MatchResult via extra)
 //   /account          → AccountScreen         (guarded)
 //   /legal/privacy    → PrivacyScreen         (public — no guard)
@@ -26,10 +26,12 @@ import 'models/match_result.dart';
 import 'models/user_profile.dart';
 import 'screens/account_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/match_screen.dart';
 import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
+import 'services/game_view_bootstrap.dart';
 
 // ---------------------------------------------------------------------------
 // Route name constants
@@ -133,40 +135,71 @@ GoRouter createRouter({required AuthStateInterface auth}) {
                 userId: 'unknown',
                 displayName: 'Player',
               );
+
+          // Launches the game view in the given mode and navigates to /match.
+          // The game URL is resolved via VITE_BACKEND_URL in production; in
+          // dev we use the Vite dev server. For now the assetUrl is a
+          // well-known constant — the auth token arrives later via the bridge
+          // startMatch message, which the shell sends after the game emits ready.
+          Future<void> launchGame(BuildContext ctx, String mode) async {
+            developer.log('Launching game mode=$mode', name: 'router');
+            try {
+              const assetUrl =
+                  String.fromEnvironment('GAME_URL', defaultValue: 'http://localhost:5173');
+              final handle = await loadGameView(assetUrl: assetUrl);
+              if (!ctx.mounted) return;
+              ctx.goNamed(Routes.match, extra: handle);
+            } catch (e) {
+              developer.log('loadGameView failed: $e', name: 'router');
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(content: Text('Failed to launch game: $e')),
+              );
+            }
+          }
+
           return HomeScreen(
             profile: profile,
-            onPracticePressed: () {
-              // TODO(bridge-agent): launch game view with mode=solo (T-v0.6-A08)
-              developer.log('Practice pressed (stub)', name: 'router');
-            },
-            onVsBotPressed: () {
-              // TODO(bridge-agent): launch game view with mode=pve (T-v0.6-A08)
-              developer.log('vs Bot pressed (stub)', name: 'router');
-            },
-            onVsHumanPressed: () {
-              // TODO(bridge-agent): launch game view with mode=turn_based (T-v0.6-A08)
-              developer.log('vs Human pressed (stub)', name: 'router');
-            },
+            onPracticePressed: () => launchGame(context, 'solo'),
+            onVsBotPressed: () => launchGame(context, 'pve'),
+            onVsHumanPressed: () => launchGame(context, 'turn_based'),
             onAccountPressed: () => context.goNamed(Routes.account),
           );
         },
       ),
 
       // -----------------------------------------------------------------------
-      // /match — guarded — placeholder until T-v0.6-A08 lands
+      // /match — guarded — GameViewHandle passed via GoRouter extra
       // -----------------------------------------------------------------------
       GoRoute(
         path: '/match',
         name: Routes.match,
-        builder: (context, state) => Scaffold(
-          appBar: AppBar(title: const Text('Match')),
-          body: const Center(
-            child: Text(
-              // TODO: Replace with game view widget (T-v0.6-A08a/b/c).
-              'Game view coming soon (T-v0.6-A08)',
-            ),
-          ),
-        ),
+        builder: (context, state) {
+          final handle = state.extra as GameViewHandle?;
+
+          // If no handle was passed (e.g. direct deep-link), show a loading
+          // indicator and redirect to home after a short delay.
+          if (handle == null) {
+            developer.log(
+              '/match reached without GameViewHandle — redirecting to home',
+              name: 'router',
+            );
+            Future.microtask(() {
+              if (context.mounted) context.goNamed(Routes.home);
+            });
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          return MatchScreen(
+            handle: handle,
+            onMatchLeft: () {
+              handle.transport.dispose();
+              context.goNamed(Routes.home);
+            },
+          );
+        },
       ),
 
       // -----------------------------------------------------------------------
@@ -186,8 +219,8 @@ GoRouter createRouter({required AuthStateInterface auth}) {
           return ResultScreen(
             result: result,
             onPlayAgainPressed: () {
-              // TODO(bridge-agent): reset game view and return to home (T-v0.6-A08)
-              developer.log('Play again pressed (stub)', name: 'router');
+              // Return to home — user selects mode again to start a new match.
+              developer.log('Play again pressed', name: 'router');
               context.goNamed(Routes.home);
             },
           );

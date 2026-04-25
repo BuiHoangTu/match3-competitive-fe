@@ -36,9 +36,36 @@ void main() {
         .toSet();
   });
 
-  group('bridge contract — message name parity', () {
+  // T-v0.6-I06 · Bridge-surface regression guard
+  group('bridge contract — message name parity (T-v0.6-I06)', () {
     test('BridgeMessageType.all exactly matches the canonical fixture', () {
       expect(BridgeMessageType.all, equals(fixtureNames));
+    });
+
+    test(
+        'no BridgeMessageType.all entry is missing from the fixture — '
+        'adding a message without updating the fixture fails', () {
+      final extra =
+          BridgeMessageType.all.difference(fixtureNames);
+      expect(
+        extra,
+        isEmpty,
+        reason: 'These names are in BridgeMessageType.all but not in the '
+            'fixture: $extra. Update bridge-messages.txt.',
+      );
+    });
+
+    test(
+        'no fixture entry is missing from BridgeMessageType.all — '
+        'removing a Dart constant without updating the fixture fails', () {
+      final missing =
+          fixtureNames.difference(BridgeMessageType.all);
+      expect(
+        missing,
+        isEmpty,
+        reason: 'These fixture names are not in BridgeMessageType.all: '
+            '$missing. Update bridge_messages.dart.',
+      );
     });
 
     test('has exactly six messages', () {
