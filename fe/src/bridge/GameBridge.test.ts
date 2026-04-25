@@ -161,7 +161,9 @@ describe("GameBridge", () => {
     GameBridge.emitMatchEnded("W", { self: 300, opponent: 200 });
 
     expect(postMessageSpy).toHaveBeenCalledOnce();
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect(arg).toMatchObject({
       type: BridgeMessageType.MATCH_ENDED,
       version: "1",
@@ -175,14 +177,18 @@ describe("GameBridge", () => {
   it("emitMatchEnded sends correct outcome for loss", () => {
     GameBridge.emitMatchEnded("L", { self: 100, opponent: 250 });
 
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect((arg as { payload: { outcome: string } }).payload.outcome).toBe("L");
   });
 
   it("emitMatchEnded sends correct outcome for draw", () => {
     GameBridge.emitMatchEnded("D", { self: 150, opponent: 150 });
 
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect((arg as { payload: { outcome: string } }).payload.outcome).toBe("D");
   });
 
@@ -190,7 +196,9 @@ describe("GameBridge", () => {
     GameBridge.emitReady();
 
     expect(postMessageSpy).toHaveBeenCalledOnce();
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect(arg).toMatchObject({
       type: BridgeMessageType.READY,
       version: "1",
@@ -202,7 +210,9 @@ describe("GameBridge", () => {
     GameBridge.emitAuthTokenRejected();
 
     expect(postMessageSpy).toHaveBeenCalledOnce();
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect(arg).toMatchObject({
       type: BridgeMessageType.AUTH_TOKEN_REJECTED,
       version: "1",
@@ -257,7 +267,9 @@ describe("GameBridge", () => {
     GameBridge.emitReady();
 
     expect(postMessageSpy).toHaveBeenCalledOnce();
-    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    const arg = JSON.parse(
+      (postMessageSpy.mock.calls[0][0] as { payload: string }).payload
+    ) as unknown;
     expect(arg).toMatchObject({
       type: "ready",
       version: "1",

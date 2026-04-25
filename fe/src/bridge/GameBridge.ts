@@ -142,8 +142,14 @@ function _send(msg: object): void {
 
   // iframe / Flutter Web — use window.parent.postMessage.
   // Falls back to window.postMessage if there is no parent (standalone mode).
+  // The Dart side filters incoming messages by `origin: "match3"`, so wrap
+  // outbound traffic in that envelope (matches the inbound filter at line ~184).
   const target = window !== window.parent ? window.parent : window;
-  target.postMessage(json, "*");
+  if (target !== window) {
+    target.postMessage({ origin: "match3", payload: json }, "*");
+  } else {
+    target.postMessage(json, "*");
+  }
 }
 
 // ---------------------------------------------------------------------------

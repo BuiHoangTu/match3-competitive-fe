@@ -39,12 +39,15 @@ import 'screens/home_screen.dart';
 import 'screens/match_screen.dart';
 import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
+import 'bridge/bridge_messages.dart';
 import 'screens/register_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/account_client.dart';
 import 'services/game_view_bootstrap.dart';
 import 'services/local_auth_service.dart';
+import 'errors/matchmaking_errors.dart';
+import 'services/matchmaking_client.dart';
 
 // ---------------------------------------------------------------------------
 // Route name constants
@@ -164,14 +167,14 @@ GoRouter createRouter({
   required AuthStateInterface auth,
   AccountClient? accountClient,
   LocalAuthService? localAuth,
+  MatchmakingClient? matchmaking,
 }) {
-  final account = accountClient ??
-      AccountClient(
-        baseUrl: const String.fromEnvironment(
-          'BACKEND_URL',
-          defaultValue: 'http://localhost:3001',
-        ),
-      );
+  const backendUrl = String.fromEnvironment(
+    'BACKEND_URL',
+    defaultValue: 'http://localhost:3001',
+  );
+  final account = accountClient ?? AccountClient(baseUrl: backendUrl);
+  final mm = matchmaking ?? MatchmakingClient(baseUrl: backendUrl);
 
   void showUnderDevelopment(BuildContext ctx, String which) {
     ScaffoldMessenger.of(ctx).showSnackBar(
@@ -307,20 +310,79 @@ GoRouter createRouter({
               );
 
           // Launches the game view in the given mode and navigates to /match.
-          // The game URL is resolved via VITE_BACKEND_URL in production; in
-          // dev we use the Vite dev server. For now the assetUrl is a
-          // well-known constant — the auth token arrives later via the bridge
-          // startMatch message, which the shell sends after the game emits ready.
+          //   1. Request a room token from /matchmaking/join (Bearer = session token).
+          //   2. Load the game view (iframe / WebView) with the Phaser bundle.
+          //   3. Wait for the game to emit `ready` on the bridge.
+          //   4. Send `startMatch(roomToken, expiresAt)` so the game's
+          //      SyncClient connects to the backend Socket.IO with that token.
+          //   5. Navigate to /match so the user sees the embedded view.
           Future<void> launchGame(BuildContext ctx, String mode) async {
             developer.log('Launching game mode=$mode', name: 'router');
+            final tok = auth.idToken;
+            if (tok == null) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('Please sign in first')),
+              );
+              return;
+            }
+            final mmMode = switch (mode) {
+              'pve' => MatchmakingMode.pve,
+              'turn_based' => MatchmakingMode.turnBased,
+              _ => MatchmakingMode.solo,
+            };
             try {
-              const assetUrl =
-                  String.fromEnvironment('GAME_URL', defaultValue: 'http://localhost:5173/game/');
+              final result = await mm.join(idToken: tok, mode: mmMode);
+              const assetUrl = String.fromEnvironment(
+                'GAME_URL',
+                defaultValue: 'http://localhost:5173/game/',
+              );
               final handle = await loadGameView(assetUrl: assetUrl);
+
+              // Send startMatch as soon as the game emits ready. If ready
+              // already fired before the listener attaches (rare race), send
+              // immediately as a fallback after a short timeout.
+              bool started = false;
+              void start() {
+                if (started) return;
+                started = true;
+                handle.transport.send(StartMatchMessage(
+                  roomToken: result.roomToken,
+                  expiresAt: result.expiresAt,
+                ));
+              }
+              final readySub = handle.transport.incoming.listen((msg) {
+                if (msg is ReadyMessage) start();
+              });
+              // Fallback: most game iframes load + emit ready under 1s; if
+              // not, send anyway so the connect attempt happens.
+              Future.delayed(const Duration(seconds: 2), start);
+              // Cancel ready listener once we've started — the rest of the
+              // match flow is handled by MatchScreen's own listener.
+              Future.delayed(const Duration(seconds: 5),
+                  () => unawaited(readySub.cancel()));
+
               if (!ctx.mounted) return;
               ctx.goNamed(Routes.match, extra: handle);
+            } on MatchmakingActiveRoom catch (e) {
+              developer.log('matchmaking active room: ${e.roomId}',
+                  name: 'router');
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text('You already have an active match'),
+              ));
+            } on MatchmakingAuthRejected {
+              if (!ctx.mounted) return;
+              await auth.signOut();
+              if (!ctx.mounted) return;
+              ctx.goNamed(Routes.signIn);
+            } on MatchmakingError catch (e) {
+              developer.log('matchmaking failed: $e', name: 'router');
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(content: Text('Matchmaking failed: ${e.message}')),
+              );
             } catch (e) {
-              developer.log('loadGameView failed: $e', name: 'router');
+              developer.log('launchGame failed: $e', name: 'router');
               if (!ctx.mounted) return;
               ScaffoldMessenger.of(ctx).showSnackBar(
                 SnackBar(content: Text('Failed to launch game: $e')),
