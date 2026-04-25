@@ -1,12 +1,11 @@
 // Typed result data passed from the game bridge to ResultScreen.
 // Populated from the `matchEnded` bridge message (T-v0.6-B09).
 
-/// The outcome of a completed match from the perspective of the local player.
-enum MatchOutcome {
-  win,
-  lose,
-  draw,
-}
+// Re-export the canonical [MatchOutcome] enum so callers don't need to import
+// from the bridge layer.
+export '../bridge/bridge_messages.dart' show MatchOutcome;
+
+import '../bridge/bridge_messages.dart' show MatchOutcome;
 
 /// Immutable value object carried from the bridge `matchEnded` message
 /// to [ResultScreen]. No Flutter or platform dependencies.

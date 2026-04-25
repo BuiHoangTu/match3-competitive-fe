@@ -17,6 +17,7 @@
 //   The interface is defined below; the concrete implementation is provided
 //   by sub-track C (T-v0.6-C05 auth_service.dart).
 
+import 'dart:async' show unawaited;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -31,6 +32,7 @@ import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
+import 'services/account_client.dart';
 import 'services/game_view_bootstrap.dart';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +64,14 @@ abstract class AuthStateInterface {
 
   /// Returns the currently signed-in user profile, or null when signed out.
   UserProfile? get currentUser;
+
+  /// Current Firebase idToken if signed in, otherwise null. Used by HTTP
+  /// clients (matchmaking, account-deletion) for `Authorization: Bearer`.
+  String? get idToken => null;
+
+  /// Sign out the current user. Default no-op for the stub; real
+  /// implementations clear the Firebase session and emit a null auth state.
+  Future<void> signOut() async {}
 }
 
 /// Stub implementation used until sub-track C lands.
@@ -75,6 +85,12 @@ class StubAuthState implements AuthStateInterface {
 
   @override
   UserProfile? get currentUser => null;
+
+  @override
+  String? get idToken => null;
+
+  @override
+  Future<void> signOut() async {}
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +100,19 @@ class StubAuthState implements AuthStateInterface {
 /// Creates the [GoRouter] instance for the shell.
 ///
 /// Accepts an [AuthStateInterface] so that the router can be constructed
-/// with either the real Firebase auth state or a test fake.
-GoRouter createRouter({required AuthStateInterface auth}) {
+/// with either the real Firebase auth state or a test fake. Optionally
+/// inject an [AccountClient] (defaults to one talking to `BACKEND_URL`).
+GoRouter createRouter({
+  required AuthStateInterface auth,
+  AccountClient? accountClient,
+}) {
+  final account = accountClient ??
+      AccountClient(
+        baseUrl: const String.fromEnvironment(
+          'BACKEND_URL',
+          defaultValue: 'http://localhost:3001',
+        ),
+      );
   return GoRouter(
     initialLocation: auth.isSignedIn ? '/home' : '/sign-in',
     redirect: (context, state) {
@@ -198,6 +225,10 @@ GoRouter createRouter({required AuthStateInterface auth}) {
               handle.transport.dispose();
               context.goNamed(Routes.home);
             },
+            onMatchEnded: (result) {
+              handle.transport.dispose();
+              context.goNamed(Routes.result, extra: result);
+            },
           );
         },
       ),
@@ -239,14 +270,32 @@ GoRouter createRouter({required AuthStateInterface auth}) {
                 userId: 'unknown',
                 displayName: 'Player',
               );
+          Future<void> doDelete() async {
+              final tok = auth.idToken;
+              if (tok == null) {
+                developer.log('deleteAccount: no idToken', name: 'router');
+                if (context.mounted) context.goNamed(Routes.signIn);
+                return;
+              }
+              try {
+                await account.delete(idToken: tok);
+              } on AccountDeleteError catch (e) {
+                developer.log('deleteAccount failed: $e', name: 'router');
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not delete account: ${e.message}')),
+                );
+                return;
+              }
+              await auth.signOut();
+              if (!context.mounted) return;
+              context.goNamed(Routes.signIn);
+            }
           return AccountScreen(
             profile: profile,
             onDeleteAccountConfirmed: () {
-              // TODO(auth-agent): call auth_service.dart deleteAccount() (T-v0.6-F06)
-              developer.log(
-                'Account deletion confirmed (stub)',
-                name: 'router',
-              );
+              // Fire-and-forget; doDelete handles errors + navigation.
+              unawaited(doDelete());
             },
           );
         },

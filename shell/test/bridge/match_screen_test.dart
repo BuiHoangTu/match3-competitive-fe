@@ -16,10 +16,14 @@ void main() {
   group('MatchScreen', () {
     late BridgeMockTransport transport;
     int matchLeftCalls = 0;
+    int matchEndedCalls = 0;
+    MatchOutcome? lastOutcome;
 
     setUp(() {
       transport = BridgeMockTransport();
       matchLeftCalls = 0;
+      matchEndedCalls = 0;
+      lastOutcome = null;
     });
 
     Widget buildSubject() {
@@ -30,6 +34,10 @@ void main() {
             transport: transport,
           ),
           onMatchLeft: () => matchLeftCalls++,
+          onMatchEnded: (result) {
+            matchEndedCalls++;
+            lastOutcome = result.outcome;
+          },
         ),
       );
     }
@@ -91,6 +99,22 @@ void main() {
 
       expect(transport.sent, hasLength(1));
       expect(matchLeftCalls, equals(1));
+    });
+
+    testWidgets(
+        'incoming MatchEndedMessage triggers onMatchEnded with mapped MatchResult',
+        (tester) async {
+      await tester.pumpWidget(buildSubject());
+
+      transport.inject(const MatchEndedMessage(
+        outcome: MatchOutcome.win,
+        selfScore: 1500,
+        opponentScore: 700,
+      ));
+      await tester.pump();
+
+      expect(matchEndedCalls, equals(1));
+      expect(lastOutcome, equals(MatchOutcome.win));
     });
   });
 }

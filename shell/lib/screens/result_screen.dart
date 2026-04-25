@@ -117,7 +117,7 @@ class ResultScreen extends StatelessWidget {
           Colors.green.shade600,
           Icons.emoji_events_rounded,
         ),
-      MatchOutcome.lose => (
+      MatchOutcome.loss => (
           'LOSE',
           theme.colorScheme.error,
           Icons.sentiment_dissatisfied_rounded,

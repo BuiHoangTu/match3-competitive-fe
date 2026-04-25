@@ -4,13 +4,18 @@
 /// a confirmation dialog. Confirming dispatches [RequestLeaveMatchMessage] over
 /// the bridge transport.
 ///
+/// Also subscribes to [BridgeTransport.incoming] for [MatchEndedMessage] and
+/// fires [onMatchEnded] so the caller (router) can navigate to /result.
+///
 /// Route: /match  (see router.dart)
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../bridge/bridge_messages.dart';
-import '../bridge/bridge_transport.dart';
+import '../models/match_result.dart';
 import '../services/game_view_bootstrap.dart';
 
 /// The in-match screen that hosts the embedded game view.
@@ -18,18 +23,47 @@ import '../services/game_view_bootstrap.dart';
 /// [handle] — the [GameViewHandle] returned by [loadGameView].
 /// [onMatchLeft] — called after the user confirms leaving (navigation is the
 ///   caller's responsibility — typically go_router pops /match off the stack).
-class MatchScreen extends StatelessWidget {
+/// [onMatchEnded] — called when the embedded game emits [MatchEndedMessage];
+///   the caller should navigate to the result screen with the supplied
+///   [MatchResult].
+class MatchScreen extends StatefulWidget {
   const MatchScreen({
     super.key,
     required this.handle,
     required this.onMatchLeft,
+    required this.onMatchEnded,
   });
 
-  /// The active game view handle (widget + transport).
   final GameViewHandle handle;
-
-  /// Called after the user confirms the leave-match dialog.
   final VoidCallback onMatchLeft;
+  final ValueChanged<MatchResult> onMatchEnded;
+
+  @override
+  State<MatchScreen> createState() => _MatchScreenState();
+}
+
+class _MatchScreenState extends State<MatchScreen> {
+  StreamSubscription<BridgeMessage>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.handle.transport.incoming.listen((msg) {
+      if (msg is MatchEndedMessage) {
+        widget.onMatchEnded(MatchResult(
+          outcome: msg.outcome,
+          selfScore: msg.selfScore,
+          opponentScore: msg.opponentScore,
+        ));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +81,7 @@ class MatchScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: handle.widget,
+      body: widget.handle.widget,
     );
   }
 
@@ -79,8 +113,8 @@ class MatchScreen extends StatelessWidget {
     );
 
     if (confirmed == true) {
-      handle.transport.send(const RequestLeaveMatchMessage());
-      onMatchLeft();
+      widget.handle.transport.send(const RequestLeaveMatchMessage());
+      widget.onMatchLeft();
     }
   }
 }
