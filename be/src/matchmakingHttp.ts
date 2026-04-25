@@ -17,6 +17,7 @@ import type { MatchmakingService, MatchmakingMode } from "./MatchmakingService";
 import { AUTH_MISSING_TOKEN, AUTH_INVALID_TOKEN } from "./constants";
 import type { PersistenceAdapter } from "./persistence/PersistenceAdapter";
 import { deleteAccount } from "./persistence/AccountDeletion";
+import * as metrics from "./metrics";
 
 const MAX_BODY_BYTES = 4 * 1024;
 
@@ -297,6 +298,10 @@ async function handleAccountDelete(
       // that unit tests don't need a Firebase project. Production deployments
       // should pass a firebaseAuth reference through a higher-level factory.
     });
+    if (result.deleted) {
+      // T-v1.0-09: count successful deletions only.
+      metrics.increment("account_deletion_count");
+    }
     sendJson(res, 200, {
       deleted: result.deleted,
       firebaseRevoked: result.firebaseRevoked,

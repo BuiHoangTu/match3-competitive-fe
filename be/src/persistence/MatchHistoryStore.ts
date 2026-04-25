@@ -12,6 +12,7 @@
  */
 
 import { getPool } from "../db";
+import * as metrics from "../metrics";
 
 export type MatchOutcome = "P1_WIN" | "P2_WIN" | "DRAW";
 
@@ -249,6 +250,9 @@ export class BufferedMatchHistoryStore implements MatchHistoryStore {
     while (this.pending.length > this.cap) {
       this.pending.shift();
       match_history_buffer_dropped_total++;
+      // T-v1.0-09: also bump the central metrics counter so an exporter
+      // sees the same value the local module logs.
+      metrics.increment("match_history_buffer_dropped_total");
       console.warn(
         `[match_history] buffer cap reached — dropping oldest insert. ` +
           `match_history_buffer_dropped_total=${match_history_buffer_dropped_total}`

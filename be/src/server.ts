@@ -26,6 +26,7 @@ import {
 } from "./persistence/PersistenceAdapter";
 import { deleteAccount, tombstoneFor } from "./persistence/AccountDeletion";
 import type { MatchOutcome } from "./persistence/MatchHistoryStore";
+import * as metrics from "./metrics";
 
 export interface ServerHandle {
   io: Server;
@@ -218,6 +219,8 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     } catch (err) {
       console.error("[match_history] insert failed:", (err as Error).message);
     }
+    // T-v1.0-09: count every match end.
+    metrics.increment("match_count");
   }
 
   function roomCleanup(roomId: string): void {
