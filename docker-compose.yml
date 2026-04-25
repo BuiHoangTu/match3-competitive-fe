@@ -58,10 +58,11 @@ services:
       context: .
       dockerfile: shell/Dockerfile
       args:
-        # Backend URL the Flutter Web build talks to from the user's browser.
-        # Override with `--build-arg BACKEND_URL=https://api.example.com` when
-        # deploying to a non-localhost host.
+        # URLs baked into the Flutter Web bundle. Override these when deploying
+        # to a non-localhost host (e.g. BACKEND_URL=https://api.example.com,
+        # GAME_URL=https://app.example.com/game/).
         BACKEND_URL: http://localhost:3001
+        GAME_URL: http://localhost:5173/game/
     ports:
       - "8080:80"
     depends_on:

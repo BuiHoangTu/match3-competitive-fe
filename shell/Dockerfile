@@ -1,6 +1,7 @@
 # Build stage - Flutter
 FROM ghcr.io/cirruslabs/flutter:stable AS builder
 ARG BACKEND_URL=http://localhost:3001
+ARG GAME_URL=http://localhost:5173/game/
 WORKDIR /app
 COPY shell/ shell/
 WORKDIR /app/shell
@@ -9,7 +10,10 @@ RUN if [ ! -f firebase_options.dart ] && [ -f firebase_options.dart.example ]; t
 RUN flutter pub get
 # T-Local-08 — bake the backend URL into the build via --dart-define so the
 # Flutter Web bundle calls the right host from the browser.
-RUN flutter build web --base-href / --dart-define=BACKEND_URL=${BACKEND_URL}
+# GAME_URL points at the Phaser bundle (served by the `frontend` service at /game/).
+RUN flutter build web --base-href / \
+    --dart-define=BACKEND_URL=${BACKEND_URL} \
+    --dart-define=GAME_URL=${GAME_URL}
 
 # Runtime stage - serve with nginx
 FROM nginx:alpine

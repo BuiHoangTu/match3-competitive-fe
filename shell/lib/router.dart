@@ -315,7 +315,7 @@ GoRouter createRouter({
             developer.log('Launching game mode=$mode', name: 'router');
             try {
               const assetUrl =
-                  String.fromEnvironment('GAME_URL', defaultValue: 'http://localhost:5173');
+                  String.fromEnvironment('GAME_URL', defaultValue: 'http://localhost:5173/game/');
               final handle = await loadGameView(assetUrl: assetUrl);
               if (!ctx.mounted) return;
               ctx.goNamed(Routes.match, extra: handle);
