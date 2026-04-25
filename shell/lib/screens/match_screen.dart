@@ -1,4 +1,5 @@
 /// T-v0.6-B06 · In-match screen
+/// T-v0.7-01 · Keyboard focus + tab order
 ///
 /// Wraps the [GameViewHandle] widget and provides a "Leave match" button with
 /// a confirmation dialog. Confirming dispatches [RequestLeaveMatchMessage] over
@@ -6,6 +7,10 @@
 ///
 /// Also subscribes to [BridgeTransport.incoming] for [MatchEndedMessage] and
 /// fires [onMatchEnded] so the caller (router) can navigate to /result.
+///
+/// Tab order: the leave button in the AppBar leading position is the sole
+/// interactive element on this screen; FocusTraversalGroup ensures it
+/// participates in keyboard traversal correctly.
 ///
 /// Route: /match  (see router.dart)
 library;
@@ -67,21 +72,29 @@ class _MatchScreenState extends State<MatchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Match'),
-        leading: Semantics(
-          label: 'Leave match',
-          button: true,
-          child: IconButton(
-            key: const Key('leave_match_button'),
-            icon: const Icon(Icons.exit_to_app_rounded),
-            tooltip: 'Leave match',
-            onPressed: () => _confirmLeave(context),
+    // T-v0.7-01: Wrap the screen in a FocusTraversalGroup so the leave button
+    // participates in the page's tab order as focus order 1.
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Match'),
+          leading: FocusTraversalOrder(
+            order: const NumericFocusOrder(1),
+            child: Semantics(
+              label: 'Leave match',
+              button: true,
+              child: IconButton(
+                key: const Key('leave_match_button'),
+                icon: const Icon(Icons.exit_to_app_rounded),
+                tooltip: 'Leave match',
+                onPressed: () => _confirmLeave(context),
+              ),
+            ),
           ),
         ),
+        body: widget.handle.widget,
       ),
-      body: widget.handle.widget,
     );
   }
 

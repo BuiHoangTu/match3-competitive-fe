@@ -1,8 +1,12 @@
 // T-v0.6-A03 — Sign-in screen UI (stubbed handlers)
+// T-v0.7-01 — Keyboard focus + tab order
 //
 // Displays Apple Sign-In and Google Sign-In buttons plus legal links.
 // Auth handlers are stubs (log + no-op). Real implementations land in
 // sub-track C (T-v0.6-C03 / T-v0.6-C04).
+//
+// Interactive elements are wrapped in a FocusTraversalGroup with
+// OrderedTraversalPolicy so Tab cycles: Apple → Google → Privacy → Terms.
 //
 // Route: /sign-in  (see router.dart)
 
@@ -45,94 +49,113 @@ class SignInScreen extends StatelessWidget {
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // App logo / title
-                Icon(
-                  Icons.games_rounded,
-                  size: 80,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Match-3 Competitive',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+            // T-v0.7-01: Group all interactive widgets with an explicit
+            // ordered traversal so Tab cycles in document order.
+            child: FocusTraversalGroup(
+              policy: OrderedTraversalPolicy(),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // App logo / title
+                  Icon(
+                    Icons.games_rounded,
+                    size: 80,
+                    color: theme.colorScheme.primary,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Sign in to play',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  const SizedBox(height: 16),
+                  Text(
+                    'Match-3 Competitive',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 48),
-
-                // Apple Sign-In button
-                Semantics(
-                  label: 'Sign in with Apple',
-                  button: true,
-                  child: _ProviderButton(
-                    key: const Key('apple_sign_in_button'),
-                    label: 'Sign in with Apple',
-                    icon: Icons.apple,
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    onPressed: onAppleSignInPressed,
+                  const SizedBox(height: 8),
+                  Text(
+                    'Sign in to play',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 48),
 
-                // Google Sign-In button
-                Semantics(
-                  label: 'Sign in with Google',
-                  button: true,
-                  child: _ProviderButton(
-                    key: const Key('google_sign_in_button'),
-                    label: 'Sign in with Google',
-                    icon: Icons.g_mobiledata_rounded,
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black87,
-                    onPressed: onGoogleSignInPressed,
-                  ),
-                ),
-
-                const SizedBox(height: 40),
-
-                // Legal links
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Semantics(
-                      label: 'Privacy Policy',
-                      link: true,
-                      child: TextButton(
-                        key: const Key('privacy_link'),
-                        onPressed: onPrivacyPressed,
-                        child: const Text('Privacy Policy'),
+                  // Apple Sign-In button — focus order 1
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(1),
+                    child: Semantics(
+                      label: 'Sign in with Apple',
+                      button: true,
+                      child: _ProviderButton(
+                        key: const Key('apple_sign_in_button'),
+                        label: 'Sign in with Apple',
+                        icon: Icons.apple,
+                        backgroundColor: Colors.black,
+                        foregroundColor: Colors.white,
+                        onPressed: onAppleSignInPressed,
                       ),
                     ),
-                    Text(
-                      '·',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                    Semantics(
-                      label: 'Terms of Service',
-                      link: true,
-                      child: TextButton(
-                        key: const Key('terms_link'),
-                        onPressed: onTermsPressed,
-                        child: const Text('Terms of Service'),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Google Sign-In button — focus order 2
+                  FocusTraversalOrder(
+                    order: const NumericFocusOrder(2),
+                    child: Semantics(
+                      label: 'Sign in with Google',
+                      button: true,
+                      child: _ProviderButton(
+                        key: const Key('google_sign_in_button'),
+                        label: 'Sign in with Google',
+                        icon: Icons.g_mobiledata_rounded,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        onPressed: onGoogleSignInPressed,
                       ),
                     ),
-                  ],
-                ),
-              ],
+                  ),
+
+                  const SizedBox(height: 40),
+
+                  // Legal links
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Privacy Policy link — focus order 3
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(3),
+                        child: Semantics(
+                          label: 'Privacy Policy',
+                          link: true,
+                          child: TextButton(
+                            key: const Key('privacy_link'),
+                            onPressed: onPrivacyPressed,
+                            child: const Text('Privacy Policy'),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '·',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                      // Terms of Service link — focus order 4
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(4),
+                        child: Semantics(
+                          label: 'Terms of Service',
+                          link: true,
+                          child: TextButton(
+                            key: const Key('terms_link'),
+                            onPressed: onTermsPressed,
+                            child: const Text('Terms of Service'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -1,4 +1,6 @@
 // T-v0.6-A10 — go_router navigation with sign-in guard
+// T-v0.7-03 — prefers-reduced-motion: routes use pageBuilder to return
+//             NoTransitionPage when MediaQuery.disableAnimations is true.
 //
 // Defines the full route table for the shell.
 //
@@ -16,6 +18,13 @@
 //   [AuthStateInterface.isSignedIn] returns false.
 //   The interface is defined below; the concrete implementation is provided
 //   by sub-track C (T-v0.6-C05 auth_service.dart).
+//
+// Reduced-motion:
+//   Every route uses [pageBuilder] instead of [builder]. The helper
+//   [_buildPage] wraps a child widget in [NoTransitionPage] when
+//   MediaQuery.disableAnimations is true, otherwise [MaterialPage].
+//   Shell-side transitions (page route animations) become instant while the
+//   game view tween animations (inside the WebView) are unaffected.
 
 import 'dart:async' show unawaited;
 import 'dart:developer' as developer;
@@ -97,6 +106,19 @@ class StubAuthState implements AuthStateInterface {
 // Router factory
 // ---------------------------------------------------------------------------
 
+/// Returns a [NoTransitionPage] when [MediaQuery.disableAnimations] is true,
+/// otherwise a [MaterialPage] with the default transition.
+///
+/// Used by every [GoRoute.pageBuilder] to honour the OS prefers-reduced-motion
+/// setting (T-v0.7-03).
+Page<void> _buildPage(BuildContext context, GoRouterState state, Widget child) {
+  final disableAnimations = MediaQuery.of(context).disableAnimations;
+  if (disableAnimations) {
+    return NoTransitionPage<void>(key: state.pageKey, child: child);
+  }
+  return MaterialPage<void>(key: state.pageKey, child: child);
+}
+
 /// Creates the [GoRouter] instance for the shell.
 ///
 /// Accepts an [AuthStateInterface] so that the router can be constructed
@@ -136,17 +158,21 @@ GoRouter createRouter({
       GoRoute(
         path: '/sign-in',
         name: Routes.signIn,
-        builder: (context, state) => SignInScreen(
-          onAppleSignInPressed: () {
-            // TODO(auth-agent): call auth_service.dart signInWithApple()
-            developer.log('Apple sign-in tapped (stub)', name: 'router');
-          },
-          onGoogleSignInPressed: () {
-            // TODO(auth-agent): call auth_service.dart signInWithGoogle()
-            developer.log('Google sign-in tapped (stub)', name: 'router');
-          },
-          onPrivacyPressed: () => context.goNamed(Routes.privacy),
-          onTermsPressed: () => context.goNamed(Routes.terms),
+        pageBuilder: (context, state) => _buildPage(
+          context,
+          state,
+          SignInScreen(
+            onAppleSignInPressed: () {
+              // TODO(auth-agent): call auth_service.dart signInWithApple()
+              developer.log('Apple sign-in tapped (stub)', name: 'router');
+            },
+            onGoogleSignInPressed: () {
+              // TODO(auth-agent): call auth_service.dart signInWithGoogle()
+              developer.log('Google sign-in tapped (stub)', name: 'router');
+            },
+            onPrivacyPressed: () => context.goNamed(Routes.privacy),
+            onTermsPressed: () => context.goNamed(Routes.terms),
+          ),
         ),
       ),
 
@@ -156,7 +182,7 @@ GoRouter createRouter({
       GoRoute(
         path: '/home',
         name: Routes.home,
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final profile = auth.currentUser ??
               const UserProfile(
                 userId: 'unknown',
@@ -185,12 +211,16 @@ GoRouter createRouter({
             }
           }
 
-          return HomeScreen(
-            profile: profile,
-            onPracticePressed: () => launchGame(context, 'solo'),
-            onVsBotPressed: () => launchGame(context, 'pve'),
-            onVsHumanPressed: () => launchGame(context, 'turn_based'),
-            onAccountPressed: () => context.goNamed(Routes.account),
+          return _buildPage(
+            context,
+            state,
+            HomeScreen(
+              profile: profile,
+              onPracticePressed: () => launchGame(context, 'solo'),
+              onVsBotPressed: () => launchGame(context, 'pve'),
+              onVsHumanPressed: () => launchGame(context, 'turn_based'),
+              onAccountPressed: () => context.goNamed(Routes.account),
+            ),
           );
         },
       ),
@@ -201,7 +231,7 @@ GoRouter createRouter({
       GoRoute(
         path: '/match',
         name: Routes.match,
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final handle = state.extra as GameViewHandle?;
 
           // If no handle was passed (e.g. direct deep-link), show a loading
@@ -214,21 +244,29 @@ GoRouter createRouter({
             Future.microtask(() {
               if (context.mounted) context.goNamed(Routes.home);
             });
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
+            return _buildPage(
+              context,
+              state,
+              const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              ),
             );
           }
 
-          return MatchScreen(
-            handle: handle,
-            onMatchLeft: () {
-              handle.transport.dispose();
-              context.goNamed(Routes.home);
-            },
-            onMatchEnded: (result) {
-              handle.transport.dispose();
-              context.goNamed(Routes.result, extra: result);
-            },
+          return _buildPage(
+            context,
+            state,
+            MatchScreen(
+              handle: handle,
+              onMatchLeft: () {
+                handle.transport.dispose();
+                context.goNamed(Routes.home);
+              },
+              onMatchEnded: (result) {
+                handle.transport.dispose();
+                context.goNamed(Routes.result, extra: result);
+              },
+            ),
           );
         },
       ),
@@ -239,7 +277,7 @@ GoRouter createRouter({
       GoRoute(
         path: '/result',
         name: Routes.result,
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           // MatchResult is passed as extra from the bridge matchEnded handler.
           final result = state.extra as MatchResult? ??
               const MatchResult(
@@ -247,13 +285,17 @@ GoRouter createRouter({
                 selfScore: 0,
                 opponentScore: 0,
               );
-          return ResultScreen(
-            result: result,
-            onPlayAgainPressed: () {
-              // Return to home — user selects mode again to start a new match.
-              developer.log('Play again pressed', name: 'router');
-              context.goNamed(Routes.home);
-            },
+          return _buildPage(
+            context,
+            state,
+            ResultScreen(
+              result: result,
+              onPlayAgainPressed: () {
+                // Return to home — user selects mode again to start a new match.
+                developer.log('Play again pressed', name: 'router');
+                context.goNamed(Routes.home);
+              },
+            ),
           );
         },
       ),
@@ -264,39 +306,44 @@ GoRouter createRouter({
       GoRoute(
         path: '/account',
         name: Routes.account,
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final profile = auth.currentUser ??
               const UserProfile(
                 userId: 'unknown',
                 displayName: 'Player',
               );
           Future<void> doDelete() async {
-              final tok = auth.idToken;
-              if (tok == null) {
-                developer.log('deleteAccount: no idToken', name: 'router');
-                if (context.mounted) context.goNamed(Routes.signIn);
-                return;
-              }
-              try {
-                await account.delete(idToken: tok);
-              } on AccountDeleteError catch (e) {
-                developer.log('deleteAccount failed: $e', name: 'router');
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not delete account: ${e.message}')),
-                );
-                return;
-              }
-              await auth.signOut();
-              if (!context.mounted) return;
-              context.goNamed(Routes.signIn);
+            final tok = auth.idToken;
+            if (tok == null) {
+              developer.log('deleteAccount: no idToken', name: 'router');
+              if (context.mounted) context.goNamed(Routes.signIn);
+              return;
             }
-          return AccountScreen(
-            profile: profile,
-            onDeleteAccountConfirmed: () {
-              // Fire-and-forget; doDelete handles errors + navigation.
-              unawaited(doDelete());
-            },
+            try {
+              await account.delete(idToken: tok);
+            } on AccountDeleteError catch (e) {
+              developer.log('deleteAccount failed: $e', name: 'router');
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Could not delete account: ${e.message}')),
+              );
+              return;
+            }
+            await auth.signOut();
+            if (!context.mounted) return;
+            context.goNamed(Routes.signIn);
+          }
+
+          return _buildPage(
+            context,
+            state,
+            AccountScreen(
+              profile: profile,
+              onDeleteAccountConfirmed: () {
+                // Fire-and-forget; doDelete handles errors + navigation.
+                unawaited(doDelete());
+              },
+            ),
           );
         },
       ),
@@ -307,7 +354,8 @@ GoRouter createRouter({
       GoRoute(
         path: '/legal/privacy',
         name: Routes.privacy,
-        builder: (context, state) => const PrivacyScreen(),
+        pageBuilder: (context, state) =>
+            _buildPage(context, state, const PrivacyScreen()),
       ),
 
       // -----------------------------------------------------------------------
@@ -316,7 +364,8 @@ GoRouter createRouter({
       GoRoute(
         path: '/legal/terms',
         name: Routes.terms,
-        builder: (context, state) => const TermsScreen(),
+        pageBuilder: (context, state) =>
+            _buildPage(context, state, const TermsScreen()),
       ),
     ],
   );

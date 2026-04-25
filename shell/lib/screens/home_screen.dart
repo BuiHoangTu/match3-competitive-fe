@@ -1,10 +1,13 @@
 // T-v0.6-A04 — Home / lobby screen (mode select)
+// T-v0.7-01 — Keyboard focus + tab order
 //
 // Displays the three game modes (Practice, vs Bot, vs Human) and a
 // user profile header (display name + avatar placeholder).
 //
 // Mode button handlers are stubs. Real navigation to the embedded game view
 // lands once T-v0.6-A08a/b/c and the bridge are complete.
+//
+// Tab order: account button (AppBar) → Practice → vs Bot → vs Human.
 //
 // Route: /home  (see router.dart)
 
@@ -45,69 +48,87 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Match-3 Competitive'),
-        actions: [
-          Semantics(
-            label: 'Account settings',
-            button: true,
-            child: IconButton(
-              key: const Key('account_button'),
-              icon: const Icon(Icons.account_circle_outlined),
-              tooltip: 'Account',
-              onPressed: onAccountPressed,
-            ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // User profile header
-              _ProfileHeader(profile: profile),
-              const SizedBox(height: 32),
-
-              Text(
-                'Choose a mode',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
+    // T-v0.7-01: The whole screen body and AppBar actions share one
+    // FocusTraversalGroup. Account button (AppBar) gets order 1; mode cards
+    // get 2–4 in document order.
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Match-3 Competitive'),
+          actions: [
+            FocusTraversalOrder(
+              order: const NumericFocusOrder(1),
+              child: Semantics(
+                label: 'Account settings',
+                button: true,
+                child: IconButton(
+                  key: const Key('account_button'),
+                  icon: const Icon(Icons.account_circle_outlined),
+                  tooltip: 'Account',
+                  onPressed: onAccountPressed,
                 ),
               ),
-              const SizedBox(height: 16),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // User profile header (not interactive)
+                _ProfileHeader(profile: profile),
+                const SizedBox(height: 32),
 
-              // Practice
-              _ModeCard(
-                key: const Key('practice_button'),
-                title: 'Practice',
-                subtitle: 'Solo play — no timer, no opponent',
-                icon: Icons.self_improvement_rounded,
-                onPressed: onPracticePressed,
-              ),
-              const SizedBox(height: 12),
+                Text(
+                  'Choose a mode',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
 
-              // vs Bot
-              _ModeCard(
-                key: const Key('vs_bot_button'),
-                title: 'vs Bot',
-                subtitle: 'Turn-based match against the AI',
-                icon: Icons.smart_toy_outlined,
-                onPressed: onVsBotPressed,
-              ),
-              const SizedBox(height: 12),
+                // Practice — focus order 2
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(2),
+                  child: _ModeCard(
+                    key: const Key('practice_button'),
+                    title: 'Practice',
+                    subtitle: 'Solo play — no timer, no opponent',
+                    icon: Icons.self_improvement_rounded,
+                    onPressed: onPracticePressed,
+                  ),
+                ),
+                const SizedBox(height: 12),
 
-              // vs Human
-              _ModeCard(
-                key: const Key('vs_human_button'),
-                title: 'vs Human',
-                subtitle: 'Online PvP — find an opponent',
-                icon: Icons.people_alt_outlined,
-                onPressed: onVsHumanPressed,
-              ),
-            ],
+                // vs Bot — focus order 3
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(3),
+                  child: _ModeCard(
+                    key: const Key('vs_bot_button'),
+                    title: 'vs Bot',
+                    subtitle: 'Turn-based match against the AI',
+                    icon: Icons.smart_toy_outlined,
+                    onPressed: onVsBotPressed,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // vs Human — focus order 4
+                FocusTraversalOrder(
+                  order: const NumericFocusOrder(4),
+                  child: _ModeCard(
+                    key: const Key('vs_human_button'),
+                    title: 'vs Human',
+                    subtitle: 'Online PvP — find an opponent',
+                    icon: Icons.people_alt_outlined,
+                    onPressed: onVsHumanPressed,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -131,6 +152,7 @@ class _ProfileHeader extends StatelessWidget {
           backgroundImage: profile.avatarUrl != null
               ? NetworkImage(profile.avatarUrl!)
               : null,
+          backgroundColor: theme.colorScheme.primaryContainer,
           child: profile.avatarUrl == null
               ? Text(
                   profile.displayName.isNotEmpty
@@ -141,7 +163,6 @@ class _ProfileHeader extends StatelessWidget {
                   ),
                 )
               : null,
-          backgroundColor: theme.colorScheme.primaryContainer,
         ),
         const SizedBox(width: 12),
         Expanded(
