@@ -7,6 +7,7 @@ import type {
   RejoinOkPayload,
   OpponentReconnectingPayload,
 } from "@match3/shared/protocol.js";
+import { GameBridge } from "../bridge/GameBridge.js";
 
 // Re-export shared types under the names used by the rest of the fe codebase
 export type OpponentMove = Move;
@@ -118,6 +119,15 @@ export class SyncClient {
     this.socket.on("connect_error", (err: Error) => {
       this.connected = false;
       reject(err);
+    });
+
+    // B10: server rejected the room token (e.g. expired mid-match).
+    // Emit authTokenRejected to the shell then disconnect — do not auto-retry.
+    // The shell is responsible for requesting a fresh token via /matchmaking/resume
+    // and re-calling startMatch.
+    this.socket.on("auth_token_rejected", () => {
+      GameBridge.emitAuthTokenRejected();
+      this.disconnect();
     });
 
     this.socket.connect();

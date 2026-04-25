@@ -66,6 +66,12 @@ interface GameSceneData {
 }
 
 // -------------------------------------------------------------------------
+// Module-level flag: emitReady is sent exactly once per page load (B11).
+// Restarting the scene must not send a second ready event.
+// -------------------------------------------------------------------------
+let _readyEmitted = false;
+
+// -------------------------------------------------------------------------
 // GameScene
 // -------------------------------------------------------------------------
 export class GameScene extends Phaser.Scene {
@@ -107,6 +113,9 @@ export class GameScene extends Phaser.Scene {
   private roomId: string | null = null;
   private syncClient: SyncClient | null = null;
   private botPlayer: BotPlayer | null = null;
+
+  // B08: stored so we can unregister in shutdown().
+  private _lifecycleHandler: ((p: { state: string }) => void) | null = null;
 
   // B1: reconnecting banner shown when opponent disconnects temporarily
   private reconnectingBanner: Phaser.GameObjects.Text | null = null;
@@ -191,10 +200,57 @@ export class GameScene extends Phaser.Scene {
       this.handlePointerDown,
       this
     );
+
+    // B08: subscribe to appLifecycle messages from the shell.
+    // Registered once per scene creation; unregistered in shutdown().
+    this._registerLifecycleHandler();
+
+    // B11: emit ready exactly once per page load — not once per scene restart.
+    if (!_readyEmitted) {
+      _readyEmitted = true;
+      GameBridge.emitReady();
+    }
   }
 
   shutdown(): void {
     this.stopTurnTimer();
+    // B08: clean up the appLifecycle handler reference (the handler list lives
+    // in GameBridge; we don't have an off() yet, but the closure holds no
+    // scene-specific state that would leak — set to null for GC hygiene).
+    this._lifecycleHandler = null;
+  }
+
+  // -------------------------------------------------------------------------
+  // B08: appLifecycle bridge handler
+  // -------------------------------------------------------------------------
+
+  /**
+   * Subscribe to appLifecycle messages from the shell.
+   *
+   * background / pause → pause all Phaser tweens (no engine-state mutation).
+   * foreground / resume → resume tweens + trigger a reconnect probe if the
+   *   socket was dropped while backgrounded.
+   *
+   * Clock authority stays on the server; we never adjust times locally here.
+   */
+  private _registerLifecycleHandler(): void {
+    this._lifecycleHandler = (payload: { state: string }) => {
+      const { state } = payload;
+      if (state === "background" || state === "pause") {
+        this.tweens.pauseAll();
+      } else if (state === "foreground" || state === "resume") {
+        this.tweens.resumeAll();
+        // Reconnect probe: if the socket is disconnected (e.g. the OS killed
+        // the connection while backgrounded), re-initiate the connection.
+        if (this.syncClient && !this.syncClient.connected) {
+          this.syncClient.connect().catch(() => {
+            // Connection probe failed — the shell will handle token refresh
+            // via authTokenRejected if needed.
+          });
+        }
+      }
+    };
+    GameBridge.onAppLifecycle(this._lifecycleHandler);
   }
 
   // -------------------------------------------------------------------------

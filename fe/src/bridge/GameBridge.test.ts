@@ -248,4 +248,30 @@ describe("GameBridge", () => {
 
     expect(postMessageSpy).toHaveBeenCalledTimes(2);
   });
+
+  // -------------------------------------------------------------------------
+  // T-v0.6-B11: emitReady sends correctly shaped message
+  // -------------------------------------------------------------------------
+
+  it("emitReady posts exactly one correctly shaped ready message", () => {
+    GameBridge.emitReady();
+
+    expect(postMessageSpy).toHaveBeenCalledOnce();
+    const arg = JSON.parse(postMessageSpy.mock.calls[0][0] as string) as unknown;
+    expect(arg).toMatchObject({
+      type: "ready",
+      version: "1",
+      payload: {},
+    });
+  });
+
+  it("emitReady called twice sends two messages (the once-only guard is in GameScene)", () => {
+    // GameBridge.emitReady() is a raw emitter; the once-only guard is the
+    // _readyEmitted module-level flag in GameScene.ts. That flag cannot be
+    // tested here without Phaser. This test documents the primitive behaviour.
+    GameBridge.emitReady();
+    GameBridge.emitReady();
+
+    expect(postMessageSpy).toHaveBeenCalledTimes(2);
+  });
 });

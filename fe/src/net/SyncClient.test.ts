@@ -4,8 +4,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock socket.io-client — use vi.hoisted so vars are available before hoisting
 // ---------------------------------------------------------------------------
 
-const { mockEmit, mockOn, mockConnect, mockDisconnect, mockIo, getListeners, resetListeners } =
-  vi.hoisted(() => {
+const {
+  mockEmit,
+  mockOn,
+  mockConnect,
+  mockDisconnect,
+  mockIo,
+  getListeners,
+  resetListeners,
+  mockEmitAuthTokenRejected,
+} = vi.hoisted(() => {
     const listeners: Record<string, ((...args: unknown[]) => void) | undefined> = {};
     const mockEmit = vi.fn();
     const mockOn = vi.fn((event: string, cb: (...args: unknown[]) => void) => {
@@ -19,6 +27,7 @@ const { mockEmit, mockOn, mockConnect, mockDisconnect, mockIo, getListeners, res
       connect: mockConnect,
       disconnect: mockDisconnect,
     }));
+    const mockEmitAuthTokenRejected = vi.fn();
     return {
       mockEmit,
       mockOn,
@@ -27,11 +36,25 @@ const { mockEmit, mockOn, mockConnect, mockDisconnect, mockIo, getListeners, res
       mockIo,
       getListeners: () => listeners,
       resetListeners: () => { for (const k of Object.keys(listeners)) delete listeners[k]; },
+      mockEmitAuthTokenRejected,
     };
   });
 
 vi.mock("socket.io-client", () => ({
   io: mockIo,
+}));
+
+// Mock GameBridge so we can assert on bridge emissions without a real window.
+vi.mock("../bridge/GameBridge.js", () => ({
+  GameBridge: {
+    emitAuthTokenRejected: mockEmitAuthTokenRejected,
+    onStartMatch: vi.fn(),
+    onAppLifecycle: vi.fn(),
+    onRequestLeaveMatch: vi.fn(),
+    init: vi.fn(),
+    _testReset: vi.fn(),
+    _testInjectMessage: vi.fn(),
+  },
 }));
 
 // Helper: trigger a registered socket event
@@ -228,5 +251,40 @@ describe("SyncClient", () => {
     trigger("connect");
     await expect(connectPromise).resolves.toBeUndefined();
     expect(client.connected).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // T-v0.6-B10: auth_token_rejected → emitAuthTokenRejected + disconnect
+  // -------------------------------------------------------------------------
+
+  // 12. auth_token_rejected emits authTokenRejected via GameBridge then disconnects
+  it("auth_token_rejected emits bridge event and disconnects socket", async () => {
+    client.startMatch("tok");
+    const p = client.connect();
+    trigger("connect");
+    await p;
+
+    mockEmitAuthTokenRejected.mockClear();
+
+    // Simulate server sending auth_token_rejected.
+    trigger("auth_token_rejected");
+
+    expect(mockEmitAuthTokenRejected).toHaveBeenCalledOnce();
+    expect(mockDisconnect).toHaveBeenCalled();
+    expect(client.connected).toBe(false);
+  });
+
+  // 13. auth_token_rejected does not auto-retry (no second io() call)
+  it("auth_token_rejected does not auto-retry — shell must call startMatch again", async () => {
+    client.startMatch("tok");
+    const p = client.connect();
+    trigger("connect");
+    await p;
+
+    const callCountBefore = mockIo.mock.calls.length;
+    trigger("auth_token_rejected");
+
+    // io() should NOT have been called again.
+    expect(mockIo.mock.calls.length).toBe(callCountBefore);
   });
 });
