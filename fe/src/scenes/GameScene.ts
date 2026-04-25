@@ -35,11 +35,33 @@ const HIGHLIGHT_ALPHA = 0.35;
 
 const DEFAULT_SEED = 12345;
 
-// Animation durations (ms)
-const SWAP_MS = 150;
-const FLASH_MS = 180;
-const FALL_MS_PER_ROW = 40;
-const APPEAR_MS = 220;
+// Animation durations (ms). Defaults; overridden when prefers-reduced-motion
+// is set (T-v0.7-04). Gameplay-critical animations (swap / flash / fall) are
+// shortened, never disabled, so tile state remains legible.
+const SWAP_MS_DEFAULT = 150;
+const FLASH_MS_DEFAULT = 180;
+const FALL_MS_PER_ROW_DEFAULT = 40;
+const APPEAR_MS_DEFAULT = 220;
+
+const REDUCED_MOTION_DIVISOR = 3; // 150ms → ~50ms etc.
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+const SWAP_MS = prefersReducedMotion()
+  ? Math.round(SWAP_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
+  : SWAP_MS_DEFAULT;
+const FLASH_MS = prefersReducedMotion()
+  ? Math.round(FLASH_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
+  : FLASH_MS_DEFAULT;
+const FALL_MS_PER_ROW = prefersReducedMotion()
+  ? Math.round(FALL_MS_PER_ROW_DEFAULT / REDUCED_MOTION_DIVISOR)
+  : FALL_MS_PER_ROW_DEFAULT;
+const APPEAR_MS = prefersReducedMotion()
+  ? Math.round(APPEAR_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
+  : APPEAR_MS_DEFAULT;
 
 // 5 minutes per player in turn-based / pve modes
 const TURN_TIME_MS = 5 * 60 * 1000;
@@ -87,6 +109,11 @@ export class GameScene extends Phaser.Scene {
   private state: GameSceneState = "idle";
   private selected: { row: number; col: number } | null = null;
   private selectionOverlay: Phaser.GameObjects.Rectangle | null = null;
+
+  // T-v0.7-02: Keyboard cursor — separate from `selected` so the cursor moves
+  // with arrow keys without committing a selection until Enter is pressed.
+  private cursor: { row: number; col: number } = { row: 0, col: 0 };
+  private cursorOverlay: Phaser.GameObjects.Rectangle | null = null;
 
   // Mode & turn state
   private mode: GameMode = "solo";
@@ -200,6 +227,15 @@ export class GameScene extends Phaser.Scene {
       this.handlePointerDown,
       this
     );
+
+    // T-v0.7-02: keyboard input. Arrow keys move the cursor; Enter / Space
+    // confirms a selection or a swap target.
+    this.input.keyboard?.on("keydown-LEFT", () => this.moveCursor(0, -1));
+    this.input.keyboard?.on("keydown-RIGHT", () => this.moveCursor(0, 1));
+    this.input.keyboard?.on("keydown-UP", () => this.moveCursor(-1, 0));
+    this.input.keyboard?.on("keydown-DOWN", () => this.moveCursor(1, 0));
+    this.input.keyboard?.on("keydown-ENTER", () => this.handleCursorConfirm());
+    this.input.keyboard?.on("keydown-SPACE", () => this.handleCursorConfirm());
 
     // B08: subscribe to appLifecycle messages from the shell.
     // Registered once per scene creation; unregistered in shutdown().
@@ -449,7 +485,8 @@ export class GameScene extends Phaser.Scene {
     } else {
       const label =
         this.mode === "pve" ? "Bot's Turn..." : "Opponent's Turn";
-      this.turnIndicator.setText(label).setColor("#888888");
+      // T-v0.7-06: bump waiting-state grey to clear AA against #1a1a2e bg.
+      this.turnIndicator.setText(label).setColor("#b0b0b0");
     }
   }
 
@@ -551,6 +588,61 @@ export class GameScene extends Phaser.Scene {
   private clearSelection(): void {
     this.selected = null;
     this.selectionOverlay?.setVisible(false);
+  }
+
+  // -------------------------------------------------------------------------
+  // T-v0.7-02 · Keyboard cursor + confirm-to-swap
+  // -------------------------------------------------------------------------
+
+  /** Move the keyboard cursor by (dr, dc) within board bounds. */
+  private moveCursor(dr: number, dc: number): void {
+    if (this.state !== "idle") return;
+    const { width, height } = this.ctrl.board;
+    const nextRow = Math.max(0, Math.min(height - 1, this.cursor.row + dr));
+    const nextCol = Math.max(0, Math.min(width - 1, this.cursor.col + dc));
+    this.cursor = { row: nextRow, col: nextCol };
+    this.renderCursor();
+  }
+
+  /** Render or update the cursor overlay (ring) at the current cursor cell. */
+  private renderCursor(): void {
+    const { x, y } = this.cellToPixel(this.cursor.row, this.cursor.col);
+    if (!this.cursorOverlay) {
+      this.cursorOverlay = this.add
+        .rectangle(x, y, TILE_SIZE, TILE_SIZE)
+        .setOrigin(0, 0)
+        .setStrokeStyle(3, 0xffffff, 0.9)
+        .setDepth(9);
+    } else {
+      this.cursorOverlay.setPosition(x, y).setVisible(true);
+    }
+  }
+
+  /** Enter / Space pressed: select cursor cell, or confirm a swap target. */
+  private handleCursorConfirm(): void {
+    if (this.state !== "idle") return;
+    if (this.mode !== "solo" && !this.myTurn) return;
+    const { row, col } = this.cursor;
+    if (this.selected === null) {
+      this.selectTile(row, col);
+      this.renderCursor();
+      return;
+    }
+    const { row: selRow, col: selCol } = this.selected;
+    if (selRow === row && selCol === col) {
+      this.clearSelection();
+      return;
+    }
+    const dr = Math.abs(selRow - row);
+    const dc = Math.abs(selCol - col);
+    if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+      this.clearSelection();
+      void this.doSwap(selRow, selCol, row, col);
+    } else {
+      this.clearSelection();
+      this.selectTile(row, col);
+      this.renderCursor();
+    }
   }
 
   // -------------------------------------------------------------------------

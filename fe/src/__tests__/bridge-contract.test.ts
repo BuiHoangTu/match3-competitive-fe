@@ -45,21 +45,21 @@ describe("bridge contract — message name parity (T-v0.6-I06)", () => {
     const extra = Object.values(BridgeMessageType).filter(
       (name) => !fixtureSet.has(name)
     );
-    expect(extra).toEqual(
-      [],
+    expect(
+      extra,
       `These BridgeMessageType entries are not in bridge-messages.txt: ${extra.join(", ")}. ` +
         "Update shared/src/__tests__/bridge-messages.txt and shell/test/bridge/bridge-messages.txt."
-    );
+    ).toEqual([]);
   });
 
   it("no fixture entry is missing from BridgeMessageType — removing without TS update fails", () => {
-    const tsSet = new Set(Object.values(BridgeMessageType));
+    const tsSet = new Set(Object.values(BridgeMessageType)) as Set<string>;
     const missing = readFixture().filter((name) => !tsSet.has(name));
-    expect(missing).toEqual(
-      [],
+    expect(
+      missing,
       `These fixture names are not in BridgeMessageType: ${missing.join(", ")}. ` +
         "Update shared/src/bridge.ts to add the missing entries."
-    );
+    ).toEqual([]);
   });
 
   it("has exactly six messages (three shell→game, three game→shell)", () => {
