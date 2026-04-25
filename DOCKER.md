@@ -1,21 +1,40 @@
-# Docker Setup for Local Development
+# Docker Setup — spare-PC / VM deployment
 
-This project can be run entirely in Docker for easy local testing without installing Node.js, Flutter SDK, or other dependencies.
+`docker compose up` brings up a fully playable Match-3 stack on a single host.
+**No Firebase, Apple, or Google account required** — the stack ships with
+local-account auth (username + password) that runs end-to-end.
 
 ## Quick Start
 
 ```bash
-# Build all services
 docker compose build
-
-# Start all services (postgres, backend, frontend, shell)
 docker compose up
-
-# Access the app
-- Flutter shell + embedded game: http://localhost:8080
-- Standalone Phaser game:        http://localhost:5173
-- Backend WebSocket:             http://localhost:3001
 ```
+
+Then open **http://localhost:8080** in a browser. Tap "Create new account",
+register with any username + password, and play.
+
+| Endpoint | What |
+|---|---|
+| http://localhost:8080 | Flutter shell + embedded game (the user-facing UI) |
+| http://localhost:5173 | Standalone Phaser game (dev-only convenience) |
+| http://localhost:3001/healthz | Backend health probe |
+
+The first time, `docker compose build` takes ~5 min (Flutter SDK pull). After
+that, `docker compose up` boots in under 30 seconds.
+
+## What's wired
+
+- **Local accounts** (T-Local): `/auth/register` + `/auth/login` issue
+  HMAC-signed session tokens that the backend's existing matchmaking + room-token
+  flow accepts as authentication.
+- **Apple + Google SSO buttons** are visible but show "Sign-in is under
+  development" — they will activate once the operator completes
+  [ops/v1-launch-checklist.md § 1](ops/v1-launch-checklist.md).
+- **Postgres** is real; migrations run automatically on backend start. Data
+  survives `docker compose restart` but is wiped by `docker compose down -v`.
+- **The whole stack runs on one host.** No horizontal scaling. Suitable for a
+  spare PC or single VM.
 
 ## Services
 
@@ -36,22 +55,48 @@ The `shell` service serves both the Flutter shell and the embedded Phaser game f
 
 Environment variables (set in `docker-compose.yml` or `.env`):
 
-- `DATABASE_URL` — PostgreSQL connection string (default: `postgresql://match3:match3dev@postgres:5432/match3`)
-- `VITE_BACKEND_URL` — Backend URL passed to frontend build (default: `http://localhost:3001`)
-- `GOOGLE_APPLICATION_CREDENTIALS` — Path to Firebase service-account key (optional; sign-in won't work without it)
+| Var | Default | Notes |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://match3:match3dev@postgres:5432/match3` | Postgres URL the backend talks to |
+| `ROOM_TOKEN_SECRET` | dev placeholder | Replace in any non-local deployment with `openssl rand -hex 32` |
+| `SESSION_TOKEN_SECRET` | dev placeholder | Same — `openssl rand -hex 32` |
+| `BACKEND_URL` (build arg) | `http://localhost:3001` | Backend URL baked into the Flutter Web build |
+| `VITE_BACKEND_URL` (build arg) | `http://localhost:3001` | Same for the standalone Phaser bundle |
+| `GOOGLE_APPLICATION_CREDENTIALS` | unset | Optional; only needed when SSO is enabled |
 
-## Firebase Configuration
+## Deploying on a remote host
 
-The Flutter shell requires `firebase_options.dart` to compile. If the file doesn't exist:
-- The Dockerfile falls back to `firebase_options.dart.example` (stubs Firebase)
-- The app will load but sign-in won't work
-- Socket.IO authentication will fail (backend needs real Firebase credentials)
+```bash
+# On the host (e.g. a spare PC or VM with Docker installed)
+git clone <repo>
+cd match3-competitive
 
-To enable real Firebase:
-1. Run `shell/` setup task T-v0.6-C01 (create Firebase project)
-2. Generate `shell/firebase_options.dart` via `flutterfire configure`
-3. Set `GOOGLE_APPLICATION_CREDENTIALS` to your service-account key path
-4. Rebuild Docker images
+# Set strong secrets (write these into docker-compose.override.yml or .env)
+export ROOM_TOKEN_SECRET=$(openssl rand -hex 32)
+export SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
+
+# Build with the host's public URL baked into the Flutter bundle
+docker compose build \
+  --build-arg BACKEND_URL=https://your-host.example.com:3001
+docker compose up -d
+```
+
+For TLS, run a reverse proxy (nginx, Caddy, traefik) in front of ports 8080
+and 3001. The backend ports must remain reachable from the user's browser
+because the embedded game opens a Socket.IO connection directly.
+
+## Enabling Apple + Google SSO later
+
+Local accounts and SSO **coexist** — the same userId space serves both. To
+turn SSO on:
+
+1. Complete [ops/v1-launch-checklist.md § 1](ops/v1-launch-checklist.md) (paid
+   developer accounts, Firebase project, OAuth client IDs).
+2. Generate `shell/firebase_options.dart` via `flutterfire configure`.
+3. Set `GOOGLE_APPLICATION_CREDENTIALS` for the backend.
+4. Replace the SSO "Under development" snackbar in `shell/lib/router.dart` with
+   actual provider calls (T-v0.6-C03/C04 hooks already exist in `shell/lib/services/`).
+5. Rebuild + redeploy.
 
 ## Debugging
 

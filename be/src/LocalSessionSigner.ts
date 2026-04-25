@@ -27,11 +27,21 @@ let _secret: Buffer | null = null;
  * from an env var (SESSION_TOKEN_SECRET). In dev/tests, omit and a fresh
  * random secret is generated per process boot.
  */
-export function initSessionSecret(secretHex?: string): void {
-  if (secretHex) {
-    const buf = Buffer.from(secretHex, "hex");
+export function initSessionSecret(secret?: string): void {
+  if (secret && secret.length > 0) {
+    // Accept either a hex string or a raw passphrase. Hex is preferred for
+    // production (use `openssl rand -hex 32`); a passphrase ≥ 16 chars is
+    // accepted as-is for dev convenience.
+    let buf: Buffer;
+    if (/^[0-9a-fA-F]+$/.test(secret) && secret.length >= 32) {
+      buf = Buffer.from(secret, "hex");
+    } else {
+      buf = Buffer.from(secret, "utf8");
+    }
     if (buf.length < 16) {
-      throw new Error("SESSION_TOKEN_SECRET must be ≥ 16 bytes (32 hex chars)");
+      throw new Error(
+        "SESSION_TOKEN_SECRET must be ≥ 16 bytes (32 hex chars or 16 utf8 chars)"
+      );
     }
     _secret = buf;
   } else {

@@ -34,6 +34,15 @@ services:
     environment:
       DATABASE_URL: postgresql://match3:match3dev@postgres:5432/match3
       PORT: 3001
+      # Local dev secrets only — replace with `openssl rand -hex 32` values
+      # for any non-local deployment.
+      ROOM_TOKEN_SECRET: dev_room_token_secret_change_me_use_openssl_rand_hex_32
+      SESSION_TOKEN_SECRET: dev_session_token_secret_change_me_use_openssl_rand_hex_32
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   frontend:
     build:
@@ -48,6 +57,11 @@ services:
     build:
       context: .
       dockerfile: shell/Dockerfile
+      args:
+        # Backend URL the Flutter Web build talks to from the user's browser.
+        # Override with `--build-arg BACKEND_URL=https://api.example.com` when
+        # deploying to a non-localhost host.
+        BACKEND_URL: http://localhost:3001
     ports:
       - "8080:80"
     depends_on:
