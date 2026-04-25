@@ -68,18 +68,18 @@ STOP and hand back to a human reviewer if any of these occur:
 
 ---
 
-## Status snapshot (as of 2026-04-24)
+## Status snapshot (as of 2026-04-25)
 
 | Milestone | Status | Notes |
 |---|---|---|
 | v0.1 Engine | DONE | `shared/engine/` — Board, MatchEngine, mulberry32 RNG, unit tests green |
 | v0.2 Practice mode | DONE | GameLoopController + TileSpritePool + GameScene wired; tweens in place |
-| v0.3 vs Bot | DONE | LobbyScene, ResultScene, BotPlayer, local TimerManager |
+| v0.3 vs Bot | DONE | LobbyScene, ResultScene, BotPlayer, local TimerManager — scenes since retired in A09 |
 | v0.4 vs Human online | DONE | `be/` server with WaitingQueue, RoomManager, Validator, TimerManager, BotManager; SyncClient |
-| v0.5 Robustness | DONE | All T-v0.5-01..04 + T-v0.5-10..15 shipped; 36 be tests green; NFR-4 ≤2s, NFR-3/6 100-iter desync=0 |
-| v0.6 Flutter shell + Accounts | PARTIAL | Sub-tracks A, B, C (partial), D, E landed on master; F–I still open |
-| v0.7 Accessibility | TODO | Deferred until Flutter shell lands so audit runs against final UI |
-| v1.0 Public launch | TODO | Infra + store releases + observability |
+| v0.5 Robustness | DONE | All T-v0.5-01..04 + T-v0.5-10..15 shipped; NFR-4 ≤2s, NFR-3/6 100-iter desync=0 |
+| v0.6 Flutter shell + Accounts | CODE-COMPLETE | All A–G code-level tasks shipped. Remaining: C01/C02 (Firebase + Apple capability), H-track (store enrolment), I01/I03/I04 (device verification). 124 be + 74 fe + 126 shell tests green. |
+| v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
+| v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
 
 ---
 
@@ -176,7 +176,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A01** (TODO) · Scaffold Flutter project
+**T-v0.6-A01** (DONE) · Scaffold Flutter project
 - **Req:** NFR-11 · **Size:** M · **Deps:** —
 - **Context:** [system-design § 2.1](system-design.md#21-client-shell-and-embedded-game-view); [planning § 4.2](planning.md#42-recommended-team-2--3-people). Flutter targets iOS + Android + Web.
 - **Inputs:** None (greenfield).
@@ -188,7 +188,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A02** (TODO) · Project layout
+**T-v0.6-A02** (DONE) · Project layout
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-A01
 - **Context:** [system-design § 2.1 responsibilities list](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `shell/` from A01.
@@ -200,7 +200,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A03** (TODO) · Sign-in screen UI (stubbed handlers)
+**T-v0.6-A03** (DONE) · Sign-in screen UI (stubbed handlers)
 - **Req:** AR-1, AR-2, AR-5 · **Size:** M · **Deps:** T-v0.6-A02
 - **Context:** [requirement § AR-1/AR-2/AR-5](requirement.md#3-identity--account-requirements); [system-design § 2.1](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `shell/lib/screens/`.
@@ -213,7 +213,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A04** (TODO) · Home / lobby screen (mode select)
+**T-v0.6-A04** (DONE) · Home / lobby screen (mode select)
 - **Req:** FR-5 · **Size:** M · **Deps:** T-v0.6-A02
 - **Context:** [requirement § FR-5](requirement.md#1-functional-requirements--gameplay--modes); [system-design § 3 "v0.6 evolution"](system-design.md#3-layered-component-view-embedded-game-view).
 - **Inputs:** `shell/lib/screens/`.
@@ -225,7 +225,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A05** (TODO) · Account screen (deletion UI)
+**T-v0.6-A05** (DONE) · Account screen (deletion UI)
 - **Req:** AR-4 · **Size:** M · **Deps:** T-v0.6-A02
 - **Context:** [requirement § AR-4](requirement.md#3-identity--account-requirements); App Store Guideline 5.1.1(v) per [planning § 5](planning.md#5-risks--how-each-milestone-mitigates-them).
 - **Inputs:** `shell/lib/screens/`.
@@ -238,7 +238,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A06** (TODO) · Privacy policy + ToS screens
+**T-v0.6-A06** (DONE) · Privacy policy + ToS screens
 - **Req:** AR-5 · **Size:** S · **Deps:** T-v0.6-A02
 - **Context:** [requirement § AR-5](requirement.md#3-identity--account-requirements).
 - **Inputs:** Placeholder Markdown content (or external URL).
@@ -250,7 +250,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A07** (TODO) · Native result screen
+**T-v0.6-A07** (DONE) · Native result screen
 - **Req:** FR-7 · **Size:** M · **Deps:** T-v0.6-A02
 - **Context:** [system-design § 3 "v0.6 evolution"](system-design.md#3-layered-component-view-embedded-game-view); [requirement § FR-7](requirement.md#1-functional-requirements--gameplay--modes).
 - **Inputs:** `shell/lib/screens/`, bridge contract (B01) once available.
@@ -262,7 +262,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A08a** (TODO) · Game-view bootstrap module *(split from original A08)*
+**T-v0.6-A08a** (DONE) · Game-view bootstrap module *(split from original A08)*
 - **Req:** NFR-11 · **Size:** S · **Deps:** T-v0.6-A02
 - **Context:** [system-design § 2.1 table](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `shell/lib/services/`.
@@ -274,7 +274,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A08b** (TODO) · iOS/Android WebView embedding *(split from original A08)*
+**T-v0.6-A08b** (DONE) · iOS/Android WebView embedding *(split from original A08)*
 - **Req:** NFR-11 · **Size:** M · **Deps:** T-v0.6-A08a
 - **Context:** [system-design § 2.1 embedding table](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `webview_flutter` package, A08a.
@@ -286,7 +286,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A08c** (TODO) · Flutter Web iframe embedding *(split from original A08)*
+**T-v0.6-A08c** (DONE) · Flutter Web iframe embedding *(split from original A08)*
 - **Req:** NFR-11 · **Size:** M · **Deps:** T-v0.6-A08a
 - **Context:** [system-design § 2.1 embedding table](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `HtmlElementView` API, A08a.
@@ -297,7 +297,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A09** (TODO) · Retire Phaser `LobbyScene` and `ResultScene`
+**T-v0.6-A09** (DONE) · Retire Phaser `LobbyScene` and `ResultScene`
 - **Req:** — · **Size:** M · **Deps:** T-v0.6-A04, T-v0.6-A07, T-v0.6-A08b, T-v0.6-A08c, T-v0.6-B12
 - **Context:** [system-design § 3 "v0.6 evolution"](system-design.md#3-layered-component-view-embedded-game-view).
 - **Inputs:** `fe/src/scenes/LobbyScene.ts`, `fe/src/scenes/ResultScene.ts`, `fe/src/main.ts` (Phaser bootstrap).
@@ -310,7 +310,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-A10** (TODO) · Flutter navigation (go_router)
+**T-v0.6-A10** (DONE) · Flutter navigation (go_router)
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-A03, T-v0.6-A04, T-v0.6-A05, T-v0.6-A06, T-v0.6-A07
 - **Context:** [system-design § 2.1 responsibilities](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** All shell screens from A03–A07.
@@ -352,7 +352,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B02** (TODO) · iOS/Android `JavaScriptChannel` transport
+**T-v0.6-B02** (DONE) · iOS/Android `JavaScriptChannel` transport
 - **Req:** — · **Size:** M · **Deps:** T-v0.6-A08b, T-v0.6-B01
 - **Context:** [system-design § 2.1 bridge transport column](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** `webview_flutter`, bridge types from B01.
@@ -364,7 +364,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B03** (TODO) · Flutter Web `postMessage` transport
+**T-v0.6-B03** (DONE) · Flutter Web `postMessage` transport
 - **Req:** — · **Size:** M · **Deps:** T-v0.6-A08c, T-v0.6-B01
 - **Context:** [system-design § 2.1](system-design.md#21-client-shell-and-embedded-game-view).
 - **Inputs:** Bridge types from B01.
@@ -376,7 +376,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B04** (TODO) · Shell → `startMatch`
+**T-v0.6-B04** (DONE) · Shell → `startMatch`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03, T-v0.6-B01b, T-v0.6-D09
 - **Context:** [system-design § 2.2 and § 2.3](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** Bridge transport from B02/B03, room token from matchmaking endpoint (D09).
@@ -389,7 +389,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B05** (TODO) · Shell → `appLifecycle`
+**T-v0.6-B05** (DONE) · Shell → `appLifecycle`
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** Flutter `WidgetsBindingObserver`.
@@ -400,7 +400,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B06** (TODO) · Shell → `requestLeaveMatch`
+**T-v0.6-B06** (DONE) · Shell → `requestLeaveMatch`
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** Home/match screen UI.
@@ -423,7 +423,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B08** (TODO) · Game → lifecycle pause/resume handling
+**T-v0.6-B08** (DONE) · Game → lifecycle pause/resume handling
 - **Req:** NFR-3 · **Size:** S · **Deps:** T-v0.6-B05
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** `GameScene`, `SyncClient`.
@@ -445,7 +445,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B10** (TODO) · Game → `authTokenRejected`
+**T-v0.6-B10** (DONE) · Game → `authTokenRejected`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03, T-v0.6-D06
 - **Context:** [system-design § 2.3 token refresh flow](system-design.md#23-identity-data-flow).
 - **Inputs:** `SyncClient`, server `auth_token_rejected` event.
@@ -456,7 +456,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B11** (TODO) · Game → `ready`
+**T-v0.6-B11** (DONE) · Game → `ready`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B02, T-v0.6-B03
 - **Context:** [system-design § 2.2 game-initiated messages](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** `fe/src/main.ts` Phaser bootstrap.
@@ -467,7 +467,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-B12** (TODO) · Bridge integration test (deterministic replay)
+**T-v0.6-B12** (DONE) · Bridge integration test (deterministic replay)
 - **Req:** AR-3 · **Size:** M · **Deps:** T-v0.6-B04 through T-v0.6-B11
 - **Context:** [system-design § 2.2 and § 8 "Failure modes"](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** All bridge pieces.
@@ -507,7 +507,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C03** (TODO) · Apple Sign-In plugin
+**T-v0.6-C03** (DONE) · Apple Sign-In plugin
 - **Req:** AR-2 · **Size:** M · **Deps:** T-v0.6-C02
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `sign_in_with_apple` Flutter plugin.
@@ -519,7 +519,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C04** (TODO) · Google Sign-In plugin
+**T-v0.6-C04** (DONE) · Google Sign-In plugin
 - **Req:** AR-2 · **Size:** M · **Deps:** T-v0.6-C01
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `google_sign_in` plugin.
@@ -531,7 +531,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C05** (TODO) · Exchange credential for Firebase id_token
+**T-v0.6-C05** (DONE) · Exchange credential for Firebase id_token
 - **Req:** AR-2, AR-3 · **Size:** M · **Deps:** T-v0.6-C03, T-v0.6-C04
 - **Context:** [system-design § 2.3 step 3](system-design.md#23-identity-data-flow).
 - **Inputs:** `firebase_auth` plugin; credentials from C03/C04.
@@ -543,7 +543,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C06** (TODO) · Token refresh scheduling
+**T-v0.6-C06** (DONE) · Token refresh scheduling
 - **Req:** AR-3 · **Size:** M · **Deps:** T-v0.6-C05, T-v0.6-B04
 - **Context:** [system-design § 2.3 token refresh sequence](system-design.md#23-identity-data-flow).
 - **Inputs:** `AuthService`, bridge `setAuthToken` helper.
@@ -554,7 +554,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C07** (TODO) · Sign-out path
+**T-v0.6-C07** (DONE) · Sign-out path
 - **Req:** AR-1 · **Size:** S · **Deps:** T-v0.6-C05
 - **Context:** [requirement § AR-1](requirement.md#3-identity--account-requirements).
 - **Inputs:** `AuthService`.
@@ -565,7 +565,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-C08** (TODO) · Sign-in resilience
+**T-v0.6-C08** (DONE) · Sign-in resilience
 - **Req:** AR-2 · **Size:** S · **Deps:** T-v0.6-C03, T-v0.6-C04
 - **Context:** [system-design § 8 "Failure modes"](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `AuthService`.
@@ -605,7 +605,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D03** (TODO) · Attach userId to socket context
+**T-v0.6-D03** (DONE) · Attach userId to socket context
 - **Req:** MR-7(v) · **Size:** S · **Deps:** T-v0.6-D02
 - **Context:** [system-design § 2 High-level architecture](system-design.md#2-high-level-architecture).
 - **Inputs:** Socket.IO socket object.
@@ -616,7 +616,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D04** (TODO) · Validator userId slot check
+**T-v0.6-D04** (DONE) · Validator userId slot check
 - **Req:** MR-7(v) · **Size:** S · **Deps:** T-v0.6-D03, T-v0.6-G01
 - **Context:** [requirement § MR-7 clause v](requirement.md#2-multiplayer--networking-requirements).
 - **Inputs:** `be/src/validator.ts`.
@@ -627,7 +627,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D05** (TODO) · In-memory token cache
+**T-v0.6-D05** (DONE) · In-memory token cache
 - **Req:** NFR-2 · **Size:** S · **Deps:** T-v0.6-D01
 - **Context:** [system-design § 8 security posture](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `AuthMiddleware`.
@@ -638,7 +638,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D06** (TODO) · Emit `auth_token_rejected`
+**T-v0.6-D06** (DONE) · Emit `auth_token_rejected`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-D03
 - **Context:** [system-design § 2.3 token refresh sequence](system-design.md#23-identity-data-flow).
 - **Inputs:** `be/src/server.ts`, validator.
@@ -649,7 +649,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D07** (TODO) · Reject tokenless sockets
+**T-v0.6-D07** (DONE) · Reject tokenless sockets
 - **Req:** AR-1 · **Size:** S · **Deps:** T-v0.6-D02
 - **Context:** [requirement § AR-1](requirement.md#3-identity--account-requirements).
 - **Inputs:** Handshake middleware.
@@ -660,7 +660,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D08** (TODO) · Server-side auth unit tests
+**T-v0.6-D08** (DONE) · Server-side auth unit tests
 - **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** T-v0.6-D01
 - **Context:** [system-design § 8 security posture](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `AuthMiddleware`.
@@ -728,7 +728,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E01** (TODO) · DB client + migrator choice
+**T-v0.6-E01** (DONE) · DB client + migrator choice
 - **Req:** — · **Size:** S · **Deps:** —
 - **Context:** [system-design § 7 tech stack](system-design.md#7-technology-stack).
 - **Inputs:** Existing `be/` package.
@@ -739,7 +739,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E02** (TODO) · Local Postgres via docker-compose
+**T-v0.6-E02** (DONE) · Local Postgres via docker-compose
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-E01
 - **Context:** [system-design § 6 deployment topology](system-design.md#6-deployment-topology-v10).
 - **Inputs:** —
@@ -750,7 +750,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E03** (TODO) · Migration 001 — `users`
+**T-v0.6-E03** (DONE) · Migration 001 — `users`
 - **Req:** AR-6 · **Size:** S · **Deps:** T-v0.6-E01
 - **Context:** [system-design § 6 durable-state notes](system-design.md#6-deployment-topology-v10).
 - **Inputs:** Migrator from E01.
@@ -761,7 +761,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E04** (TODO) · Migration 002 — `match_history`
+**T-v0.6-E04** (DONE) · Migration 002 — `match_history`
 - **Req:** AR-6 · **Size:** S · **Deps:** T-v0.6-E03
 - **Context:** [system-design § 6 durable-state notes](system-design.md#6-deployment-topology-v10).
 - **Inputs:** Migrator.
@@ -772,7 +772,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E05** (TODO) · Connection pool module
+**T-v0.6-E05** (DONE) · Connection pool module
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-E01
 - **Context:** [system-design § 6 durable-state notes](system-design.md#6-deployment-topology-v10).
 - **Inputs:** `be/` server.
@@ -783,7 +783,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E06** (TODO) · User upsert on sign-in
+**T-v0.6-E06** (DONE) · User upsert on sign-in
 - **Req:** AR-5, AR-6 · **Size:** S · **Deps:** T-v0.6-D03, T-v0.6-E03, T-v0.6-E05
 - **Context:** [system-design § 8 data minimisation](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `AuthMiddleware`, `db.ts`, verified token claims.
@@ -794,7 +794,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E07** (TODO) · Insert `match_history` at match end
+**T-v0.6-E07** (DONE) · Insert `match_history` at match end
 - **Req:** AR-6 · **Size:** M · **Deps:** T-v0.6-E04, T-v0.6-E05
 - **Context:** [system-design § 6 durable-state notes](system-design.md#6-deployment-topology-v10).
 - **Inputs:** `be/src/RoomManager.ts`, `be/src/TimerManager.ts`.
@@ -805,7 +805,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E08** (TODO) · Match history read endpoint
+**T-v0.6-E08** (DONE) · Match history read endpoint
 - **Req:** AR-6 · **Size:** M · **Deps:** T-v0.6-E07
 - **Context:** Surfacing history in the Flutter account screen.
 - **Inputs:** `db.ts`, `AuthMiddleware`, `be/src/server.ts`.
@@ -816,7 +816,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-E09** (TODO) · DB outage buffering
+**T-v0.6-E09** (DONE) · DB outage buffering
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-E07
 - **Context:** [system-design § 8 "Database outage"](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `be/src/db.ts`.
@@ -831,7 +831,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F01** (TODO) · Delete endpoint (transactional)
+**T-v0.6-F01** (DONE) · Delete endpoint (transactional)
 - **Req:** AR-4 · **Size:** M · **Deps:** T-v0.6-D02, T-v0.6-E03
 - **Context:** [requirement § AR-4](requirement.md#3-identity--account-requirements); App Store Guideline 5.1.1(v).
 - **Inputs:** `db.ts`, `AuthMiddleware`.
@@ -842,7 +842,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F02** (TODO) · Anonymise `match_history` rows
+**T-v0.6-F02** (DONE) · Anonymise `match_history` rows
 - **Req:** AR-4 · **Size:** S · **Deps:** T-v0.6-F01
 - **Context:** [system-design § 8 deletion integrity](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** Deletion SQL path.
@@ -853,7 +853,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F03** (TODO) · Delete `users` row
+**T-v0.6-F03** (DONE) · Delete `users` row
 - **Req:** AR-4 · **Size:** S · **Deps:** T-v0.6-F01, T-v0.6-F02
 - **Context:** [requirement § AR-4](requirement.md#3-identity--account-requirements).
 - **Inputs:** Deletion SQL path.
@@ -864,7 +864,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F04** (TODO) · Revoke Firebase user
+**T-v0.6-F04** (DONE) · Revoke Firebase user
 - **Req:** AR-4, AR-5 · **Size:** S · **Deps:** T-v0.6-F01
 - **Context:** [requirement § AR-4/AR-5](requirement.md#3-identity--account-requirements).
 - **Inputs:** `firebase-admin` Auth API.
@@ -875,7 +875,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F05** (TODO) · Deletion integration test
+**T-v0.6-F05** (DONE) · Deletion integration test
 - **Req:** AR-4 · **Size:** M · **Deps:** T-v0.6-F02, T-v0.6-F03
 - **Context:** [system-design § 8 deletion integrity](system-design.md#8-cross-cutting-concerns); [planning § 5 GDPR risks](planning.md#5-risks--how-each-milestone-mitigates-them).
 - **Inputs:** Existing seed data.
@@ -886,7 +886,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F06** (TODO) · Flutter deletion UI
+**T-v0.6-F06** (DONE) · Flutter deletion UI
 - **Req:** AR-4 · **Size:** S · **Deps:** T-v0.6-A05, T-v0.6-F01
 - **Context:** [requirement § AR-4](requirement.md#3-identity--account-requirements).
 - **Inputs:** Account screen from A05, delete endpoint from F01.
@@ -897,7 +897,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F07** (TODO) · Grace-period policy
+**T-v0.6-F07** (DONE) · Grace-period policy
 - **Req:** AR-4 · **Size:** S · **Deps:** T-v0.6-F01
 - **Context:** [requirement § Open values AR-4](requirement.md#open-values).
 - **Inputs:** Pinned open value (30-day soft-delete vs immediate hard-delete).
@@ -912,7 +912,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-G01** (TODO) · RoomManager key by userId
+**T-v0.6-G01** (DONE) · RoomManager key by userId
 - **Req:** MR-6 · **Size:** M · **Deps:** T-v0.6-D03
 - **Context:** [system-design § 4.3 v0.6 upgrade](system-design.md#43-reconnection-v05-mr-6).
 - **Inputs:** `be/src/RoomManager.ts`.
@@ -923,7 +923,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-G02** (TODO) · RejoinManager by verified token
+**T-v0.6-G02** (DONE) · RejoinManager by verified token
 - **Req:** MR-6 · **Size:** M · **Deps:** T-v0.6-G01, T-v0.6-D03
 - **Context:** [system-design § 4.3](system-design.md#43-reconnection-v05-mr-6).
 - **Inputs:** `be/src/RejoinManager.ts`.
@@ -934,7 +934,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-G03** (TODO) · Retire HMAC rejoin code
+**T-v0.6-G03** (DONE) · Retire HMAC rejoin code
 - **Req:** — · **Size:** S · **Deps:** T-v0.6-G02
 - **Context:** [system-design § 4.3 v0.6 upgrade](system-design.md#43-reconnection-v05-mr-6).
 - **Inputs:** Existing HMAC code paths + their tests.
@@ -957,7 +957,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-G05** (TODO) · AR-7 single-active-match enforcement
+**T-v0.6-G05** (DONE) · AR-7 single-active-match enforcement
 - **Req:** AR-7 · **Size:** S · **Deps:** T-v0.6-G01
 - **Context:** [requirement § AR-7](requirement.md#3-identity--account-requirements).
 - **Inputs:** `be/src/WaitingQueue.ts`, `be/src/RoomManager.ts`.
@@ -968,7 +968,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-G06** (TODO) · Extend reconnection window
+**T-v0.6-G06** (DONE) · Extend reconnection window
 - **Req:** MR-6 · **Size:** S · **Deps:** T-v0.6-G01
 - **Context:** [requirement § Open values MR-6](requirement.md#open-values) — moved from 60 s to 5 min with identity.
 - **Inputs:** `be/src/constants.ts`.
@@ -1056,7 +1056,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.6-I06** (TODO) · Bridge-surface regression test
+**T-v0.6-I06** (DONE) · Bridge-surface regression test
 - **Req:** MR-8, AR-3 · **Size:** S · **Deps:** T-v0.6-B12
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract); [§ 8 bandwidth budget](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** B01 contract, B12 test.
@@ -1075,7 +1075,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-01** (TODO) · Flutter shell keyboard focus + tab order
+**T-v0.7-01** (DONE) · Flutter shell keyboard focus + tab order
 - **Req:** NFR-8 · **Size:** M · **Deps:** v0.6 done
 - **Context:** [requirement § NFR-8](requirement.md#accessibility).
 - **Inputs:** All shell screens from sub-track A.
@@ -1086,7 +1086,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-02** (TODO) · Directional-key + confirm-to-swap in GameScene
+**T-v0.7-02** (DONE) · Directional-key + confirm-to-swap in GameScene
 - **Req:** NFR-8 · **Size:** M · **Deps:** v0.6 done
 - **Context:** [requirement § NFR-8](requirement.md#accessibility); [system-design § 3 v0.6 evolution](system-design.md#3-layered-component-view-embedded-game-view).
 - **Inputs:** `fe/src/scenes/GameScene.ts`.
@@ -1097,7 +1097,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-03** (TODO) · `prefers-reduced-motion` in Flutter
+**T-v0.7-03** (DONE) · `prefers-reduced-motion` in Flutter
 - **Req:** NFR-9 · **Size:** S · **Deps:** —
 - **Context:** [requirement § NFR-9](requirement.md#accessibility).
 - **Inputs:** `MediaQuery.disableAnimations` in Flutter.
@@ -1108,7 +1108,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-04** (TODO) · `prefers-reduced-motion` in game view
+**T-v0.7-04** (DONE) · `prefers-reduced-motion` in game view
 - **Req:** NFR-9 · **Size:** S · **Deps:** —
 - **Context:** [requirement § NFR-9](requirement.md#accessibility).
 - **Inputs:** `fe/src/scenes/GameScene.ts`, tween durations.
@@ -1119,7 +1119,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-05** (TODO) · WCAG AA contrast audit (shell)
+**T-v0.7-05** (DONE) · WCAG AA contrast audit (shell)
 - **Req:** NFR-10 · **Size:** M · **Deps:** —
 - **Context:** [requirement § NFR-10](requirement.md#accessibility).
 - **Inputs:** Shell theme.
@@ -1130,7 +1130,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v0.7-06** (TODO) · WCAG AA contrast audit (in-match)
+**T-v0.7-06** (DONE) · WCAG AA contrast audit (in-match)
 - **Req:** NFR-10 · **Size:** S · **Deps:** —
 - **Context:** [requirement § NFR-10](requirement.md#accessibility).
 - **Inputs:** `fe/src/scenes/GameScene.ts` text styles.
@@ -1285,7 +1285,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v1.0-08** (TODO) · Structured server logs
+**T-v1.0-08** (DONE) · Structured server logs
 - **Req:** — · **Size:** S · **Deps:** —
 - **Context:** [planning § 2 v1.0 observability](planning.md#v10--public-launch).
 - **Inputs:** `be/src/logger.ts` from T-v0.5-14.
@@ -1295,7 +1295,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v1.0-09** (TODO) · Metrics
+**T-v1.0-09** (DONE) · Metrics
 - **Req:** — · **Size:** M · **Deps:** T-v1.0-08
 - **Context:** [planning § 2 v1.0 observability](planning.md#v10--public-launch).
 - **Outputs:** Counters for match_count, disconnect_rate, sign_in_failure_rate, account_deletion_rate, bridge_error_rate, match_history_buffer_dropped_total. Dashboard in the chosen tool.
@@ -1331,7 +1331,7 @@ Each H-task acceptance: artifact exists and is linked from `shell/docs/app-store
 
 ---
 
-**T-v1.0-13** (TODO) · Production runbook
+**T-v1.0-13** (PARTIAL) · Production runbook
 - **Req:** — · **Size:** S · **Deps:** all v1.0 tasks
 - **Outputs:** `ops/runbook.md` with restart, rollback, backup-restore, incident contacts.
 - **Acceptance:**
