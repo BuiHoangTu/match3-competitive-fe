@@ -1,4 +1,6 @@
 /**
+ * T-v0.6-I06 · Bridge-surface regression test
+ *
  * Asserts that the TypeScript bridge message-name constants match the canonical
  * fixture at shared/src/__tests__/bridge-messages.txt.
  *
@@ -6,6 +8,10 @@
  * fixture is read by the Dart test (shell/test/bridge/bridge_messages_test.dart).
  * If a name is added/removed/renamed on either side without updating the fixture,
  * one of the two tests will fail.
+ *
+ * Guard direction: fails in BOTH directions —
+ *   - A new BridgeMessageType entry not in the fixture → test fails ("extra in TS").
+ *   - A fixture entry not in BridgeMessageType → test fails ("missing from TS").
  */
 
 import { describe, it, expect } from "vitest";
@@ -18,18 +24,42 @@ const FIXTURE_PATH = path.resolve(
   "../../../shared/src/__tests__/bridge-messages.txt"
 );
 
-describe("bridge contract — message name parity", () => {
+function readFixture(): string[] {
+  const raw = fs.readFileSync(FIXTURE_PATH, "utf-8");
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .sort();
+}
+
+describe("bridge contract — message name parity (T-v0.6-I06)", () => {
   it("BridgeMessageType values exactly match the canonical fixture", () => {
-    const raw = fs.readFileSync(FIXTURE_PATH, "utf-8");
-    const fixtureNames = raw
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .sort();
-
+    const fixtureNames = readFixture();
     const tsNames = Object.values(BridgeMessageType).slice().sort();
-
     expect(tsNames).toEqual(fixtureNames);
+  });
+
+  it("no BridgeMessageType entry is missing from the fixture — adding without fixture update fails", () => {
+    const fixtureSet = new Set(readFixture());
+    const extra = Object.values(BridgeMessageType).filter(
+      (name) => !fixtureSet.has(name)
+    );
+    expect(extra).toEqual(
+      [],
+      `These BridgeMessageType entries are not in bridge-messages.txt: ${extra.join(", ")}. ` +
+        "Update shared/src/__tests__/bridge-messages.txt and shell/test/bridge/bridge-messages.txt."
+    );
+  });
+
+  it("no fixture entry is missing from BridgeMessageType — removing without TS update fails", () => {
+    const tsSet = new Set(Object.values(BridgeMessageType));
+    const missing = readFixture().filter((name) => !tsSet.has(name));
+    expect(missing).toEqual(
+      [],
+      `These fixture names are not in BridgeMessageType: ${missing.join(", ")}. ` +
+        "Update shared/src/bridge.ts to add the missing entries."
+    );
   });
 
   it("has exactly six messages (three shell→game, three game→shell)", () => {

@@ -472,8 +472,8 @@ export class GameScene extends Phaser.Scene {
     // B1: game is over — no need for a rejoin token anymore
     SyncClient.clearRejoinToken();
 
-    // ResultScene adds timeBonus to myScore internally, so pass them separately.
-    // For the bridge, compute the final totals the same way ResultScene does.
+    // Compute final totals: timeBonus is added to myScore for the outcome check.
+    // The shell receives these via matchEnded and shows the result screen natively.
     const finalMyScore = this.myScore + timeBonus;
     const finalOpponentScore = this.opponentScore;
 
@@ -493,11 +493,9 @@ export class GameScene extends Phaser.Scene {
       opponent: finalOpponentScore,
     });
 
-    this.scene.start("ResultScene", {
-      myScore: this.myScore,
-      opponentScore: this.opponentScore,
-      timeBonus,
-    });
+    // A09: ResultScene is retired. The shell handles the result screen natively
+    // after receiving the matchEnded bridge message above.
+    // GameScene stays in game_over state (input already disabled above).
   }
 
   // -------------------------------------------------------------------------
