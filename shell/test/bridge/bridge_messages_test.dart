@@ -11,11 +11,13 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../lib/bridge/bridge_messages.dart';
 
 void main() {
-  // Resolve the fixture path relative to the repo root. When running via
-  // `dart test` from shell/, the working directory is shell/.
+  // Resolve the fixture path. The canonical source lives under
+  // shared/src/__tests__/, but a sibling copy under shell/test/bridge/ keeps
+  // the test runnable when shell/ is mounted in isolation (e.g. inside a
+  // Docker volume that does not include the rest of the monorepo).
   final fixturePath = [
+    'test/bridge/bridge-messages.txt',
     '../shared/src/__tests__/bridge-messages.txt',
-    // fallback if run from repo root
     'shared/src/__tests__/bridge-messages.txt',
   ].firstWhere((p) => File(p).existsSync(), orElse: () {
     throw StateError(

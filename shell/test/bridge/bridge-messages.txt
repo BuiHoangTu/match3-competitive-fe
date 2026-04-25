@@ -1,0 +1,6 @@
+startMatch
+appLifecycle
+requestLeaveMatch
+ready
+authTokenRejected
+matchEnded
