@@ -1,4 +1,4 @@
-import type { Move } from "./RoomManager";
+import type { Move, Room } from "./RoomManager";
 
 const BOARD_MIN = 0;
 const BOARD_MAX = 7;
@@ -20,4 +20,24 @@ export function isValidMove(move: Move): boolean {
 
   // Exactly adjacent: one axis differs by 1, the other by 0
   return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+}
+
+/**
+ * T-v0.6-D04 · Validator userId slot check
+ *
+ * Confirms the given userId owns a slot in the room. Returns the slot index
+ * (0 or 1) on success, or a string reason code on failure.
+ *
+ * The check is deliberately separate from isValidMove so each concern has a
+ * clear rejection reason.
+ */
+export function checkUserIdOwnsSlot(
+  userId: string,
+  room: Room
+): { ok: true; slot: 0 | 1 } | { ok: false; reason: string } {
+  const slot = room.userIds.indexOf(userId) as 0 | 1 | -1;
+  if (slot === -1) {
+    return { ok: false, reason: "user_not_in_room" };
+  }
+  return { ok: true, slot };
 }

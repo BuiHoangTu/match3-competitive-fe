@@ -9,7 +9,8 @@ import { IdleSweeper } from "./IdleSweeper";
 import { MatchmakingService } from "./MatchmakingService";
 import { createMatchmakingHttpHandler } from "./matchmakingHttp";
 import { verify as verifyRoomToken } from "./RoomTokenSigner";
-import { isValidMove } from "./validator";
+import { checkTokenExpiry } from "./AuthMiddleware";
+import { isValidMove, checkUserIdOwnsSlot } from "./validator";
 import {
   BOT_ID,
   BOT_USER_ID,
@@ -33,6 +34,17 @@ export interface ServerHandle {
   close(): Promise<void>;
 }
 
+export interface ServerOptions {
+  /**
+   * T-v0.6-D07 · When true (default in non-test environments), reject any
+   * Socket.IO connection that does not carry a room token in
+   * `socket.handshake.auth.token`. Set to false only in v0.5 legacy test
+   * contexts (latency harness, rejoin latency) that drive the deprecated
+   * `matchmake` socket event path.
+   */
+  requireRoomToken?: boolean;
+}
+
 /**
  * Build (but do not start) a fully wired Match-3 server. Handlers are bound
  * during construction; listening happens when the caller awaits `close()`-able
@@ -40,7 +52,10 @@ export interface ServerHandle {
  * bootstrap, use {@link startServer} which listens on a port and returns the
  * handle.
  */
-export function createMatch3Server(): ServerHandle {
+export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
+  // D07: in test environments the legacy matchmake path is still in use;
+  // outside tests (and when callers don't opt out) we enforce room tokens.
+  const requireRoomToken = opts.requireRoomToken ?? (process.env.NODE_ENV !== "test");
   const httpServer = createHttpServer();
   const io = new Server(httpServer, {
     cors: { origin: "*" },
@@ -86,12 +101,17 @@ export function createMatch3Server(): ServerHandle {
     void matchmakingHttp(req, res);
   });
 
-  // T-v0.6-D02 (revised) — if the handshake carries a valid room token,
-  // place the socket into the referenced room and skip the legacy join_queue
-  // path. Legacy (untoken) handshakes continue to work for v0.5 tests.
+  // T-v0.6-D02 / D07 — Room-token handshake middleware.
+  // If requireRoomToken is true (production default), reject any connection
+  // that arrives without a token (code: no_token). Otherwise (legacy test
+  // mode), allow tokenless connections through to the matchmake event path.
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token as string | undefined;
     if (!token) {
+      if (requireRoomToken) {
+        next(new Error("no_token"));
+        return;
+      }
       next();
       return;
     }
@@ -112,6 +132,8 @@ export function createMatch3Server(): ServerHandle {
     socket.data.roomId = payload.roomId;
     socket.data.userId = payload.userId;
     socket.data.slot = payload.slot;
+    // T-v0.6-D06: store room token expiry in seconds so checkTokenExpiry works.
+    socket.data.tokenExpSec = Math.floor(payload.exp / 1000);
     next();
   });
 
@@ -144,8 +166,6 @@ export function createMatch3Server(): ServerHandle {
       timerManager.scheduleRoomClose(id);
     });
 
-    const rejoinToken = rejoinManager.generate(roomId, humanSocketId);
-
     humanSocket.emit("match_found", {
       roomId,
       seed: room.seed,
@@ -153,7 +173,7 @@ export function createMatch3Server(): ServerHandle {
       myPlayerId: humanSocketId,
       firstPlayerId,
       mode: "turn_based",
-      rejoinToken,
+      rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
     });
 
     if (firstPlayerId === BOT_ID) {
@@ -263,9 +283,6 @@ export function createMatch3Server(): ServerHandle {
           timerManager.scheduleRoomClose(id);
         });
 
-        const token1 = rejoinManager.generate(roomId, player1Id);
-        const token2 = rejoinManager.generate(roomId, player2Id);
-
         io.to(player1Id).emit("match_found", {
           roomId,
           seed: room.seed,
@@ -273,7 +290,7 @@ export function createMatch3Server(): ServerHandle {
           myPlayerId: player1Id,
           firstPlayerId,
           mode: "turn_based",
-          rejoinToken: token1,
+          rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
         });
         io.to(player2Id).emit("match_found", {
           roomId,
@@ -282,7 +299,7 @@ export function createMatch3Server(): ServerHandle {
           myPlayerId: player2Id,
           firstPlayerId,
           mode: "turn_based",
-          rejoinToken: token2,
+          rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
         });
       } else {
         const room = roomManager.createRoom(socket.id);
@@ -294,56 +311,76 @@ export function createMatch3Server(): ServerHandle {
       }
     });
 
-    socket.on("rejoin", (data: { token: string }) => {
-      const entry = rejoinManager.verify(data.token);
-      if (!entry) {
-        socket.emit("rejoin_failed", { reason: "invalid or expired token" });
+    // T-v0.6-G02/G03 · userId-keyed rejoin via verified socket identity.
+    // The socket's userId is set by the D02 room-token handshake middleware.
+    // Legacy clients that connected via the `matchmake` event do not have a
+    // userId on the socket and will receive rejoin_failed immediately; they
+    // should reconnect via POST /matchmaking/resume → room token instead.
+    socket.on("rejoin", (_data: unknown) => {
+      const userId = socket.data.userId as string | undefined;
+      if (!userId) {
+        socket.emit("rejoin_failed", { reason: "no verified identity — use /matchmaking/resume" });
         return;
       }
 
-      const { roomId, playerId: oldPlayerId } = entry;
+      const entry = rejoinManager.lookup(userId);
+      if (!entry) {
+        socket.emit("rejoin_failed", { reason: "no active rejoin window for this identity" });
+        return;
+      }
+
+      const { roomId } = entry;
       const room = roomManager.getRoom(roomId);
       if (!room || room.status === "over") {
         socket.emit("rejoin_failed", { reason: "game already ended" });
-        rejoinManager.delete(data.token);
+        rejoinManager.delete(userId);
         logEvent("rejoin", {
           matchId: roomId,
           playerId: socket.id,
-          oldPlayerId,
+          userId,
           ok: false,
           reason: "game already ended",
         });
         return;
       }
 
-      const gracePending = disconnectedPlayers.get(oldPlayerId);
-      if (gracePending) {
-        clearTimeout(gracePending);
-        disconnectedPlayers.delete(oldPlayerId);
+      // Find the old socket ID for this userId in the room.
+      const slotIndex = room.userIds.indexOf(userId);
+      // Find any player socket that previously occupied this userId's slot;
+      // for userId-keyed rooms the old socket may already be gone.
+      const oldPlayerId = room.players.find((_, i) => i === slotIndex) ?? null;
+
+      if (oldPlayerId) {
+        const gracePending = disconnectedPlayers.get(oldPlayerId);
+        if (gracePending) {
+          clearTimeout(gracePending);
+          disconnectedPlayers.delete(oldPlayerId);
+        }
       }
 
-      const updatedRoom = roomManager.replacePlayer(oldPlayerId, socket.id);
-      if (!updatedRoom) {
-        socket.emit("rejoin_failed", { reason: "could not rejoin room" });
-        return;
+      // Attach the new socket to the slot (replaces old socket ID in room).
+      let updatedRoom = room;
+      if (oldPlayerId) {
+        const replaced = roomManager.replacePlayer(oldPlayerId, socket.id);
+        if (replaced) updatedRoom = replaced;
+      } else {
+        roomManager.attachSocketToSlot(roomId, slotIndex as 0 | 1, socket.id);
       }
 
       socket.join(roomId);
-
-      rejoinManager.delete(data.token);
-      const newToken = rejoinManager.generate(roomId, socket.id);
+      rejoinManager.delete(userId);
 
       const times = timerManager.getTimes(roomId);
       const opponentId = updatedRoom.players.find((p) => p !== socket.id) ?? null;
 
       const remappedMoves = updatedRoom.moves.map((m) =>
-        m.playerId === oldPlayerId ? { ...m, playerId: socket.id } : m
+        oldPlayerId && m.playerId === oldPlayerId ? { ...m, playerId: socket.id } : m
       );
 
       logEvent("rejoin", {
         matchId: roomId,
         playerId: socket.id,
-        oldPlayerId,
+        userId,
         ok: true,
       });
 
@@ -355,7 +392,7 @@ export function createMatch3Server(): ServerHandle {
         activePlayerId: updatedRoom.activePlayer,
         times: times ?? {},
         opponentId,
-        rejoinToken: newToken,
+        rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
       });
 
       socket.to(roomId).emit("opponent_reconnected");
@@ -363,7 +400,10 @@ export function createMatch3Server(): ServerHandle {
 
     socket.on(
       "move",
-      (data: { roomId: string; r1: number; c1: number; r2: number; c2: number }) => {
+      async (data: { roomId: string; r1: number; c1: number; r2: number; c2: number }) => {
+        // T-v0.6-D06: re-check token expiry on every move event.
+        if (!(await checkTokenExpiry(socket))) return;
+
         const move = {
           playerId: socket.id,
           r1: data.r1,
@@ -390,6 +430,20 @@ export function createMatch3Server(): ServerHandle {
           socket.emit("move_rejected", { reason: "not in room", move });
           logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "not in room" });
           return;
+        }
+
+        // T-v0.6-D04 · userId slot check: the socket's verified userId must
+        // own a slot in the room. Sockets that connected via room token always
+        // have socket.data.userId populated; legacy sockets via matchmake have
+        // empty userIds slots ("") which we skip to preserve backward compat.
+        const socketUserId = socket.data.userId as string | undefined;
+        if (socketUserId) {
+          const slotCheck = checkUserIdOwnsSlot(socketUserId, room);
+          if (!slotCheck.ok) {
+            socket.emit("move_rejected", { reason: slotCheck.reason, move });
+            logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: slotCheck.reason });
+            return;
+          }
         }
 
         if (room.activePlayer && room.activePlayer !== socket.id) {
@@ -507,8 +561,8 @@ export function createMatch3Server(): ServerHandle {
  * Starts the server on the given port (0 = random free port). Returns the
  * handle once the server is listening.
  */
-export function startServer(port: number): Promise<ServerHandle> {
-  const handle = createMatch3Server();
+export function startServer(port: number, opts: ServerOptions = {}): Promise<ServerHandle> {
+  const handle = createMatch3Server(opts);
   return new Promise((resolve) => {
     handle.httpServer.listen(port, () => resolve(handle));
   });

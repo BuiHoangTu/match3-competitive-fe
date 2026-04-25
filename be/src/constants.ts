@@ -3,7 +3,10 @@ export const BOT_USER_ID = "bot:default";
 export const PLAYER_TIME_MS = 5 * 60 * 1000;
 export const BOT_WAIT_MS = 5_000;
 export const BOT_THINK_MS = 700;
-export const REJOIN_WINDOW_MS = 60_000;
+// AR-3 / MR-6: identity-based rejoin (via verified userId) allows a longer
+// reconnection window than the old 60 s HMAC token window. Clients can now
+// call /matchmaking/resume at any point within 5 minutes of disconnect.
+export const REJOIN_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 export const IDLE_MATCH_TIMEOUT_MS = 30 * 60 * 1000;
 export const IDLE_SWEEP_INTERVAL_MS = 60_000;
 export const ROOM_TOKEN_TTL_MS = 5 * 60 * 1000;

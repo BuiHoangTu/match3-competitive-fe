@@ -135,6 +135,30 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(r2.status).toBe(409);
     expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
   });
+
+  // T-v0.6-G05 · AR-7 single-active-match enforcement
+  it("409 response includes the existing roomId so client can call /resume", async () => {
+    const r1 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "carol");
+    expect(r1.status).toBe(200);
+    const firstPayload = verifyRoomToken((r1.body as { roomToken: string }).roomToken)!;
+    const firstRoomId = firstPayload.roomId;
+
+    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "carol");
+    expect(r2.status).toBe(409);
+    const body = r2.body as { code: string; roomId: string };
+    expect(body.code).toBe("ACTIVE_ROOM");
+    // The response must include the existing roomId so the client can call /resume.
+    expect(body.roomId).toBe(firstRoomId);
+  });
+
+  it("AR-7 enforced across different modes (first solo, then turn_based rejected)", async () => {
+    const r1 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "dave");
+    expect(r1.status).toBe(200);
+    // Attempting a different mode is still rejected.
+    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "dave");
+    expect(r2.status).toBe(409);
+    expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
+  });
 });
 
 describe("POST /matchmaking/resume — T-v0.6-D10", () => {
