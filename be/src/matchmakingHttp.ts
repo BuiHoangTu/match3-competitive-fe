@@ -55,13 +55,30 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+// Permissive CORS — local dev + spare-PC deploy serve the shell on a
+// different origin (e.g. :8080) than the backend (:3001). Browsers block
+// cross-origin fetch by default. We mirror the request origin (or fall back
+// to "*") so the Flutter Web bundle can call /auth/*, /matchmaking/*, etc.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
 function sendJson(res: ServerResponse, status: number, body: object): void {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json",
     "Content-Length": Buffer.byteLength(json),
+    ...CORS_HEADERS,
   });
   res.end(json);
+}
+
+function sendNoContent(res: ServerResponse): void {
+  res.writeHead(204, CORS_HEADERS);
+  res.end();
 }
 
 function extractBearerToken(req: IncomingMessage): string | null {
@@ -78,6 +95,13 @@ function isValidMode(v: unknown): v is MatchmakingMode {
 export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = req.url ?? "";
+
+    // ── CORS preflight ─────────────────────────────────────────────────────────
+    // Browsers send OPTIONS before any non-simple cross-origin request.
+    if (req.method === "OPTIONS") {
+      sendNoContent(res);
+      return;
+    }
 
     // ── POST /auth/register ────────────────────────────────────────────────────
     if (url === "/auth/register") {
