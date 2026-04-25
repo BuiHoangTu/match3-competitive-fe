@@ -26,7 +26,7 @@
 //   Shell-side transitions (page route animations) become instant while the
 //   game view tween animations (inside the WebView) are unaffected.
 
-import 'dart:async' show unawaited;
+import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -39,10 +39,12 @@ import 'screens/home_screen.dart';
 import 'screens/match_screen.dart';
 import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
+import 'screens/register_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/account_client.dart';
 import 'services/game_view_bootstrap.dart';
+import 'services/local_auth_service.dart';
 
 // ---------------------------------------------------------------------------
 // Route name constants
@@ -51,6 +53,7 @@ import 'services/game_view_bootstrap.dart';
 /// Named route constants. Use these with [context.goNamed] to avoid typos.
 abstract final class Routes {
   static const signIn = 'sign-in';
+  static const register = 'register';
   static const home = 'home';
   static const match = 'match';
   static const result = 'result';
@@ -102,6 +105,38 @@ class StubAuthState implements AuthStateInterface {
   Future<void> signOut() async {}
 }
 
+/// T-Local-07 · Adapter exposing a [LocalAuthService] as an
+/// [AuthStateInterface] + a [Listenable] so GoRouter can refresh on changes.
+class LocalAuthStateAdapter extends ChangeNotifier
+    implements AuthStateInterface {
+  LocalAuthStateAdapter(this._service) {
+    _sub = _service.authStateStream.listen((_) => notifyListeners());
+  }
+
+  final LocalAuthService _service;
+  StreamSubscription<UserProfile?>? _sub;
+
+  @override
+  bool get isSignedIn => _service.isSignedIn;
+
+  @override
+  UserProfile? get currentUser => _service.currentUser;
+
+  @override
+  String? get idToken => _service.sessionToken;
+
+  @override
+  Future<void> signOut() async {
+    await _service.signOut();
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router factory
 // ---------------------------------------------------------------------------
@@ -121,12 +156,14 @@ Page<void> _buildPage(BuildContext context, GoRouterState state, Widget child) {
 
 /// Creates the [GoRouter] instance for the shell.
 ///
-/// Accepts an [AuthStateInterface] so that the router can be constructed
-/// with either the real Firebase auth state or a test fake. Optionally
-/// inject an [AccountClient] (defaults to one talking to `BACKEND_URL`).
+/// Accepts an [AuthStateInterface] for the redirect guard. If [localAuth] is
+/// supplied, the sign-in / register screens call its methods to authenticate;
+/// otherwise the screens are inert (useful in tests). Apple + Google buttons
+/// are wired to a "Under development" snackbar until T-v0.6-C03/C04 land.
 GoRouter createRouter({
   required AuthStateInterface auth,
   AccountClient? accountClient,
+  LocalAuthService? localAuth,
 }) {
   final account = accountClient ??
       AccountClient(
@@ -135,18 +172,84 @@ GoRouter createRouter({
           defaultValue: 'http://localhost:3001',
         ),
       );
+
+  void showUnderDevelopment(BuildContext ctx, String which) {
+    ScaffoldMessenger.of(ctx).showSnackBar(
+      SnackBar(content: Text('$which sign-in is under development')),
+    );
+  }
+
+  Future<void> handleLocalSignIn(
+      BuildContext ctx, String username, String password) async {
+    if (localAuth == null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Local sign-in not configured')),
+      );
+      return;
+    }
+    try {
+      await localAuth.login(username: username, password: password);
+      if (!ctx.mounted) return;
+      ctx.goNamed(Routes.home);
+    } on LocalAuthInvalidCredentials {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Invalid username or password')),
+      );
+    } on LocalAuthError catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text('Sign-in failed: ${e.message}')),
+      );
+    }
+  }
+
+  Future<void> handleRegister(BuildContext ctx, String username,
+      String password, String? email) async {
+    if (localAuth == null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Registration not configured')),
+      );
+      return;
+    }
+    try {
+      await localAuth.register(
+          username: username, password: password, email: email);
+      if (!ctx.mounted) return;
+      ctx.goNamed(Routes.home);
+    } on LocalAuthUsernameTaken {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('That username is taken')),
+      );
+    } on LocalAuthBadRequest catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } on LocalAuthError catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text('Registration failed: ${e.message}')),
+      );
+    }
+  }
   return GoRouter(
     initialLocation: auth.isSignedIn ? '/home' : '/sign-in',
+    refreshListenable: auth is Listenable ? auth as Listenable : null,
     redirect: (context, state) {
       // Public paths that do not require sign-in.
       final isPublic = state.matchedLocation == '/sign-in' ||
+          state.matchedLocation == '/register' ||
           state.matchedLocation.startsWith('/legal/');
 
       if (!isPublic && !auth.isSignedIn) {
         return '/sign-in';
       }
-      // Redirect signed-in users away from sign-in back to home.
-      if (state.matchedLocation == '/sign-in' && auth.isSignedIn) {
+      // Redirect signed-in users away from sign-in/register back to home.
+      if ((state.matchedLocation == '/sign-in' ||
+              state.matchedLocation == '/register') &&
+          auth.isSignedIn) {
         return '/home';
       }
       return null; // no redirect
@@ -162,16 +265,30 @@ GoRouter createRouter({
           context,
           state,
           SignInScreen(
-            onAppleSignInPressed: () {
-              // TODO(auth-agent): call auth_service.dart signInWithApple()
-              developer.log('Apple sign-in tapped (stub)', name: 'router');
-            },
-            onGoogleSignInPressed: () {
-              // TODO(auth-agent): call auth_service.dart signInWithGoogle()
-              developer.log('Google sign-in tapped (stub)', name: 'router');
-            },
+            onLocalSignInPressed: (u, p) =>
+                unawaited(handleLocalSignIn(context, u, p)),
+            onRegisterPressed: () => context.goNamed(Routes.register),
+            onAppleSignInPressed: () => showUnderDevelopment(context, 'Apple'),
+            onGoogleSignInPressed: () => showUnderDevelopment(context, 'Google'),
             onPrivacyPressed: () => context.goNamed(Routes.privacy),
             onTermsPressed: () => context.goNamed(Routes.terms),
+          ),
+        ),
+      ),
+
+      // -----------------------------------------------------------------------
+      // /register — public
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/register',
+        name: Routes.register,
+        pageBuilder: (context, state) => _buildPage(
+          context,
+          state,
+          RegisterScreen(
+            onRegisterPressed: (u, p, e) =>
+                unawaited(handleRegister(context, u, p, e)),
+            onCancelPressed: () => context.goNamed(Routes.signIn),
           ),
         ),
       ),

@@ -1,12 +1,15 @@
 # Build stage - Flutter
 FROM ghcr.io/cirruslabs/flutter:stable AS builder
+ARG BACKEND_URL=http://localhost:3001
 WORKDIR /app
 COPY shell/ shell/
 WORKDIR /app/shell
 # Handle missing firebase_options.dart by copying from example if needed
 RUN if [ ! -f firebase_options.dart ] && [ -f firebase_options.dart.example ]; then cp firebase_options.dart.example firebase_options.dart; fi
 RUN flutter pub get
-RUN flutter build web --base-href /
+# T-Local-08 — bake the backend URL into the build via --dart-define so the
+# Flutter Web bundle calls the right host from the browser.
+RUN flutter build web --base-href / --dart-define=BACKEND_URL=${BACKEND_URL}
 
 # Runtime stage - serve with nginx
 FROM nginx:alpine

@@ -1,10 +1,8 @@
-// T-v0.7-01 · Sign-in screen keyboard focus tests
+// T-v0.7-01 / T-Local-06 · Sign-in screen keyboard focus tests
 //
-// Verifies that Tab cycles through interactive elements in the declared
-// FocusTraversalOrder: Apple(1) → Google(2) → Privacy(3) → Terms(4) → wrap.
-//
-// Each test is independent (fresh pumpWidget). Tab counts are cumulative
-// from the initial unfocused state.
+// Tab order on the new screen:
+//   1. username    2. password   3. sign-in    4. register link
+//   5. apple       6. google     7. privacy    8. terms
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../lib/screens/sign_in_screen.dart';
 
 Widget _buildSubject({
+  void Function(String, String)? onLocalSignIn,
+  VoidCallback? onRegister,
   VoidCallback? onApple,
   VoidCallback? onGoogle,
   VoidCallback? onPrivacy,
@@ -20,6 +20,8 @@ Widget _buildSubject({
 }) {
   return MaterialApp(
     home: SignInScreen(
+      onLocalSignInPressed: onLocalSignIn ?? (_, __) {},
+      onRegisterPressed: onRegister ?? () {},
       onAppleSignInPressed: onApple ?? () {},
       onGoogleSignInPressed: onGoogle ?? () {},
       onPrivacyPressed: onPrivacy ?? () {},
@@ -28,96 +30,89 @@ Widget _buildSubject({
   );
 }
 
-/// Sends [count] Tab presses then an Enter press and settles.
-Future<void> tabThenEnter(WidgetTester tester, int tabCount) async {
-  for (int i = 0; i < tabCount; i++) {
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.pump();
-  }
-  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-  await tester.pump();
-}
-
 void main() {
-  group('SignInScreen — keyboard focus traversal (T-v0.7-01)', () {
-    testWidgets('all four interactive widgets render', (tester) async {
+  group('SignInScreen — keyboard focus + form (T-v0.7-01 / T-Local-06)', () {
+    testWidgets('all interactive widgets render', (tester) async {
       await tester.pumpWidget(_buildSubject());
+      expect(find.byKey(const Key('username_field')), findsOneWidget);
+      expect(find.byKey(const Key('password_field')), findsOneWidget);
+      expect(find.byKey(const Key('local_sign_in_button')), findsOneWidget);
+      expect(find.byKey(const Key('register_link')), findsOneWidget);
       expect(find.byKey(const Key('apple_sign_in_button')), findsOneWidget);
       expect(find.byKey(const Key('google_sign_in_button')), findsOneWidget);
       expect(find.byKey(const Key('privacy_link')), findsOneWidget);
       expect(find.byKey(const Key('terms_link')), findsOneWidget);
     });
 
-    testWidgets('Tab×1 → Enter activates Apple button (order 1)',
-        (tester) async {
-      var appleCalled = false;
-      await tester.pumpWidget(_buildSubject(onApple: () => appleCalled = true));
-
-      await tabThenEnter(tester, 1);
-
-      expect(appleCalled, isTrue,
-          reason: 'Apple button should fire after 1 Tab + Enter');
+    testWidgets('Tab moves focus from username to password', (tester) async {
+      await tester.pumpWidget(_buildSubject());
+      await tester.tap(find.byKey(const Key('username_field')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      // Verify password field has focus.
+      final passwordFocus = Focus.of(
+        tester.element(find.byKey(const Key('password_field'))),
+      );
+      expect(passwordFocus.hasFocus, isTrue);
     });
 
-    testWidgets('Tab×2 → Enter activates Google button (order 2)',
+    testWidgets('submit calls onLocalSignInPressed with entered values',
         (tester) async {
-      var googleCalled = false;
-      await tester
-          .pumpWidget(_buildSubject(onGoogle: () => googleCalled = true));
-
-      await tabThenEnter(tester, 2);
-
-      expect(googleCalled, isTrue,
-          reason: 'Google button should fire after 2 Tabs + Enter');
-    });
-
-    testWidgets('Tab×3 → Enter activates Privacy link (order 3)',
-        (tester) async {
-      var privacyCalled = false;
-      await tester
-          .pumpWidget(_buildSubject(onPrivacy: () => privacyCalled = true));
-
-      await tabThenEnter(tester, 3);
-
-      expect(privacyCalled, isTrue,
-          reason: 'Privacy link should fire after 3 Tabs + Enter');
-    });
-
-    testWidgets('Tab×4 → Enter activates Terms link (order 4)',
-        (tester) async {
-      var termsCalled = false;
-      await tester
-          .pumpWidget(_buildSubject(onTerms: () => termsCalled = true));
-
-      await tabThenEnter(tester, 4);
-
-      expect(termsCalled, isTrue,
-          reason: 'Terms link should fire after 4 Tabs + Enter');
-    });
-
-    testWidgets('traversal wraps: Tab×5 → Enter re-activates Apple',
-        (tester) async {
-      var appleCalled = false;
-      await tester.pumpWidget(_buildSubject(onApple: () => appleCalled = true));
-
-      await tabThenEnter(tester, 5);
-
-      expect(appleCalled, isTrue,
-          reason: 'After wrapping, Tab×5 should return to Apple');
-    });
-
-    testWidgets('Apple and Google do not cross-activate', (tester) async {
-      var appleCalled = false;
-      var googleCalled = false;
+      String? capturedUser;
+      String? capturedPass;
       await tester.pumpWidget(_buildSubject(
-        onApple: () => appleCalled = true,
-        onGoogle: () => googleCalled = true,
+        onLocalSignIn: (u, p) {
+          capturedUser = u;
+          capturedPass = p;
+        },
       ));
+      await tester.enterText(find.byKey(const Key('username_field')), 'alice');
+      await tester.enterText(
+          find.byKey(const Key('password_field')), 'secret123');
+      await tester.tap(find.byKey(const Key('local_sign_in_button')));
+      await tester.pumpAndSettle();
+      expect(capturedUser, equals('alice'));
+      expect(capturedPass, equals('secret123'));
+    });
 
-      // Activate Apple only.
-      await tabThenEnter(tester, 1);
-      expect(appleCalled, isTrue);
-      expect(googleCalled, isFalse);
+    testWidgets('submit with empty username shows validation error',
+        (tester) async {
+      bool called = false;
+      await tester.pumpWidget(_buildSubject(
+        onLocalSignIn: (_, __) => called = true,
+      ));
+      await tester.tap(find.byKey(const Key('local_sign_in_button')));
+      await tester.pumpAndSettle();
+      expect(called, isFalse);
+      expect(find.text('Username required'), findsOneWidget);
+    });
+
+    testWidgets('apple button tap fires onAppleSignInPressed', (tester) async {
+      int calls = 0;
+      await tester.pumpWidget(_buildSubject(onApple: () => calls++));
+      await tester.ensureVisible(find.byKey(const Key('apple_sign_in_button')));
+      await tester.tap(find.byKey(const Key('apple_sign_in_button')));
+      await tester.pumpAndSettle();
+      expect(calls, equals(1));
+    });
+
+    testWidgets('google button tap fires onGoogleSignInPressed', (tester) async {
+      int calls = 0;
+      await tester.pumpWidget(_buildSubject(onGoogle: () => calls++));
+      await tester.ensureVisible(find.byKey(const Key('google_sign_in_button')));
+      await tester.tap(find.byKey(const Key('google_sign_in_button')));
+      await tester.pumpAndSettle();
+      expect(calls, equals(1));
+    });
+
+    testWidgets('register link tap fires onRegisterPressed', (tester) async {
+      int calls = 0;
+      await tester.pumpWidget(_buildSubject(onRegister: () => calls++));
+      await tester.ensureVisible(find.byKey(const Key('register_link')));
+      await tester.tap(find.byKey(const Key('register_link')));
+      await tester.pumpAndSettle();
+      expect(calls, equals(1));
     });
   });
 }

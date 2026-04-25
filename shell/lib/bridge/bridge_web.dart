@@ -16,11 +16,12 @@ import 'dart:async';
 import 'dart:convert';
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
+// ignore: undefined_shown_name
+import 'dart:ui_web' as ui_web;
 
 import 'package:flutter/widgets.dart';
 // ignore: depend_on_referenced_packages
 import 'package:web/web.dart' as web;
-import 'package:ui_web/ui_web.dart' as ui_web;
 
 import 'bridge_messages.dart';
 import 'bridge_transport.dart';
@@ -32,14 +33,14 @@ const _kViewType = 'match3-game-iframe';
 class BridgeWebTransport implements BridgeTransport {
   BridgeWebTransport._({
     required StreamController<BridgeMessage> streamController,
-    required html.StreamSubscription<html.MessageEvent> subscription,
+    required StreamSubscription<html.MessageEvent> subscription,
     required String iframeId,
   })  : _streamController = streamController,
         _subscription = subscription,
         _iframeId = iframeId;
 
   final StreamController<BridgeMessage> _streamController;
-  final html.StreamSubscription<html.MessageEvent> _subscription;
+  final StreamSubscription<html.MessageEvent> _subscription;
   final String _iframeId;
 
   @override
