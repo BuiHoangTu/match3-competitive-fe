@@ -16,6 +16,7 @@
 import { createHash } from "crypto";
 import type { Socket } from "socket.io";
 import { AUTH_MISSING_TOKEN, AUTH_INVALID_TOKEN, AUTH_EXPIRED, type AuthErrorCode } from "./constants";
+import { verifySession } from "./LocalSessionSigner";
 
 /** Maximum time to keep a cached result even if token expiry is longer. */
 const TOKEN_CACHE_MAX_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -76,11 +77,20 @@ function evictExpired(): void {
   }
 }
 
-async function getVerifier(): Promise<VerifyIdTokenFn> {
+async function getVerifier(): Promise<VerifyIdTokenFn | null> {
   if (_verifyIdToken) return _verifyIdToken;
-  // Lazy-load real firebase-admin/auth to allow test mocking without importing
-  const { getAuth } = await import("firebase-admin/auth");
-  return (token: string) => getAuth().verifyIdToken(token);
+  // Lazy-load real firebase-admin/auth to allow test mocking without importing.
+  // Local-account deploys may not have firebase-admin initialised — return
+  // null in that case so the caller can decide whether to reject.
+  try {
+    const { getAuth } = await import("firebase-admin/auth");
+    // Probe: getAuth() throws if no app initialised. We catch that here and
+    // return null to signal "Firebase auth unavailable in this deployment".
+    getAuth();
+    return (token: string) => getAuth().verifyIdToken(token);
+  } catch {
+    return null;
+  }
 }
 
 export interface VerifiedToken {
@@ -115,9 +125,33 @@ export async function verifyToken(token: string | undefined | null): Promise<Ver
     return { userId: cached.userId, tokenExpSec: cached.tokenExpSec };
   }
 
+  // T-Local-04 · Local session token first. Shape is base64url.base64url
+  // and the payload includes kind:"session". Cheap (HMAC, no network).
+  const localResult = verifySession(token);
+  if (localResult) {
+    const tokenExpSec = Math.floor(localResult.exp / 1000);
+    const tokenExpMs = localResult.exp;
+    const ttlMs = Math.min(tokenExpMs - nowMs(), TOKEN_CACHE_MAX_TTL_MS);
+    if (ttlMs <= 0) throw new AuthError(AUTH_EXPIRED, "Token already expired");
+    tokenCache.set(hash, {
+      userId: localResult.userId,
+      expiresAtMs: nowMs() + ttlMs,
+      tokenExpSec,
+    });
+    return { userId: localResult.userId, tokenExpSec };
+  }
+
+  // Fall back to Firebase verification, if available.
+  const verifier = await getVerifier();
+  if (!verifier) {
+    throw new AuthError(
+      AUTH_INVALID_TOKEN,
+      "Token not a valid local session and Firebase auth unavailable"
+    );
+  }
+
   let decoded: { uid: string; exp: number };
   try {
-    const verifier = await getVerifier();
     decoded = await verifier(token);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

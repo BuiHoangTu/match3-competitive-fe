@@ -18,6 +18,11 @@ import { AUTH_MISSING_TOKEN, AUTH_INVALID_TOKEN } from "./constants";
 import type { PersistenceAdapter } from "./persistence/PersistenceAdapter";
 import { deleteAccount } from "./persistence/AccountDeletion";
 import * as metrics from "./metrics";
+import {
+  type LocalAccountStore,
+  DuplicateUsernameError,
+} from "./persistence/LocalAccountStore";
+import { signSession } from "./LocalSessionSigner";
 
 const MAX_BODY_BYTES = 4 * 1024;
 
@@ -25,6 +30,11 @@ export interface MatchmakingHttpDeps {
   roomManager: RoomManager;
   matchmaking: MatchmakingService;
   persistence: PersistenceAdapter;
+  /**
+   * Optional local-account store. When set, /auth/register and /auth/login
+   * are wired. When omitted, those endpoints return 503 (auth unavailable).
+   */
+  localAccounts?: LocalAccountStore;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -68,6 +78,24 @@ function isValidMode(v: unknown): v is MatchmakingMode {
 export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = req.url ?? "";
+
+    // ── POST /auth/register ────────────────────────────────────────────────────
+    if (url === "/auth/register") {
+      await handleAuthRegister(deps, req, res);
+      return;
+    }
+
+    // ── POST /auth/login ───────────────────────────────────────────────────────
+    if (url === "/auth/login") {
+      await handleAuthLogin(deps, req, res);
+      return;
+    }
+
+    // ── GET /healthz ───────────────────────────────────────────────────────────
+    if (url === "/healthz") {
+      sendJson(res, 200, { status: "ok" });
+      return;
+    }
 
     // ── GET /user/history ──────────────────────────────────────────────────────
     if (url.startsWith("/user/history")) {
@@ -310,6 +338,141 @@ async function handleAccountDelete(
     console.error("[account_deletion] failed:", (err as Error).message);
     sendJson(res, 500, { code: "DELETION_FAILED", message: "Account deletion failed" });
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// T-Local-04 · /auth/register and /auth/login
+// ───────────────────────────────────────────────────────────────────────────
+
+const USERNAME_RE = /^[a-zA-Z0-9_-]{3,32}$/;
+const MIN_PASSWORD_LEN = 6;
+const MAX_PASSWORD_LEN = 200;
+
+interface RegisterBody {
+  username?: unknown;
+  email?: unknown;
+  password?: unknown;
+}
+
+interface LoginBody {
+  username?: unknown;
+  password?: unknown;
+}
+
+async function handleAuthRegister(
+  deps: MatchmakingHttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
+    return;
+  }
+  if (!deps.localAccounts) {
+    sendJson(res, 503, {
+      code: "LOCAL_AUTH_DISABLED",
+      message: "Local account auth not configured on this server",
+    });
+    return;
+  }
+  let body: RegisterBody = {};
+  try {
+    const raw = await readBody(req);
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { code: "BAD_BODY" });
+    return;
+  }
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const email =
+    typeof body.email === "string" && body.email.trim() !== ""
+      ? body.email.trim()
+      : undefined;
+  if (!USERNAME_RE.test(username)) {
+    sendJson(res, 400, {
+      code: "BAD_USERNAME",
+      message:
+        "Username must be 3-32 chars, alphanumerics / underscore / hyphen only",
+    });
+    return;
+  }
+  if (password.length < MIN_PASSWORD_LEN || password.length > MAX_PASSWORD_LEN) {
+    sendJson(res, 400, {
+      code: "BAD_PASSWORD",
+      message: `Password must be ${MIN_PASSWORD_LEN}–${MAX_PASSWORD_LEN} characters`,
+    });
+    return;
+  }
+  try {
+    const account = await deps.localAccounts.register({ username, email, password });
+    const { token, expiresAt } = signSession({ userId: account.userId });
+    sendJson(res, 201, {
+      sessionToken: token,
+      expiresAt,
+      userId: account.userId,
+      username: account.username,
+    });
+  } catch (err) {
+    if (err instanceof DuplicateUsernameError) {
+      sendJson(res, 409, { code: "USERNAME_TAKEN", message: err.message });
+      return;
+    }
+    console.error("[auth/register] failed:", (err as Error).message);
+    sendJson(res, 500, { code: "REGISTER_FAILED", message: "Registration failed" });
+  }
+}
+
+async function handleAuthLogin(
+  deps: MatchmakingHttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
+    return;
+  }
+  if (!deps.localAccounts) {
+    sendJson(res, 503, {
+      code: "LOCAL_AUTH_DISABLED",
+      message: "Local account auth not configured on this server",
+    });
+    return;
+  }
+  let body: LoginBody = {};
+  try {
+    const raw = await readBody(req);
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { code: "BAD_BODY" });
+    return;
+  }
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  if (!username || !password) {
+    sendJson(res, 400, { code: "BAD_BODY", message: "username and password required" });
+    return;
+  }
+  let userId: string | null = null;
+  try {
+    userId = await deps.localAccounts.login(username, password);
+  } catch (err) {
+    console.error("[auth/login] failed:", (err as Error).message);
+    sendJson(res, 500, { code: "LOGIN_FAILED" });
+    return;
+  }
+  if (!userId) {
+    // Same code for "no such user" and "wrong password" — defense in depth.
+    sendJson(res, 401, { code: "INVALID_CREDENTIALS" });
+    return;
+  }
+  const { token, expiresAt } = signSession({ userId });
+  sendJson(res, 200, {
+    sessionToken: token,
+    expiresAt,
+    userId,
+    username,
+  });
 }
 
 /** Expose helpers for tests. */

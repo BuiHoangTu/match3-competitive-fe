@@ -56,6 +56,12 @@ export interface ServerOptions {
    * adapter is used so the server can be constructed in tests without Postgres.
    */
   persistence?: PersistenceAdapter;
+
+  /**
+   * T-Local-04 · Local-account store for /auth/register + /auth/login.
+   * When omitted, those endpoints respond 503 LOCAL_AUTH_DISABLED.
+   */
+  localAccounts?: import("./persistence/LocalAccountStore").LocalAccountStore;
 }
 
 /**
@@ -113,13 +119,16 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     roomManager,
     matchmaking,
     persistence,
+    localAccounts: opts.localAccounts,
   });
   httpServer.on("request", (req, res) => {
     const url = req.url ?? "";
     if (
       url.startsWith("/matchmaking/") ||
       url.startsWith("/user/") ||
-      url.startsWith("/account/")
+      url.startsWith("/account/") ||
+      url.startsWith("/auth/") ||
+      url === "/healthz"
     ) {
       void matchmakingHttp(req, res);
       return;
@@ -673,9 +682,64 @@ export function startServer(port: number, opts: ServerOptions = {}): Promise<Ser
   });
 }
 
-if (require.main === module) {
+/**
+ * CLI bootstrap: wires up persistence + local-account auth from env.
+ *   DATABASE_URL — enables Postgres-backed UserStore, MatchHistoryStore,
+ *                  and LocalAccountStore. Without it, the server runs in
+ *                  ephemeral / in-memory mode (data lost on restart).
+ *   SESSION_TOKEN_SECRET — HMAC secret for local session tokens.
+ *   ROOM_TOKEN_SECRET    — HMAC secret for room tokens.
+ *   FIREBASE_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS — optional;
+ *                  enables Apple/Google SSO once configured.
+ */
+async function bootstrap(): Promise<void> {
+  const { initSessionSecret } = await import("./LocalSessionSigner");
+  initSessionSecret(process.env.SESSION_TOKEN_SECRET);
+
+  let persistence: PersistenceAdapter = NullPersistenceAdapter;
+  let localAccounts: import("./persistence/LocalAccountStore").LocalAccountStore | undefined;
+
+  if (process.env.DATABASE_URL) {
+    try {
+      const [{ getPool }, { PgUserStore }, { PgMatchHistoryStore }, { PgLocalAccountStore }] =
+        await Promise.all([
+          import("./db"),
+          import("./persistence/UserStore"),
+          import("./persistence/MatchHistoryStore"),
+          import("./persistence/LocalAccountStore"),
+        ]);
+      const pool = getPool();
+      persistence = {
+        userStore: new PgUserStore(),
+        matchHistoryStore: new PgMatchHistoryStore(),
+      };
+      localAccounts = new PgLocalAccountStore(pool);
+      console.log("[bootstrap] Postgres-backed persistence + local accounts enabled");
+    } catch (err) {
+      console.error(
+        "[bootstrap] DATABASE_URL set but pool init failed — running without persistence:",
+        err
+      );
+    }
+  } else {
+    // No Postgres → in-memory local accounts so /auth still works on a spare
+    // PC deploy. Accounts are lost on restart; document this in DOCKER.md.
+    const { InMemoryLocalAccountStore } = await import("./persistence/LocalAccountStore");
+    localAccounts = new InMemoryLocalAccountStore();
+    console.log(
+      "[bootstrap] DATABASE_URL not set — using in-memory local accounts " +
+        "(non-persistent across restarts)"
+    );
+  }
+
   const PORT = Number(process.env.PORT ?? 3001);
-  startServer(PORT).then(() => {
-    console.log(`Match-3 backend listening on port ${PORT}`);
+  await startServer(PORT, { persistence, localAccounts });
+  console.log(`Match-3 backend listening on port ${PORT}`);
+}
+
+if (require.main === module) {
+  bootstrap().catch((err) => {
+    console.error("[bootstrap] fatal:", err);
+    process.exit(1);
   });
 }
