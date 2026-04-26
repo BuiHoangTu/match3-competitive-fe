@@ -16,6 +16,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/user_profile.dart';
 
@@ -69,22 +70,83 @@ class _AuthResult {
   final int expiresAt;
 }
 
+/// Storage keys used by [LocalAuthService] to persist a session across page
+/// reloads. Kept centralised for tests.
+class _Keys {
+  static const sessionToken = 'auth.sessionToken';
+  static const userId = 'auth.userId';
+  static const username = 'auth.username';
+  static const expiresAt = 'auth.expiresAtMs';
+}
+
 class LocalAuthService {
   LocalAuthService({
     required this.baseUrl,
     HttpPoster? postFn,
-  }) : _post = postFn ?? _defaultPost;
+    Future<SharedPreferences>? prefs,
+  })  : _post = postFn ?? _defaultPost,
+        _prefs = prefs ?? SharedPreferences.getInstance();
 
   /// Backend origin — no trailing slash.
   final String baseUrl;
   final HttpPoster _post;
+  final Future<SharedPreferences> _prefs;
 
   String? _sessionToken;
   UserProfile? _profile;
   int? _expiresAtMs;
+  bool _restored = false;
 
   final StreamController<UserProfile?> _stateController =
       StreamController<UserProfile?>.broadcast();
+
+  /// Restore a previously saved session from local storage if present and
+  /// not expired. Safe to call multiple times. Emits the restored profile on
+  /// [authStateStream] so listeners (router refresh) react. Call this once
+  /// at app startup before [createRouter].
+  Future<void> restoreSession() async {
+    if (_restored) return;
+    _restored = true;
+    final p = await _prefs;
+    final token = p.getString(_Keys.sessionToken);
+    final exp = p.getInt(_Keys.expiresAt);
+    final userId = p.getString(_Keys.userId);
+    final username = p.getString(_Keys.username);
+    if (token == null ||
+        exp == null ||
+        userId == null ||
+        username == null ||
+        exp <= DateTime.now().millisecondsSinceEpoch) {
+      // Stale or absent — clear silently.
+      await _clearStorage();
+      return;
+    }
+    _sessionToken = token;
+    _expiresAtMs = exp;
+    _profile = UserProfile(userId: userId, displayName: username);
+    _stateController.add(_profile);
+  }
+
+  Future<void> _clearStorage() async {
+    final p = await _prefs;
+    await p.remove(_Keys.sessionToken);
+    await p.remove(_Keys.userId);
+    await p.remove(_Keys.username);
+    await p.remove(_Keys.expiresAt);
+  }
+
+  Future<void> _persist() async {
+    final p = await _prefs;
+    if (_sessionToken == null ||
+        _expiresAtMs == null ||
+        _profile == null) {
+      return;
+    }
+    await p.setString(_Keys.sessionToken, _sessionToken!);
+    await p.setInt(_Keys.expiresAt, _expiresAtMs!);
+    await p.setString(_Keys.userId, _profile!.userId);
+    await p.setString(_Keys.username, _profile!.displayName);
+  }
 
   /// Emits the current profile on sign-in, null on sign-out.
   Stream<UserProfile?> get authStateStream => _stateController.stream;
@@ -119,7 +181,7 @@ class LocalAuthService {
       },
       successCodes: const {201},
     );
-    _setAuthState(result);
+    await _setAuthState(result);
     return _profile!;
   }
 
@@ -132,7 +194,7 @@ class LocalAuthService {
       body: {'username': username, 'password': password},
       successCodes: const {200},
     );
-    _setAuthState(result);
+    await _setAuthState(result);
     return _profile!;
   }
 
@@ -140,13 +202,15 @@ class LocalAuthService {
     _sessionToken = null;
     _profile = null;
     _expiresAtMs = null;
+    await _clearStorage();
     _stateController.add(null);
   }
 
-  void _setAuthState(_AuthResult r) {
+  Future<void> _setAuthState(_AuthResult r) async {
     _sessionToken = r.sessionToken;
     _expiresAtMs = r.expiresAt;
     _profile = UserProfile(userId: r.userId, displayName: r.username);
+    await _persist();
     _stateController.add(_profile);
   }
 

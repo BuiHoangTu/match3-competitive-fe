@@ -1,4 +1,4 @@
-// T-v0.6-A01..A02 + T-Local-07 — App entrypoint with router + LocalAuthService.
+// T-v0.6-A01..A02 + T-Local-07/09 — App entrypoint with router + LocalAuthService.
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -11,8 +11,13 @@ const _backendUrl = String.fromEnvironment(
   defaultValue: 'http://localhost:3001',
 );
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   final localAuth = LocalAuthService(baseUrl: _backendUrl);
+  // Restore any previously stored session before the router decides where
+  // to send the user. Without this, every page reload bounces back to
+  // /sign-in even though a valid token is sitting in localStorage.
+  await localAuth.restoreSession();
   final authState = LocalAuthStateAdapter(localAuth);
   final router = createRouter(auth: authState, localAuth: localAuth);
   runApp(Match3App(router: router));

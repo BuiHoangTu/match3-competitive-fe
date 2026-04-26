@@ -47,6 +47,7 @@ import 'services/account_client.dart';
 import 'services/game_view_bootstrap.dart';
 import 'services/local_auth_service.dart';
 import 'errors/matchmaking_errors.dart';
+import 'models/matchmaking_result.dart';
 import 'services/matchmaking_client.dart';
 
 // ---------------------------------------------------------------------------
@@ -331,7 +332,25 @@ GoRouter createRouter({
               _ => MatchmakingMode.solo,
             };
             try {
-              final result = await mm.join(idToken: tok, mode: mmMode);
+              MatchmakingResult result;
+              try {
+                result = await mm.join(idToken: tok, mode: mmMode);
+              } on MatchmakingActiveRoom catch (e) {
+                // The user already has a live match server-side. Resume
+                // transparently rather than forcing them to forfeit and
+                // re-queue. Server-side AR-7 enforcement leaves the original
+                // room intact; the resume endpoint mints a fresh room token.
+                developer.log(
+                    'active match for ${e.roomId} — calling /matchmaking/resume',
+                    name: 'router');
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Reconnecting to your match…'),
+                    duration: Duration(seconds: 2),
+                  ));
+                }
+                result = await mm.resume(idToken: tok, roomId: e.roomId);
+              }
               // Same-origin sub-path: the shell's nginx serves the Phaser
               // bundle at /game/ alongside the Flutter shell at /. Override
               // via --dart-define=GAME_URL=... only if the game is hosted
@@ -367,12 +386,13 @@ GoRouter createRouter({
 
               if (!ctx.mounted) return;
               ctx.goNamed(Routes.match, extra: handle);
-            } on MatchmakingActiveRoom catch (e) {
-              developer.log('matchmaking active room: ${e.roomId}',
-                  name: 'router');
+            } on MatchmakingRoomGone {
+              // Resume after the rejoin window expired — the previous match
+              // is gone. User can tap a mode again to start fresh.
               if (!ctx.mounted) return;
               ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                content: Text('You already have an active match'),
+                content: Text(
+                    'Previous match ended — tap a mode to start a new one'),
               ));
             } on MatchmakingAuthRejected {
               if (!ctx.mounted) return;

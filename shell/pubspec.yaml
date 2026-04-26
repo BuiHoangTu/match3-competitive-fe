@@ -37,6 +37,9 @@ dependencies:
   # WebView for embedded game view — iOS/Android (T-v0.6-A08b)
   webview_flutter: ^4.0.0
 
+  # Persistent local storage for the session token (T-Local-09).
+  shared_preferences: ^2.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
