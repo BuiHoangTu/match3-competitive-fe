@@ -332,9 +332,13 @@ GoRouter createRouter({
             };
             try {
               final result = await mm.join(idToken: tok, mode: mmMode);
+              // Same-origin sub-path: the shell's nginx serves the Phaser
+              // bundle at /game/ alongside the Flutter shell at /. Override
+              // via --dart-define=GAME_URL=... only if the game is hosted
+              // somewhere else (uncommon).
               const assetUrl = String.fromEnvironment(
                 'GAME_URL',
-                defaultValue: 'http://localhost:5173/game/',
+                defaultValue: '/game/',
               );
               final handle = await loadGameView(assetUrl: assetUrl);
 

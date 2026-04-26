@@ -16,12 +16,19 @@ register with any username + password, and play.
 
 | Endpoint | What |
 |---|---|
-| http://localhost:8080 | Flutter shell + embedded game (the user-facing UI) |
-| http://localhost:5173 | Standalone Phaser game (dev-only convenience) |
+| http://localhost:8080/ | Flutter shell |
+| http://localhost:8080/game/ | Embedded Phaser bundle (same origin as the shell — postMessage and Socket.IO behave) |
 | http://localhost:3001/healthz | Backend health probe |
 
 The first time, `docker compose build` takes ~5 min (Flutter SDK pull). After
 that, `docker compose up` boots in under 30 seconds.
+
+Three containers run: `postgres`, `backend`, `shell`. The shell container's
+nginx serves both the Flutter app at `/` and the Phaser bundle at `/game/`,
+so the iframe stays same-origin and there's nothing to plumb between hosts.
+
+For standalone Phaser dev iteration outside Docker, run `npm run dev` in
+`fe/` — that gives you http://localhost:5173 with hot-reload.
 
 ## What's wired
 
@@ -61,7 +68,7 @@ Environment variables (set in `docker-compose.yml` or `.env`):
 | `ROOM_TOKEN_SECRET` | dev placeholder | Replace in any non-local deployment with `openssl rand -hex 32` |
 | `SESSION_TOKEN_SECRET` | dev placeholder | Same — `openssl rand -hex 32` |
 | `BACKEND_URL` (build arg) | `http://localhost:3001` | Backend URL baked into the Flutter Web build |
-| `VITE_BACKEND_URL` (build arg) | `http://localhost:3001` | Same for the standalone Phaser bundle |
+| `VITE_BACKEND_URL` (build arg) | `http://localhost:3001` | Same backend URL baked into the embedded Phaser build |
 | `GOOGLE_APPLICATION_CREDENTIALS` | unset | Optional; only needed when SSO is enabled |
 
 ## Deploying on a remote host
@@ -75,9 +82,10 @@ cd match3-competitive
 export ROOM_TOKEN_SECRET=$(openssl rand -hex 32)
 export SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
 
-# Build with the host's public URL baked into the Flutter bundle
+# Build with the host's public URL baked into the bundles
 docker compose build \
-  --build-arg BACKEND_URL=https://your-host.example.com:3001
+  --build-arg BACKEND_URL=https://your-host.example.com:3001 \
+  --build-arg VITE_BACKEND_URL=https://your-host.example.com:3001
 docker compose up -d
 ```
 

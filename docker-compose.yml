@@ -1,7 +1,9 @@
-version: "3.9"
-
-# Local development only — never expose these credentials to production.
-# Prod uses a managed Postgres instance (Cloud SQL / RDS); see system-design § 6.
+# Three services. The shell container serves both the Flutter Web app and
+# the embedded Phaser bundle from the same origin (`/` and `/game/`), so
+# postMessage between shell ↔ game and the Socket.IO handshake from the
+# game iframe to the backend stay simple.
+#
+# Local development only — never expose the placeholder secrets in prod.
 
 services:
   postgres:
@@ -44,30 +46,19 @@ services:
       timeout: 3s
       retries: 12
 
-  frontend:
-    build:
-      context: .
-      dockerfile: fe/Dockerfile
-      args:
-        VITE_BACKEND_URL: http://localhost:3001
-    ports:
-      - "5173:80"
-
   shell:
     build:
       context: .
       dockerfile: shell/Dockerfile
       args:
-        # URLs baked into the Flutter Web bundle. Override these when deploying
-        # to a non-localhost host (e.g. BACKEND_URL=https://api.example.com,
-        # GAME_URL=https://app.example.com/game/).
+        # Backend origin baked into the shell + game bundles. Override when
+        # deploying behind a different domain.
         BACKEND_URL: http://localhost:3001
-        GAME_URL: http://localhost:5173/game/
+        VITE_BACKEND_URL: http://localhost:3001
     ports:
       - "8080:80"
     depends_on:
       - backend
-      - frontend
 
 volumes:
   match3_pgdata:
