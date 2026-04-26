@@ -28,7 +28,7 @@ nginx serves both the Flutter app at `/` and the Phaser bundle at `/game/`,
 so the iframe stays same-origin and there's nothing to plumb between hosts.
 
 For standalone Phaser dev iteration outside Docker, run `npm run dev` in
-`fe/` — that gives you http://localhost:5173 with hot-reload.
+`packages/game-view/` — that gives you http://localhost:5173 with hot-reload.
 
 ## What's wired
 
@@ -56,7 +56,7 @@ For standalone Phaser dev iteration outside Docker, run `npm run dev` in
 
 The `shell` service serves both the Flutter shell and the embedded Phaser game from the **same origin** (required for `postMessage` bridge):
 - `/` → Flutter shell (from `shell/build/web/`)
-- `/game/` → Phaser game (from `fe/dist/`)
+- `/game/` → Phaser game (from `packages/game-view/dist/`)
 
 ## Configuration
 
@@ -100,10 +100,10 @@ turn SSO on:
 
 1. Complete [ops/v1-launch-checklist.md § 1](ops/v1-launch-checklist.md) (paid
    developer accounts, Firebase project, OAuth client IDs).
-2. Generate `shell/firebase_options.dart` via `flutterfire configure`.
+2. Generate `apps/frontend/firebase_options.dart` via `flutterfire configure`.
 3. Set `GOOGLE_APPLICATION_CREDENTIALS` for the backend.
-4. Replace the SSO "Under development" snackbar in `shell/lib/router.dart` with
-   actual provider calls (T-v0.6-C03/C04 hooks already exist in `shell/lib/services/`).
+4. Replace the SSO "Under development" snackbar in `apps/frontend/lib/router.dart` with
+   actual provider calls (T-v0.6-C03/C04 hooks already exist in `apps/frontend/lib/services/`).
 5. Rebuild + redeploy.
 
 ## Debugging

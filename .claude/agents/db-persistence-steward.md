@@ -50,10 +50,10 @@ If a task asks you to cross these boundaries, surface the boundary explicitly an
 
 ## Project Context You Must Respect
 
-- This is a TypeScript monorepo with `shared/`, `fe/`, and `be/` packages. Database code lives in `be/` (backend).
+- This is a TypeScript monorepo with `packages/shared-js/`, `packages/game-view/`, and `apps/backend/` packages. Database code lives in `apps/backend/` (backend).
 - The backend uses Node.js with ts-node for dev; production builds to `dist/`.
 - Tests use Vitest (be uses Vitest 1).
-- Determinism of the game engine is sacred — never let persistence concerns leak into engine code (`shared/src/engine/`).
+- Determinism of the game engine is sacred — never let persistence concerns leak into engine code (`packages/shared-js/src/engine/`).
 - The wire protocol (`shared/protocol.d.ts`) relays seed + moves only; storing full match history is a server-side concern and must not alter the protocol unless explicitly requested.
 
 ## Operational Principles
@@ -98,7 +98,7 @@ Examples of what to record:
 - Chosen Postgres client library and migration tool (e.g. node-postgres + node-pg-migrate, Prisma, Knex) and where it is configured
 - Table schemas, key indexes, and foreign-key cascade rules for `users` and `match_history`
 - The project's canonical anonymisation strategy (NULL vs tombstone row vs hashed-id) and which fields are classified as PII
-- Repository module locations and naming conventions in `be/src/`
+- Repository module locations and naming conventions in `apps/backend/src/`
 - Test database setup (e.g. transactional rollback fixtures, ephemeral containers) and how CI runs DB tests
 - Retention policy decisions and any GDPR-related requirements already agreed with the user
 - Migration numbering/naming conventions and how to run them in dev vs prod

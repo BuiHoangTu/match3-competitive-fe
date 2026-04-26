@@ -103,15 +103,15 @@ No password complexity rules in v1.0; we'll add them later if needed.
 
 ## Files added/changed
 
-- `be/migrations/003_local_accounts.sql` — schema
-- `be/src/persistence/LocalAccountStore.ts` — register / verifyPassword / lookup
-- `be/src/LocalSessionSigner.ts` — sign / verify session tokens
-- `be/src/AuthMiddleware.ts` — try local first, then Firebase
-- `be/src/matchmakingHttp.ts` — POST /auth/register, /auth/login
-- `shell/lib/services/local_auth_service.dart` — implements AuthStateInterface
-- `shell/lib/screens/sign_in_screen.dart` — username + password fields
-- `shell/lib/screens/register_screen.dart` — new
-- `shell/lib/router.dart` — wires the new service; SSO buttons → snackbar
+- `apps/backend/migrations/003_local_accounts.sql` — schema
+- `apps/backend/src/persistence/LocalAccountStore.ts` — register / verifyPassword / lookup
+- `apps/backend/src/LocalSessionSigner.ts` — sign / verify session tokens
+- `apps/backend/src/AuthMiddleware.ts` — try local first, then Firebase
+- `apps/backend/src/matchmakingHttp.ts` — POST /auth/register, /auth/login
+- `apps/frontend/lib/services/local_auth_service.dart` — implements AuthStateInterface
+- `apps/frontend/lib/screens/sign_in_screen.dart` — username + password fields
+- `apps/frontend/lib/screens/register_screen.dart` — new
+- `apps/frontend/lib/router.dart` — wires the new service; SSO buttons → snackbar
 - `DOCKER.md` — updated quickstart
 
 Tests added at every new module + endpoint level.

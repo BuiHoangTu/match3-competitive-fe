@@ -41,7 +41,7 @@ On rolling deploys: stop old instance **after** new instance accepts connections
 
 ## Deploys
 
-1. Build: `cd be && npm ci && npm run build`. Artefact: `be/dist/`.
+1. Build: `cd apps/backend && npm ci && npm run build`. Artefact: `apps/backend/dist/`.
 2. Ship artefact to VM; run migrations with `npm run migrate:up` against `DATABASE_URL`.
 3. Rolling restart per above.
 4. Health-check: `curl -fsS https://<prod-domain>/health` expects `200 ok`. If no `/health` endpoint exists yet, monitor `wss://<prod-domain>/socket.io/?EIO=4&transport=websocket` handshake.
@@ -54,7 +54,7 @@ systemctl stop match3-be
 # Repoint dist/ to previous release tag (managed by deploy tool)
 systemctl start match3-be
 # If migration needs reverting:
-cd /app/be && npm run migrate:down
+cd /app/apps/backend && npm run migrate:down
 ```
 
 Database migrations are additive where possible. Destructive migrations (column drop, table drop) require an out-of-band plan.
@@ -79,7 +79,7 @@ Drill this quarterly — see [T-v1.0-04](../specification/implementation-plan.md
 
 **Match-history writes backing up.** DB outage or latency; the server buffers up to 500 rows in memory then drops oldest (see `match_history_buffer_dropped_total` metric). Escalate if buffer dropped > 0.
 
-**Rejoin failing after network drop.** Check rejoin window (`REJOIN_WINDOW_MS` in `be/src/constants.ts`). Check server log for `rejoin_window_expired` events. If persistent, suspect a clock-skew or HMAC mismatch.
+**Rejoin failing after network drop.** Check rejoin window (`REJOIN_WINDOW_MS` in `apps/backend/src/constants.ts`). Check server log for `rejoin_window_expired` events. If persistent, suspect a clock-skew or HMAC mismatch.
 
 **Determinism-violation events.** Treat as high-severity. Capture: server seed, move list, both clients' final-board hashes, server `match_history` row. File a determinism incident, pin the match for offline replay.
 

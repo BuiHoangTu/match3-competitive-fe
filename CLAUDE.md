@@ -13,15 +13,20 @@ Specs live under [specification/](specification/):
 - [planning.md](specification/planning.md) — milestones and per-version scope
 - [implementation-plan.md](specification/implementation-plan.md) — agent-executable tasks
 
-**Not yet in the codebase (v0.6 work):** Flutter app shell, shell↔game bridge, Firebase Auth / Socket.IO token verification, Postgres persistence (`users`, `match_history`), userId-keyed rejoin. Do not assume these exist when reading code — they are planned, not present. Current code state matches the Status snapshot in [implementation-plan.md](specification/implementation-plan.md).
+All four packages (backend, frontend, game-view, shared-js) are present and tested. v0.6 code is complete; outstanding items are paid-account / device / store-submission gates tracked in [ops/v1-launch-checklist.md](ops/v1-launch-checklist.md).
 
 ## Repository Layout
 
 ```
-shared/   — Pure TypeScript shared by both fe and be
-fe/       — Phaser + TypeScript game client
-be/       — Node.js + Socket.IO backend server
+apps/
+  backend/         — Node.js + Socket.IO server (Postgres-backed)
+  frontend/        — Flutter shell (mobile + web). Embeds the game view.
+packages/
+  game-view/       — Phaser + TypeScript game client (the embedded iframe / WebView)
+  shared-js/       — Pure TS shared by backend + game-view (engine, bot, bridge types)
 ```
+
+`apps/frontend/` is a Flutter package; the others are npm workspaces.
 
 ## Commands
 
@@ -36,29 +41,29 @@ See [DOCKER.md](DOCKER.md) for full setup and debugging guide.
 
 ### Local development (requires Node.js 20, Flutter SDK)
 
-**Shared (`shared/`)**
+**Shared (`packages/shared-js/`)**
 ```bash
 # No build step needed — imported directly by fe and be
-npx tsc --project shared/tsconfig.json --noEmit   # type-check only
+npx tsc --project packages/shared-js/tsconfig.json --noEmit   # type-check only
 ```
 
-**Frontend (`fe/`)**
+**Frontend (`packages/game-view/`)**
 ```bash
 npm run dev     # Vite dev server  →  http://localhost:5173
 npm test        # Vitest unit tests (68 tests)
 npm run build   # TypeScript + Vite production build
 ```
 
-**Backend (`be/`)**
+**Backend (`apps/backend/`)**
 ```bash
 npm run dev     # ts-node src/server.ts  →  port 3001
 npm test        # Vitest unit tests (36 tests)
 npm run build   # tsc → dist/
 ```
 
-**Flutter Shell (`shell/`)**
+**Flutter Shell (`apps/frontend/`)**
 ```bash
-cd shell
+cd apps/frontend
 flutter pub get
 flutter run -d chrome          # Run on web (requires Chrome/Chromium)
 flutter build web              # Build for production
@@ -68,45 +73,45 @@ flutter build web              # Build for production
 
 Four strict layers — **never mix them**:
 
-0. **Shared** (`shared/src/`) — pure TypeScript, no framework/Phaser/Node imports.
+0. **Shared** (`packages/shared-js/src/`) — pure TypeScript, no framework/Phaser/Node imports.
    - `engine/rng.ts`, `engine/Board.ts`, `engine/MatchEngine.ts` — canonical engine source
    - `bot/BotPlayer.ts` — bot AI shared by frontend (PvE client-side) and backend (matchmaking fallback)
    - `protocol.d.ts` — Socket.IO wire-format types shared by fe and be
-   - All packages import shared code via the `@match3/shared` npm workspace alias (e.g. `@match3/shared/engine/Board.js`)
-   - `fe/src/engine/*.ts` and `fe/src/bot/BotPlayer.ts` are **re-export shims** so existing imports and tests continue to work unchanged
-   - `be/tsconfig.json` uses `rootDir: ".."` (monorepo root) to allow importing shared `.ts` source files; build output is `dist/be/src/server.js`
+   - All packages import shared code via the `@match3/shared-js` npm workspace alias (e.g. `@match3/shared-js/engine/Board.js`)
+   - `packages/game-view/src/engine/*.ts` and `packages/game-view/src/bot/BotPlayer.ts` are **re-export shims** so existing imports and tests continue to work unchanged
+   - `apps/backend/tsconfig.json` uses `rootDir: ".."` (monorepo root) to allow importing shared `.ts` source files; build output is `dist/apps/backend/src/server.js`
 
-1. **Engine** (`fe/src/engine/`) — re-export shims only; real source lives in `shared/`.
+1. **Engine** (`packages/game-view/src/engine/`) — re-export shims only; real source lives in `packages/shared-js/`.
    - `rng.ts` — mulberry32 seeded PRNG (`createRng`, `randInt`)
    - `Board.ts` — grid state, `createBoard(seed)`, `swapTiles()` (immutable)
    - `MatchEngine.ts` — `findMatches`, `removeMatches`, `applyGravity`, `refill`, `resolveBoard`, plus animation variants `applyGravityWithMovements` and `resolveBoardAnimated`
    - All randomness flows through seeded RNG; same seed + moves = identical board on every client.
 
-2. **Game loop** (`fe/src/game/`) — pure TypeScript, zero Phaser imports.
+2. **Game loop** (`packages/game-view/src/game/`) — pure TypeScript, zero Phaser imports.
    - `GameLoopController.ts` — owns `Board`, score, tile ID grid. `attemptSwap()` returns animation choreography data (`ResolvedStep[]`). This is the single source of truth for game state in the rendering layer.
 
-3. **Rendering** (`fe/src/scenes/`, `fe/src/rendering/`) — Phaser only.
+3. **Rendering** (`packages/game-view/src/scenes/`, `packages/game-view/src/rendering/`) — Phaser only.
    - `rendering/TileSpritePool.ts` — Phaser object pool with stable sprite IDs
    - `scenes/GameScene.ts` — async swap/resolve loop, tile animations, opponent minimap, dual clocks, turn indicator
    - `scenes/LobbyScene.ts` — three modes: PvP Find Match, vs Bot, Practice
    - `scenes/ResultScene.ts` — WIN/LOSE/DRAW, match score, time bonus, total
    - **Never mutate engine state directly from the render layer** — call `GameLoopController.attemptSwap()` only.
 
-4. **Bot** (`fe/src/bot/`) — re-export shim; real source in `shared/src/bot/BotPlayer.ts`.
+4. **Bot** (`packages/game-view/src/bot/`) — re-export shim; real source in `packages/shared-js/src/bot/BotPlayer.ts`.
    - Scans all adjacent pairs, returns the swap that clears the most cells
    - Used client-side (PvE mode) and server-side (matchmaking fallback when no human opponent)
 
-5. **Network** (`be/`, `fe/src/net/`) — server relays seed + moves only; never full board state.
-   - `be/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay; falls back to bot opponent after 5 s if no human joins
-   - `be/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking
-   - `be/src/validator.ts` — adjacency + bounds validation
-   - `fe/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match
+5. **Network** (`apps/backend/`, `packages/game-view/src/net/`) — server relays seed + moves only; never full board state.
+   - `apps/backend/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay; falls back to bot opponent after 5 s if no human joins
+   - `apps/backend/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking
+   - `apps/backend/src/validator.ts` — adjacency + bounds validation
+   - `packages/game-view/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match
 
 ## Key Constraints
 
 - **Determinism is sacred**: same seed → same board on all clients. Never break this.
-- Engine layer (`fe/src/engine/`) must have zero Phaser imports. Tests run in Node.
-- `GameLoopController` (`fe/src/game/`) must have zero Phaser imports.
+- Engine layer (`packages/game-view/src/engine/`) must have zero Phaser imports. Tests run in Node.
+- `GameLoopController` (`packages/game-view/src/game/`) must have zero Phaser imports.
 - Rendering layer reads engine state; it never mutates it.
 - Server sends seed + moves only — no board state over the wire.
 

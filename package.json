@@ -2,8 +2,8 @@
   "name": "match3-competitive",
   "private": true,
   "workspaces": [
-    "shared",
-    "fe",
-    "be"
+    "packages/shared-js",
+    "packages/game-view",
+    "apps/backend"
   ]
 }

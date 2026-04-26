@@ -17,7 +17,7 @@ State as of 2026-04-25. The codebase is **code-complete** for everything that ca
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v0.6-C01 | Create Firebase project (one for dev, one to follow for prod) | `flutterfire configure` to populate `shell/firebase_options.dart`; enable Apple + Google providers; disable email/password |
+| T-v0.6-C01 | Create Firebase project (one for dev, one to follow for prod) | `flutterfire configure` to populate `apps/frontend/firebase_options.dart`; enable Apple + Google providers; disable email/password |
 | T-v0.6-C02 | Add Sign-in-with-Apple capability + bundle id in Xcode project | Requires paid Apple Developer Program enrolment (T-v0.6-H01) |
 | T-v0.6-H01 | Apple Developer enrolment ($99/yr) | Pay + verify with org docs |
 | T-v0.6-H02 | Google Play Console enrolment ($25) | Pay |
@@ -49,16 +49,16 @@ Server config: see [ops/runbook.md § Environment variables](runbook.md#environm
 | T-v1.0-06 | App Store production submission | Promote TestFlight → production track once review passes |
 | T-v1.0-07 | Play Console production submission | Promote closed → production track once review passes |
 
-[shell/docs/app-store-review.md](../shell/docs/app-store-review.md) tracks each guideline self-review (4.2 / 4.8 / 5.1.1(v)). Fill in the Artefact column as each H-task lands.
+[apps/frontend/docs/app-store-review.md](../apps/frontend/docs/app-store-review.md) tracks each guideline self-review (4.2 / 4.8 / 5.1.1(v)). Fill in the Artefact column as each H-task lands.
 
 ### 4. Device + browser verification (v0.6-I01..I04, v0.7-08..12)
 
 | Task | What | Owner action |
 |---|---|---|
 | T-v0.6-I01 | Three-target determinism assertion | Run a fixed move sequence on iOS + Android + Flutter Web; SHA-256 of canonicalised final board hashes match |
-| T-v0.6-I03 | Flutter Web cold-load measurement | Lighthouse + manual timing; record in [shell/docs/cold-load.md](../shell/docs/cold-load.md) |
-| T-v0.6-I04 | Cross-device rejoin E2E | Start match on phone → resume on laptop; record in shell/docs/ |
-| T-v0.7-08 | Browser matrix (Chrome / FF / Safari / mobile) | Fill [shell/docs/platform-matrix.md](../shell/docs/platform-matrix.md) |
+| T-v0.6-I03 | Flutter Web cold-load measurement | Lighthouse + manual timing; record in [apps/frontend/docs/cold-load.md](../apps/frontend/docs/cold-load.md) |
+| T-v0.6-I04 | Cross-device rejoin E2E | Start match on phone → resume on laptop; record in apps/frontend/docs/ |
+| T-v0.7-08 | Browser matrix (Chrome / FF / Safari / mobile) | Fill [apps/frontend/docs/platform-matrix.md](../apps/frontend/docs/platform-matrix.md) |
 | T-v0.7-09 | Physical iOS device pass | At minimum supported iOS — full sign-in / play / rejoin loop |
 | T-v0.7-10 | Physical Android device pass | At minimum supported Android — same |
 | T-v0.7-11 | NFR-12(a) first-launch timing (≤ 20 s median) | 5 cold runs per target |
@@ -68,8 +68,8 @@ Server config: see [ops/runbook.md § Environment variables](runbook.md#environm
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v0.7-07 | Tile-art colour-blindness audit | Run [fe/docs/tile-palette.md](../fe/docs/tile-palette.md) through deuteranopia / protanopia / tritanopia / achromatopsia simulators; fix any confusion pairs |
-| T-v0.7-13 | External reviewer signoff on NFR-7/8/9/10 | Engage an a11y reviewer; archive their report in `shell/docs/a11y-review/` |
+| T-v0.7-07 | Tile-art colour-blindness audit | Run [packages/game-view/docs/tile-palette.md](../packages/game-view/docs/tile-palette.md) through deuteranopia / protanopia / tritanopia / achromatopsia simulators; fix any confusion pairs |
+| T-v0.7-13 | External reviewer signoff on NFR-7/8/9/10 | Engage an a11y reviewer; archive their report in `apps/frontend/docs/a11y-review/` |
 
 ### 6. Load & soak (v1.0-10..12)
 
@@ -85,7 +85,7 @@ These don't gate the launch but are quick wins worth considering before/after v1
 
 - **T-v0.6-G04** — Cross-device rejoin E2E test in CI. The runtime path is wired (G01/G02); a CI test would just exercise it.
 - **T-v0.6-I02** — Token-refresh-while-connected integration test. The protocol is in place (D06 + B10 + C06); just needs a scripted run with short TTL.
-- **T-v0.6-I05** — Account-deletion CI integration test exists in `be/src/__tests__/account_deletion.test.ts`; it only runs when `DATABASE_URL` is set. Add a CI job that brings up postgres and runs it.
+- **T-v0.6-I05** — Account-deletion CI integration test exists in `apps/backend/src/__tests__/account_deletion.test.ts`; it only runs when `DATABASE_URL` is set. Add a CI job that brings up postgres and runs it.
 - Wire `metrics.emitJsonLine` to a periodic interval or `/metrics` endpoint so an exporter can scrape it.
 - Wire `metrics.increment("bridge_error_count")` at the right places in `GameBridge` and the shell-side transports.
 

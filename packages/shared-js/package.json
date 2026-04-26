@@ -1,0 +1,19 @@
+{
+  "name": "@match3/shared-js",
+  "version": "1.0.0",
+  "private": true,
+  "exports": {
+    "./engine/rng.js": "./src/engine/rng.ts",
+    "./engine/rng": "./src/engine/rng.ts",
+    "./engine/Board.js": "./src/engine/Board.ts",
+    "./engine/Board": "./src/engine/Board.ts",
+    "./engine/MatchEngine.js": "./src/engine/MatchEngine.ts",
+    "./engine/MatchEngine": "./src/engine/MatchEngine.ts",
+    "./bot/BotPlayer.js": "./src/bot/BotPlayer.ts",
+    "./bot/BotPlayer": "./src/bot/BotPlayer.ts",
+    "./protocol.js": "./src/protocol.d.ts",
+    "./protocol": "./src/protocol.d.ts",
+    "./bridge.js": "./src/bridge.ts",
+    "./bridge": "./src/bridge.ts"
+  }
+}

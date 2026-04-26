@@ -74,7 +74,7 @@ flowchart LR
     IdP["Identity Provider<br/>(Firebase Auth →<br/>Apple + Google)"]
     DB[("Postgres<br/>users • match_history")]
 
-    subgraph SharedPkg["@match3/shared (imported by game view + server)"]
+    subgraph SharedPkg["@match3/shared-js (imported by game view + server)"]
         SharedEngine["engine/<br/>Board • MatchEngine • RNG"]
         SharedBot["bot/BotPlayer"]
         Protocol["protocol.d.ts"]
@@ -95,7 +95,7 @@ flowchart LR
 Two things to notice in this picture:
 
 1. **The hot path (moves, clocks, cascades) does not cross the shell→game bridge.** The shell passes the auth token in once, and the game view owns the socket. Every millisecond of the gameplay loop stays inside the WebView/iframe process. This preserves [NFR-2](requirement.md#performance) and [NFR-3](requirement.md#performance) from the pre-shell architecture with no regression.
-2. **The shared engine is still the determinism keystone.** Adding the shell changed the distribution model but not the engine's location or its import graph. The same `@match3/shared` package still serves both game view and server, so [MR-2 / NFR-6](requirement.md#determinism) remain compile-time properties.
+2. **The shared engine is still the determinism keystone.** Adding the shell changed the distribution model but not the engine's location or its import graph. The same `@match3/shared-js` package still serves both game view and server, so [MR-2 / NFR-6](requirement.md#determinism) remain compile-time properties.
 
 ### 2.1 Client shell and embedded game view
 
@@ -391,7 +391,7 @@ flowchart LR
 | v0.3 | `fe/scenes/LobbyScene`, `fe/scenes/ResultScene`, `shared/bot/BotPlayer`, local `TimerManager` | FR-5 (vs Bot), FR-6, FR-7 |
 | v0.4 | `be/server`, `be/RoomManager`, `be/WaitingQueue`, `be/Validator`, `be/TimerManager`, `be/BotManager`, `fe/net/SyncClient`, `shared/protocol.d.ts` | FR-5 (vs Human), FR-8, MR-1–5, MR-7, MR-8 |
 | v0.5 | `be/RejoinManager` (socket-keyed), latency harness, lifecycle logging | MR-6 (initial), NFR-3, NFR-4 |
-| v0.6 | `shell/` Flutter project (iOS + Android + Web targets), shell→game bridge, Firebase Auth integration, `be/AuthMiddleware` (JWT verify), Postgres + migrations (`users`, `match_history`), `RejoinManager` upgraded to userId-keyed. Phaser Lobby/Result scenes removed (replaced by Flutter Widgets). | AR-1–AR-7, NFR-11 (extended), MR-6 (upgraded) |
+| v0.6 | `apps/frontend/` Flutter project (iOS + Android + Web targets), shell→game bridge, Firebase Auth integration, `be/AuthMiddleware` (JWT verify), Postgres + migrations (`users`, `match_history`), `RejoinManager` upgraded to userId-keyed. Phaser Lobby/Result scenes removed (replaced by Flutter Widgets). | AR-1–AR-7, NFR-11 (extended), MR-6 (upgraded) |
 | v0.7 | Keyboard input adapter (shell + bridged into game view), `prefers-reduced-motion` handling in both, contrast audit | NFR-8 (keyboard), NFR-9, NFR-10, NFR-11 (formal), NFR-12 |
 | v1.0 | Hosting + CDN + TLS + managed Postgres + metrics + App Store / Play Store production releases | — (infra + store) |
 

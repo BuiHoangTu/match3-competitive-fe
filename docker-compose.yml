@@ -27,7 +27,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: be/Dockerfile
+      dockerfile: apps/backend/Dockerfile
     ports:
       - "3001:3001"
     depends_on:
@@ -46,10 +46,10 @@ services:
       timeout: 3s
       retries: 12
 
-  shell:
+  frontend:
     build:
       context: .
-      dockerfile: shell/Dockerfile
+      dockerfile: apps/frontend/Dockerfile
       args:
         # Backend origin baked into the shell + game bundles. Override when
         # deploying behind a different domain.

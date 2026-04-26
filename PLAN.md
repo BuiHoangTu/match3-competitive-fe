@@ -11,33 +11,33 @@
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| A1 | Scaffold `fe/` — TypeScript, Vite, Vitest, Phaser | `fe/package.json`, `tsconfig.json`, `vite.config.ts` | ✅ |
-| A2 | Seeded RNG (mulberry32) | `fe/src/engine/rng.ts` | ✅ |
-| A3 | `Board.ts` — grid state, init, swap | `fe/src/engine/Board.ts` | ✅ |
-| A4 | `MatchEngine.ts` — match detection (H+V, 3+) | `fe/src/engine/MatchEngine.ts` | ✅ |
-| A5 | Gravity + refill | `fe/src/engine/MatchEngine.ts` | ✅ |
-| A6 | Cascade resolver (loop until no matches) | `fe/src/engine/MatchEngine.ts` | ✅ |
-| A7 | Unit tests for A3–A6 (38 passing) | `fe/src/engine/*.test.ts` | ✅ |
-| A8 | Animation data: `applyGravityWithMovements`, `resolveBoardAnimated` | `fe/src/engine/MatchEngine.ts` (append) | ✅ |
-| A9 | Unit tests for A8 (8 tests) | `fe/src/engine/MatchEngine.animated.test.ts` | ✅ |
+| A1 | Scaffold `packages/game-view/` — TypeScript, Vite, Vitest, Phaser | `packages/game-view/package.json`, `tsconfig.json`, `vite.config.ts` | ✅ |
+| A2 | Seeded RNG (mulberry32) | `packages/game-view/src/engine/rng.ts` | ✅ |
+| A3 | `Board.ts` — grid state, init, swap | `packages/game-view/src/engine/Board.ts` | ✅ |
+| A4 | `MatchEngine.ts` — match detection (H+V, 3+) | `packages/game-view/src/engine/MatchEngine.ts` | ✅ |
+| A5 | Gravity + refill | `packages/game-view/src/engine/MatchEngine.ts` | ✅ |
+| A6 | Cascade resolver (loop until no matches) | `packages/game-view/src/engine/MatchEngine.ts` | ✅ |
+| A7 | Unit tests for A3–A6 (38 passing) | `packages/game-view/src/engine/*.test.ts` | ✅ |
+| A8 | Animation data: `applyGravityWithMovements`, `resolveBoardAnimated` | `packages/game-view/src/engine/MatchEngine.ts` (append) | ✅ |
+| A9 | Unit tests for A8 (8 tests) | `packages/game-view/src/engine/MatchEngine.animated.test.ts` | ✅ |
 
 ## Track B — Backend
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| B1 | Scaffold `be/` — Node.js, Socket.IO, TypeScript | `be/package.json`, `tsconfig.json` | ✅ |
-| B2 | Room manager | `be/src/RoomManager.ts` | ✅ |
-| B3 | WebSocket server — matchmaking, relay moves | `be/src/server.ts` | ✅ |
-| B4 | Move validator | `be/src/validator.ts` | ✅ |
-| B5 | Per-player 5-min turn timers + `turn_changed` / `game_over` relay | `be/src/server.ts` | ✅ |
+| B1 | Scaffold `apps/backend/` — Node.js, Socket.IO, TypeScript | `apps/backend/package.json`, `tsconfig.json` | ✅ |
+| B2 | Room manager | `apps/backend/src/RoomManager.ts` | ✅ |
+| B3 | WebSocket server — matchmaking, relay moves | `apps/backend/src/server.ts` | ✅ |
+| B4 | Move validator | `apps/backend/src/validator.ts` | ✅ |
+| B5 | Per-player 5-min turn timers + `turn_changed` / `game_over` relay | `apps/backend/src/server.ts` | ✅ |
 
 ## Track C — Rendering
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| C1 | `TileSpritePool` — identity-tracked Phaser object pool | `fe/src/rendering/TileSpritePool.ts` | ✅ |
-| C2 | `GameLoopController` — state machine owning board, score, tile IDs | `fe/src/game/GameLoopController.ts` | ✅ |
-| C3 | `GameScene` rewrite — async swap/resolve, sprite identity system | `fe/src/scenes/GameScene.ts` | ✅ |
+| C1 | `TileSpritePool` — identity-tracked Phaser object pool | `packages/game-view/src/rendering/TileSpritePool.ts` | ✅ |
+| C2 | `GameLoopController` — state machine owning board, score, tile IDs | `packages/game-view/src/game/GameLoopController.ts` | ✅ |
+| C3 | `GameScene` rewrite — async swap/resolve, sprite identity system | `packages/game-view/src/scenes/GameScene.ts` | ✅ |
 | C4 | Swap animation (tween + animate-back on no-match) | `GameScene.ts` | ✅ |
 | C5 | Match disappear animation (alpha fade) | `GameScene.ts` | ✅ |
 | C6 | Gravity fall animation (tween per movement) | `GameScene.ts` | ✅ |
@@ -48,9 +48,9 @@
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| D1 | `SyncClient` — Socket.IO client wrapper + `onGameOver` | `fe/src/net/SyncClient.ts` | ✅ |
-| D2 | `LobbyScene` — PvP / vs Bot / Practice modes | `fe/src/scenes/LobbyScene.ts` | ✅ |
-| D3 | `ResultScene` — WIN/LOSE/DRAW, match score, time bonus, Play Again | `fe/src/scenes/ResultScene.ts` | ✅ |
+| D1 | `SyncClient` — Socket.IO client wrapper + `onGameOver` | `packages/game-view/src/net/SyncClient.ts` | ✅ |
+| D2 | `LobbyScene` — PvP / vs Bot / Practice modes | `packages/game-view/src/scenes/LobbyScene.ts` | ✅ |
+| D3 | `ResultScene` — WIN/LOSE/DRAW, match score, time bonus, Play Again | `packages/game-view/src/scenes/ResultScene.ts` | ✅ |
 | D4 | Wire `SyncClient` into `GameScene` — send moves, recv opponent moves | `GameScene.ts` | ✅ |
 | D5 | Opponent minimap (32 px tiles, full-redraw on each move) | `GameScene.ts` | ✅ |
 | D6 | Dual per-player clocks (5 min each), turn indicator | `GameScene.ts` | ✅ |
@@ -60,15 +60,15 @@
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| E1 | Client-side bot — scans board for best match-creating swap | `fe/src/bot/BotPlayer.ts` | ✅ |
+| E1 | Client-side bot — scans board for best match-creating swap | `packages/game-view/src/bot/BotPlayer.ts` | ✅ |
 | E2 | PvE mode — local turn-based game vs bot with per-player 5-min clocks | `GameScene.ts`, `LobbyScene.ts` | ✅ |
-| E3 | PvP turn-based — server-side per-player 5-min timers, `turn_changed` relay | `be/src/server.ts`, `SyncClient.ts` | ✅ |
+| E3 | PvP turn-based — server-side per-player 5-min timers, `turn_changed` relay | `apps/backend/src/server.ts`, `SyncClient.ts` | ✅ |
 
 ## Track F — Mobile (depends on C)
 
 | # | Task | Deliverable | Status |
 |---|------|-------------|--------|
-| F1 | Capacitor setup + wrap `fe/` build | `capacitor.config.ts` | ⬜ |
+| F1 | Capacitor setup + wrap `packages/game-view/` build | `capacitor.config.ts` | ⬜ |
 | F2 | Touch input tuning, performance pass | — | ⬜ |
 
 ## Track G — Optional / Later
