@@ -13,6 +13,7 @@
 import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
+import { signSession } from "../LocalSessionSigner";
 import { createBoard, swapTiles, type Board } from "@match3/shared-js/engine/Board";
 import { createRng } from "@match3/shared-js/engine/rng";
 import {
@@ -140,8 +141,46 @@ export async function runLatencyHarness(
   const port = (server.httpServer.address() as AddressInfo).port;
   const url = `http://127.0.0.1:${port}`;
 
-  const rawA = ioClient(url, { transports: ["websocket"], forceNew: true });
-  const rawB = ioClient(url, { transports: ["websocket"], forceNew: true });
+  // Pair the two clients via the HTTP matchmaking endpoint. Both calls
+  // present a session token (HMAC, no DB) so the AuthMiddleware accepts them
+  // without any local-accounts store. The first call enqueues; the second
+  // pairs and resolves both. We then connect Socket.IO with each client's
+  // room token.
+  const sessionA = signSession({ userId: "harness:A" }).token;
+  const sessionB = signSession({ userId: "harness:B" }).token;
+
+  async function joinTurnBased(sessionToken: string): Promise<{
+    roomToken: string;
+  }> {
+    const res = await fetch(`${url}/matchmaking/join`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+      body: JSON.stringify({ mode: "turn_based" }),
+    });
+    if (!res.ok) {
+      throw new Error(`matchmaking/join ${res.status}: ${await res.text()}`);
+    }
+    return res.json() as Promise<{ roomToken: string }>;
+  }
+  const [{ roomToken: tokenA }, { roomToken: tokenB }] = await Promise.all([
+    joinTurnBased(sessionA),
+    // Stagger the second call slightly so the first registers in the queue.
+    new Promise<void>((r) => setTimeout(r, 5)).then(() => joinTurnBased(sessionB)),
+  ]);
+
+  const rawA = ioClient(url, {
+    transports: ["websocket"],
+    forceNew: true,
+    auth: { token: tokenA },
+  });
+  const rawB = ioClient(url, {
+    transports: ["websocket"],
+    forceNew: true,
+    auth: { token: tokenB },
+  });
   const a = wrapWithLatency(rawA, rttMs);
   const b = wrapWithLatency(rawB, rttMs);
 
@@ -152,17 +191,9 @@ export async function runLatencyHarness(
   };
 
   try {
-    await Promise.all([
-      new Promise<void>((res) => rawA.on("connect", () => res())),
-      new Promise<void>((res) => rawB.on("connect", () => res())),
-    ]);
-
-    // Await match_found on both clients simultaneously, then send matchmake
+    // Both clients receive match_found from the room-token handshake (D02).
     const matchA = a.once("match_found");
     const matchB = b.once("match_found");
-
-    a.emit("matchmake");
-    b.emit("matchmake");
 
     const timeoutMatch = setTimeout(() => {
       throw new Error(`matchmake timeout (${matchmakeTimeoutMs}ms)`);

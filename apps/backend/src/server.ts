@@ -1,7 +1,6 @@
 import { createServer as createHttpServer, Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import { RoomManager } from "./RoomManager";
-import { WaitingQueue } from "./WaitingQueue";
 import { RejoinManager } from "./RejoinManager";
 import { TimerManager } from "./TimerManager";
 import { BotManager } from "./BotManager";
@@ -43,15 +42,6 @@ export interface ServerHandle {
 
 export interface ServerOptions {
   /**
-   * T-v0.6-D07 · When true (default in non-test environments), reject any
-   * Socket.IO connection that does not carry a room token in
-   * `socket.handshake.auth.token`. Set to false only in v0.5 legacy test
-   * contexts (latency harness, rejoin latency) that drive the deprecated
-   * `matchmake` socket event path.
-   */
-  requireRoomToken?: boolean;
-
-  /**
    * T-v0.6-E06..E09, F01..F04 · Persistence stores. When omitted a no-op
    * adapter is used so the server can be constructed in tests without Postgres.
    */
@@ -72,9 +62,6 @@ export interface ServerOptions {
  * handle.
  */
 export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
-  // D07: in test environments the legacy matchmake path is still in use;
-  // outside tests (and when callers don't opt out) we enforce room tokens.
-  const requireRoomToken = opts.requireRoomToken ?? (process.env.NODE_ENV !== "test");
   const persistence = opts.persistence ?? NullPersistenceAdapter;
   const httpServer = createHttpServer();
   const io = new Server(httpServer, {
@@ -101,7 +88,6 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   }
 
   const roomManager = new RoomManager();
-  const waitingQueue = new WaitingQueue();
   const rejoinManager = new RejoinManager();
   const timerManager = new TimerManager(io, roomManager);
   const botManager = new BotManager(io, roomManager, timerManager);
@@ -135,18 +121,13 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     }
   });
 
-  // T-v0.6-D02 / D07 — Room-token handshake middleware.
-  // If requireRoomToken is true (production default), reject any connection
-  // that arrives without a token (code: no_token). Otherwise (legacy test
-  // mode), allow tokenless connections through to the matchmake event path.
+  // T-v0.6-D02 — Room-token handshake middleware. Every Socket.IO connection
+  // must carry a valid room token in `socket.handshake.auth.token`. Tokenless
+  // or invalid connections are rejected before reaching any event handler.
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token as string | undefined;
     if (!token) {
-      if (requireRoomToken) {
-        next(new Error("no_token"));
-        return;
-      }
-      next();
+      next(new Error("no_token"));
       return;
     }
     const payload = verifyRoomToken(token);
@@ -237,61 +218,11 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     rejoinManager.cleanupRoom(roomId);
   }
 
-  function startBotGame(roomId: string, humanSocketId: string): void {
-    const humanSocket = io.sockets.sockets.get(humanSocketId);
-    if (!humanSocket || !humanSocket.connected) {
-      timerManager.scheduleRoomClose(roomId);
-      return;
-    }
-
-    const room = roomManager.joinRoom(roomId, BOT_ID);
-    if (!room) return;
-
-    if (!botManager.setup(roomId)) return;
-
-    logEvent("player_joined", { matchId: roomId, playerId: BOT_ID, bot: true });
-
-    const firstPlayerId = Math.random() < 0.5 ? humanSocketId : BOT_ID;
-    room.activePlayer = firstPlayerId;
-
-    matchStartTimes.set(roomId, Date.now());
-    timerManager.startRoomTimer(roomId, humanSocketId, BOT_ID, (id, loserId) => {
-      const r = roomManager.getRoom(id);
-      const outcome = computeOutcome(r ?? { players: [humanSocketId, BOT_ID], userIds: ["", ""] }, 0, 0, loserId);
-      void recordMatchEnd(id, r ?? { players: [humanSocketId, BOT_ID], userIds: ["", ""] }, 0, 0, outcome);
-      roomCleanup(id);
-      timerManager.scheduleRoomClose(id);
-    });
-
-    humanSocket.emit("match_found", {
-      roomId,
-      seed: room.seed,
-      opponentId: BOT_ID,
-      myPlayerId: humanSocketId,
-      firstPlayerId,
-      mode: "turn_based",
-      rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
-    });
-
-    if (firstPlayerId === BOT_ID) {
-      botManager.scheduleBotTurn(roomId, humanSocketId);
-    }
-  }
-
-  function startBotFallback(roomId: string, socket: Socket): void {
-    const timeoutId = setTimeout(() => {
-      const removed = waitingQueue.removeBySocket(socket.id);
-      if (removed) startBotGame(roomId, socket.id);
-    }, BOT_WAIT_MS);
-    waitingQueue.setBotTimeout(socket.id, timeoutId);
-  }
-
   io.on("connection", (socket) => {
     console.log(`[connect] ${socket.id}`);
 
-    // T-v0.6-D02 (revised) — room-token handshake: place the socket directly
-    // into its pre-existing room and emit match_found without needing a
-    // `matchmake` event from the client.
+    // T-v0.6-D02 — room-token handshake: place the socket directly into its
+    // pre-existing room (created by /matchmaking/join) and emit match_found.
     const tokenRoomId = socket.data.roomId as string | undefined;
     const tokenUserId = socket.data.userId as string | undefined;
     const tokenSlot = socket.data.slot as 0 | 1 | undefined;
@@ -361,73 +292,9 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
       }
     }
 
-    socket.on("matchmake", () => {
-      if (waitingQueue.size > 0) {
-        const entry = waitingQueue.shift();
-        if (!entry) return;
-
-        const room = roomManager.joinRoom(entry.roomId, socket.id);
-        if (room === null) {
-          const newRoom = roomManager.createRoom(socket.id);
-          logEvent("match_created", { matchId: newRoom.id, seed: newRoom.seed });
-          logEvent("player_joined", { matchId: newRoom.id, playerId: socket.id });
-          socket.join(newRoom.id);
-          waitingQueue.enqueue(newRoom.id, socket.id);
-          startBotFallback(newRoom.id, socket);
-          return;
-        }
-
-        const roomId = room.id;
-        logEvent("player_joined", { matchId: roomId, playerId: socket.id });
-        socket.join(roomId);
-
-        const [player1Id, player2Id] = room.players as [string, string];
-        const firstPlayerId = Math.random() < 0.5 ? player1Id : player2Id;
-        room.activePlayer = firstPlayerId;
-
-        matchStartTimes.set(roomId, Date.now());
-        timerManager.startRoomTimer(roomId, player1Id, player2Id, (id, loserId) => {
-          const r = roomManager.getRoom(id);
-          const pls = r?.players ?? [player1Id, player2Id];
-          const uids = r?.userIds ?? (["", ""] as [string, string]);
-          const outcome = computeOutcome({ players: pls, userIds: uids }, 0, 0, loserId);
-          void recordMatchEnd(id, r ?? { players: pls, userIds: uids }, 0, 0, outcome);
-          rejoinManager.cleanupRoom(id);
-          timerManager.scheduleRoomClose(id);
-        });
-
-        io.to(player1Id).emit("match_found", {
-          roomId,
-          seed: room.seed,
-          opponentId: player2Id,
-          myPlayerId: player1Id,
-          firstPlayerId,
-          mode: "turn_based",
-          rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
-        });
-        io.to(player2Id).emit("match_found", {
-          roomId,
-          seed: room.seed,
-          opponentId: player1Id,
-          myPlayerId: player2Id,
-          firstPlayerId,
-          mode: "turn_based",
-          rejoinToken: "", // legacy path — rejoin via /matchmaking/resume instead
-        });
-      } else {
-        const room = roomManager.createRoom(socket.id);
-        logEvent("match_created", { matchId: room.id, seed: room.seed });
-        logEvent("player_joined", { matchId: room.id, playerId: socket.id });
-        socket.join(room.id);
-        waitingQueue.enqueue(room.id, socket.id);
-        startBotFallback(room.id, socket);
-      }
-    });
-
     // T-v0.6-G02/G03 · userId-keyed rejoin via verified socket identity.
     // The socket's userId is set by the D02 room-token handshake middleware.
-    // Legacy clients that connected via the `matchmake` event do not have a
-    // userId on the socket and will receive rejoin_failed immediately; they
+    // Sockets without a verified identity receive rejoin_failed; clients
     // should reconnect via POST /matchmaking/resume → room token instead.
     socket.on("rejoin", (_data: unknown) => {
       const userId = socket.data.userId as string | undefined;
@@ -546,9 +413,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
         }
 
         // T-v0.6-D04 · userId slot check: the socket's verified userId must
-        // own a slot in the room. Sockets that connected via room token always
-        // have socket.data.userId populated; legacy sockets via matchmake have
-        // empty userIds slots ("") which we skip to preserve backward compat.
+        // own a slot in the room.
         const socketUserId = socket.data.userId as string | undefined;
         if (socketUserId) {
           const slotCheck = checkUserIdOwnsSlot(socketUserId, room);
@@ -605,8 +470,6 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     socket.on("disconnect", () => {
       console.log(`[disconnect] ${socket.id}`);
       logEvent("disconnect", { playerId: socket.id });
-
-      waitingQueue.removeBySocket(socket.id);
 
       const activeRoom = roomManager.getRoomByPlayer(socket.id);
       if (activeRoom) {

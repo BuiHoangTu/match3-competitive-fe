@@ -133,8 +133,7 @@ describe("T-v0.6-D07 · Reject tokenless sockets", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    // Start server with requireRoomToken: true (explicit production-like mode).
-    handle = await startServer(0, { requireRoomToken: true });
+    handle = await startServer(0);
   });
 
   afterEach(async () => {
