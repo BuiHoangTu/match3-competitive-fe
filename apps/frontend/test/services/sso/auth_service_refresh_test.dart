@@ -25,8 +25,8 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/services/auth_service.dart';
-import '../../lib/models/auth_token.dart';
+import '../../../lib/services/sso/auth_service.dart';
+import '../../../lib/services/sso/auth_token.dart';
 
 import 'fakes.dart';
 

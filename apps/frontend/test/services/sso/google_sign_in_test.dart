@@ -17,8 +17,8 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../../lib/errors/auth_errors.dart';
-import '../../lib/services/google_sign_in_service.dart';
+import '../../../lib/services/sso/auth_errors.dart';
+import '../../../lib/services/sso/google_sign_in_service.dart';
 
 void main() {
   // ---------------------------------------------------------------------------

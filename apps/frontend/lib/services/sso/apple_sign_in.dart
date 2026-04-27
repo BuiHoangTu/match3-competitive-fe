@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
-import '../errors/auth_errors.dart';
+import 'auth_errors.dart';
 
 // ---------------------------------------------------------------------------
 // Stub guard

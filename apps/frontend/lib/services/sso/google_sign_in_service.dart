@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../errors/auth_errors.dart';
+import 'auth_errors.dart';
 import 'apple_sign_in.dart' show kAuthStubMode, fakeJwtForStub;
 
 // ---------------------------------------------------------------------------

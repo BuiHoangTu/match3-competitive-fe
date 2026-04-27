@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../errors/auth_errors.dart';
-import '../models/auth_token.dart';
+import 'auth_errors.dart';
+import 'auth_token.dart';
 import 'apple_sign_in.dart' as apple;
 import 'google_sign_in_service.dart' as google;
 

@@ -19,8 +19,8 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/errors/auth_errors.dart';
-import '../../lib/services/apple_sign_in.dart';
+import '../../../lib/services/sso/auth_errors.dart';
+import '../../../lib/services/sso/apple_sign_in.dart';
 
 void main() {
   // ---------------------------------------------------------------------------

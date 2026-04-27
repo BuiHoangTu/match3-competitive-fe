@@ -14,9 +14,9 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import '../../lib/services/auth_service.dart';
-import '../../lib/models/auth_token.dart';
-import '../../lib/errors/auth_errors.dart';
+import '../../../lib/services/sso/auth_service.dart';
+import '../../../lib/services/sso/auth_token.dart';
+import '../../../lib/services/sso/auth_errors.dart';
 
 import 'fakes.dart';
 
