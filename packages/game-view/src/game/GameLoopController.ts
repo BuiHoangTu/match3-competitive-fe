@@ -1,10 +1,10 @@
-import { createBoard, swapTiles, type Board } from "../engine/Board.js";
+import { createBoard, swapTiles, type Board } from "@match3/shared-js/engine/Board.js";
 import {
   findMatches,
   resolveBoardAnimated,
   type AnimatedResolveStep,
-} from "../engine/MatchEngine.js";
-import { createRng } from "../engine/rng.js";
+} from "@match3/shared-js/engine/MatchEngine.js";
+import { createRng } from "@match3/shared-js/engine/rng.js";
 
 export interface ResolvedStep {
   engineStep: AnimatedResolveStep;

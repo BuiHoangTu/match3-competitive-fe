@@ -5,8 +5,8 @@ import {
   applyGravity,
   refill,
   resolveBoard,
-} from "./MatchEngine.js";
-import { createRng } from "./rng.js";
+} from "../engine/MatchEngine.js";
+import { createRng } from "../engine/rng.js";
 
 // Helper to build a grid from a flat row-major array
 function makeGrid(rows: number, cols: number, values: number[]): number[][] {

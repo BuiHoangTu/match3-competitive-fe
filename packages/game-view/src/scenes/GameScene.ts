@@ -8,7 +8,7 @@ import {
   TILE_SIZE,
   type TileSprite,
 } from "../rendering/TileSpritePool.js";
-import type { TileMovement } from "../engine/MatchEngine.js";
+import type { TileMovement } from "@match3/shared-js/engine/MatchEngine.js";
 import { SyncClient } from "../net/SyncClient.js";
 import type {
   OpponentMove,
@@ -16,7 +16,7 @@ import type {
   GameOverData,
   RejoinOkPayload,
 } from "../net/SyncClient.js";
-import { BotPlayer } from "../bot/BotPlayer.js";
+import { BotPlayer } from "@match3/shared-js/bot/BotPlayer.js";
 import { GameBridge } from "../bridge/GameBridge.js";
 
 // -------------------------------------------------------------------------

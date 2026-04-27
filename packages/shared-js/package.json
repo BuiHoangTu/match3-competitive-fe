@@ -2,6 +2,13 @@
   "name": "@match3/shared-js",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^3.1.2"
+  },
   "exports": {
     "./engine/rng.js": "./src/engine/rng.ts",
     "./engine/rng": "./src/engine/rng.ts",

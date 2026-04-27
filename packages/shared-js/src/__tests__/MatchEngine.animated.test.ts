@@ -3,8 +3,8 @@ import {
   applyGravityWithMovements,
   resolveBoardAnimated,
   resolveBoard,
-} from "./MatchEngine.js";
-import { createRng } from "./rng.js";
+} from "../engine/MatchEngine.js";
+import { createRng } from "../engine/rng.js";
 
 describe("applyGravityWithMovements", () => {
   it("reports no movements when board is already settled", () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createBoard, swapTiles } from "./Board.js";
-import { findMatches } from "./MatchEngine.js";
+import { createBoard, swapTiles } from "../engine/Board.js";
+import { findMatches } from "../engine/MatchEngine.js";
 
 describe("createBoard", () => {
   it("produces an 8x8 grid", () => {
