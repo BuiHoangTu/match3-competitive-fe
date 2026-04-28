@@ -39,15 +39,13 @@ import 'screens/home_screen.dart';
 import 'screens/match_screen.dart';
 import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
-import 'bridge/bridge_messages.dart';
 import 'screens/register_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/account_client.dart';
 import 'services/game_view_bootstrap.dart';
 import 'services/local_auth_service.dart';
-import 'errors/matchmaking_errors.dart';
-import 'models/matchmaking_result.dart';
+import 'services/match_session_launcher.dart';
 import 'services/matchmaking_client.dart';
 
 // ---------------------------------------------------------------------------
@@ -169,6 +167,7 @@ GoRouter createRouter({
   AccountClient? accountClient,
   LocalAuthService? localAuth,
   MatchmakingClient? matchmaking,
+  MatchSessionLauncher? sessionLauncher,
 }) {
   const backendUrl = String.fromEnvironment(
     'BACKEND_URL',
@@ -176,6 +175,16 @@ GoRouter createRouter({
   );
   final account = accountClient ?? AccountClient(baseUrl: backendUrl);
   final mm = matchmaking ?? MatchmakingClient(baseUrl: backendUrl);
+  const assetUrl = String.fromEnvironment(
+    'GAME_URL',
+    defaultValue: '/game/',
+  );
+  final launcher = sessionLauncher ??
+      MatchSessionLauncher(
+        matchmaking: mm,
+        loadView: loadGameView,
+        assetUrl: assetUrl,
+      );
 
   void showUnderDevelopment(BuildContext ctx, String which) {
     ScaffoldMessenger.of(ctx).showSnackBar(
@@ -311,12 +320,8 @@ GoRouter createRouter({
               );
 
           // Launches the game view in the given mode and navigates to /match.
-          //   1. Request a room token from /matchmaking/join (Bearer = session token).
-          //   2. Load the game view (iframe / WebView) with the Phaser bundle.
-          //   3. Wait for the game to emit `ready` on the bridge.
-          //   4. Send `startMatch(roomToken, expiresAt)` so the game's
-          //      SyncClient connects to the backend Socket.IO with that token.
-          //   5. Navigate to /match so the user sees the embedded view.
+          // Delegates orchestration to [MatchSessionLauncher.launch]; this
+          // callsite only handles UI side-effects (snackbars, navigation).
           Future<void> launchGame(BuildContext ctx, String mode) async {
             developer.log('Launching game mode=$mode', name: 'router');
             final tok = auth.idToken;
@@ -332,61 +337,21 @@ GoRouter createRouter({
               _ => MatchmakingMode.solo,
             };
             try {
-              MatchmakingResult result;
-              try {
-                result = await mm.join(idToken: tok, mode: mmMode);
-              } on MatchmakingActiveRoom catch (e) {
-                // The user already has a live match server-side. Resume
-                // transparently rather than forcing them to forfeit and
-                // re-queue. Server-side AR-7 enforcement leaves the original
-                // room intact; the resume endpoint mints a fresh room token.
-                developer.log(
-                    'active match for ${e.roomId} — calling /matchmaking/resume',
-                    name: 'router');
-                if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                    content: Text('Reconnecting to your match…'),
-                    duration: Duration(seconds: 2),
-                  ));
-                }
-                result = await mm.resume(idToken: tok, roomId: e.roomId);
-              }
-              // Same-origin sub-path: the shell's nginx serves the Phaser
-              // bundle at /game/ alongside the Flutter shell at /. Override
-              // via --dart-define=GAME_URL=... only if the game is hosted
-              // somewhere else (uncommon).
-              const assetUrl = String.fromEnvironment(
-                'GAME_URL',
-                defaultValue: '/game/',
+              final handle = await launcher.launch(
+                idToken: tok,
+                mode: mmMode,
+                onReconnecting: () {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                      content: Text('Reconnecting to your match…'),
+                      duration: Duration(seconds: 2),
+                    ));
+                  }
+                },
               );
-              final handle = await loadGameView(assetUrl: assetUrl);
-
-              // Send startMatch as soon as the game emits ready. If ready
-              // already fired before the listener attaches (rare race), send
-              // immediately as a fallback after a short timeout.
-              bool started = false;
-              void start() {
-                if (started) return;
-                started = true;
-                handle.transport.send(StartMatchMessage(
-                  roomToken: result.roomToken,
-                  expiresAt: result.expiresAt,
-                ));
-              }
-              final readySub = handle.transport.incoming.listen((msg) {
-                if (msg is ReadyMessage) start();
-              });
-              // Fallback: most game iframes load + emit ready under 1s; if
-              // not, send anyway so the connect attempt happens.
-              Future.delayed(const Duration(seconds: 2), start);
-              // Cancel ready listener once we've started — the rest of the
-              // match flow is handled by MatchScreen's own listener.
-              Future.delayed(const Duration(seconds: 5),
-                  () => unawaited(readySub.cancel()));
-
               if (!ctx.mounted) return;
               ctx.goNamed(Routes.match, extra: handle);
-            } on MatchmakingRoomGone {
+            } on LaunchActiveRoomGone {
               // Resume after the rejoin window expired — the previous match
               // is gone. User can tap a mode again to start fresh.
               if (!ctx.mounted) return;
@@ -394,22 +359,16 @@ GoRouter createRouter({
                 content: Text(
                     'Previous match ended — tap a mode to start a new one'),
               ));
-            } on MatchmakingAuthRejected {
+            } on LaunchAuthRejected {
               if (!ctx.mounted) return;
               await auth.signOut();
               if (!ctx.mounted) return;
               ctx.goNamed(Routes.signIn);
-            } on MatchmakingError catch (e) {
-              developer.log('matchmaking failed: $e', name: 'router');
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                SnackBar(content: Text('Matchmaking failed: ${e.message}')),
-              );
-            } catch (e) {
+            } on LaunchTransport catch (e) {
               developer.log('launchGame failed: $e', name: 'router');
               if (!ctx.mounted) return;
               ScaffoldMessenger.of(ctx).showSnackBar(
-                SnackBar(content: Text('Failed to launch game: $e')),
+                SnackBar(content: Text('Failed to launch game: ${e.message}')),
               );
             }
           }
