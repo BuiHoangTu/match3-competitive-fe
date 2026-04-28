@@ -1,0 +1,97 @@
+/**
+ * io.on("connection", ...) orchestrator.
+ *
+ * Handles the room-token connection setup: attaches the socket to its
+ * pre-existing room slot, emits match_found when both players are present,
+ * starts timers, wires per-socket move/rejoin/disconnect handlers.
+ */
+
+import type { Server, Socket } from "socket.io";
+import type { ServerContext } from "../context";
+import { BOT_ID, BOT_USER_ID } from "../constants";
+import { logEvent } from "../logger";
+import { computeOutcome, recordMatchEnd, roomCleanup } from "../matchEnd";
+import { registerMoveHandler } from "./move";
+import { registerRejoinHandler } from "./rejoin";
+import { registerDisconnectHandler } from "./disconnect";
+
+export function registerConnectionHandler(io: Server, ctx: ServerContext): void {
+  io.on("connection", (socket: Socket) => {
+    console.log(`[connect] ${socket.id}`);
+
+    // T-v0.6-D02 — room-token handshake: place the socket directly into its
+    // pre-existing room (created by /matchmaking/join) and emit match_found.
+    const tokenRoomId = socket.data.roomId as string | undefined;
+    const tokenUserId = socket.data.userId as string | undefined;
+    const tokenSlot = socket.data.slot as 0 | 1 | undefined;
+    if (tokenRoomId && tokenUserId !== undefined && tokenSlot !== undefined) {
+      const room = ctx.roomManager.attachSocketToSlot(tokenRoomId, tokenSlot, socket.id);
+      if (room) {
+        socket.join(tokenRoomId);
+        logEvent("player_joined", { matchId: tokenRoomId, playerId: socket.id });
+
+        const opponentSlot = tokenSlot === 0 ? 1 : 0;
+        const opponentUserId = room.userIds[opponentSlot];
+        const isBotOpponent = opponentUserId === BOT_USER_ID;
+
+        // Both slots bound (both humans connected, OR bot opponent is
+        // always "present"): start the match.
+        const bothSocketsConnected = room.players.length === 2;
+        if (bothSocketsConnected || isBotOpponent) {
+          if (!room.activePlayer) {
+            // Pick starter deterministically: slot 0 goes first.
+            room.activePlayer = room.players[0];
+          }
+          // Record match start time for duration calculation.
+          if (!ctx.matchStartTimes.has(room.id)) {
+            ctx.matchStartTimes.set(room.id, Date.now());
+          }
+          if (isBotOpponent) {
+            ctx.botManager.setup(room.id);
+            ctx.timerManager.startRoomTimer(
+              room.id,
+              socket.id,
+              BOT_ID,
+              (id, loserId) => {
+                const r = ctx.roomManager.getRoom(id);
+                const outcome = computeOutcome(r ?? { players: room.players, userIds: room.userIds }, 0, 0, loserId);
+                void recordMatchEnd(ctx, id, r ?? { players: room.players, userIds: room.userIds }, 0, 0, outcome);
+                roomCleanup(ctx, id);
+                ctx.timerManager.scheduleRoomClose(id);
+              }
+            );
+          } else if (room.players.length === 2) {
+            const [p0, p1] = room.players as [string, string];
+            ctx.timerManager.startRoomTimer(room.id, p0, p1, (id, loserId) => {
+              const r = ctx.roomManager.getRoom(id);
+              const outcome = computeOutcome(r ?? { players: [p0, p1], userIds: room.userIds }, 0, 0, loserId);
+              void recordMatchEnd(ctx, id, r ?? { players: [p0, p1], userIds: room.userIds }, 0, 0, outcome);
+              ctx.rejoinManager.cleanupRoom(id);
+              ctx.timerManager.scheduleRoomClose(id);
+            });
+          }
+
+          for (const pid of room.players) {
+            const opponentSocketId = room.players.find((p) => p !== pid) ?? BOT_ID;
+            io.to(pid).emit("match_found", {
+              roomId: room.id,
+              seed: room.seed,
+              opponentId: isBotOpponent ? BOT_ID : opponentSocketId,
+              myPlayerId: pid,
+              firstPlayerId: room.activePlayer,
+              mode: "turn_based",
+            });
+          }
+
+          if (isBotOpponent && room.activePlayer === BOT_ID) {
+            ctx.botManager.scheduleBotTurn(room.id, socket.id);
+          }
+        }
+      }
+    }
+
+    registerRejoinHandler(socket, ctx);
+    registerMoveHandler(socket, ctx);
+    registerDisconnectHandler(socket, ctx);
+  });
+}
