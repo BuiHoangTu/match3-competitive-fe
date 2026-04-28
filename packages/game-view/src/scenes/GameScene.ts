@@ -5,63 +5,27 @@ import {
 } from "../game/GameLoopController.js";
 import {
   TileSpritePool,
-  TILE_SIZE,
   type TileSprite,
 } from "../rendering/TileSpritePool.js";
-import type { TileMovement } from "@match3/shared-js/engine/MatchEngine.js";
 import { SyncClient } from "../net/SyncClient.js";
 import type {
-  OpponentMove,
   TurnChangedData,
   GameOverData,
   RejoinOkPayload,
 } from "../net/SyncClient.js";
 import { BotPlayer } from "@match3/shared-js/bot/BotPlayer.js";
 import { GameBridge } from "../bridge/GameBridge.js";
-
-// -------------------------------------------------------------------------
-// Layout
-// -------------------------------------------------------------------------
-const TILE_GAP = 4;
-const CELL_STRIDE = TILE_SIZE + TILE_GAP; // 68px
-
-const BOARD_ORIGIN_X = 28;
-const BOARD_ORIGIN_Y = 80;
-
-const PANEL_X = 630;
-
-const HIGHLIGHT_COLOR = 0xffffff;
-const HIGHLIGHT_ALPHA = 0.35;
+import { cellToPixel } from "./parts/layout.js";
+import { Hud } from "./parts/Hud.js";
+import { InputController } from "./parts/InputController.js";
+import {
+  TweenChoreographer,
+  SWAP_MS,
+  REFILL_SPAWN_Y,
+} from "./parts/TweenChoreographer.js";
+import { MultiplayerSync } from "./parts/MultiplayerSync.js";
 
 const DEFAULT_SEED = 12345;
-
-// Animation durations (ms). Defaults; overridden when prefers-reduced-motion
-// is set (T-v0.7-04). Gameplay-critical animations (swap / flash / fall) are
-// shortened, never disabled, so tile state remains legible.
-const SWAP_MS_DEFAULT = 150;
-const FLASH_MS_DEFAULT = 180;
-const FALL_MS_PER_ROW_DEFAULT = 40;
-const APPEAR_MS_DEFAULT = 220;
-
-const REDUCED_MOTION_DIVISOR = 3; // 150ms → ~50ms etc.
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-const SWAP_MS = prefersReducedMotion()
-  ? Math.round(SWAP_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
-  : SWAP_MS_DEFAULT;
-const FLASH_MS = prefersReducedMotion()
-  ? Math.round(FLASH_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
-  : FLASH_MS_DEFAULT;
-const FALL_MS_PER_ROW = prefersReducedMotion()
-  ? Math.round(FALL_MS_PER_ROW_DEFAULT / REDUCED_MOTION_DIVISOR)
-  : FALL_MS_PER_ROW_DEFAULT;
-const APPEAR_MS = prefersReducedMotion()
-  ? Math.round(APPEAR_MS_DEFAULT / REDUCED_MOTION_DIVISOR)
-  : APPEAR_MS_DEFAULT;
 
 // 5 minutes per player in turn-based / pve modes
 const TURN_TIME_MS = 5 * 60 * 1000;
@@ -94,7 +58,9 @@ interface GameSceneData {
 let _readyEmitted = false;
 
 // -------------------------------------------------------------------------
-// GameScene
+// GameScene — Phaser lifecycle + high-level state. Pointer/keyboard input,
+// HUD rendering, tween choreography, and multiplayer wiring live in
+// `parts/*` modules; this class orchestrates them.
 // -------------------------------------------------------------------------
 export class GameScene extends Phaser.Scene {
   // Single shared board — both players' moves are applied here
@@ -107,13 +73,6 @@ export class GameScene extends Phaser.Scene {
   private idAt: number[][] = [];
 
   private state: GameSceneState = "idle";
-  private selected: { row: number; col: number } | null = null;
-  private selectionOverlay: Phaser.GameObjects.Rectangle | null = null;
-
-  // T-v0.7-02: Keyboard cursor — separate from `selected` so the cursor moves
-  // with arrow keys without committing a selection until Enter is pressed.
-  private cursor: { row: number; col: number } = { row: 0, col: 0 };
-  private cursorOverlay: Phaser.GameObjects.Rectangle | null = null;
 
   // Mode & turn state
   private mode: GameMode = "solo";
@@ -130,30 +89,18 @@ export class GameScene extends Phaser.Scene {
   private timerInterval: number | null = null;
   private lastTimerTick = 0;
 
-  // UI elements
-  private scoreText!: Phaser.GameObjects.Text;
-  private opponentScoreText: Phaser.GameObjects.Text | null = null;
-  private myTimerText: Phaser.GameObjects.Text | null = null;
-  private opponentTimerText: Phaser.GameObjects.Text | null = null;
-  private turnIndicator: Phaser.GameObjects.Text | null = null;
-
   private roomId: string | null = null;
   private syncClient: SyncClient | null = null;
   private botPlayer: BotPlayer | null = null;
 
+  // Parts
+  private hud!: Hud;
+  private inputController!: InputController;
+  private choreographer!: TweenChoreographer;
+  private multiplayer!: MultiplayerSync;
+
   // B08: stored so we can unregister in shutdown().
   private _lifecycleHandler: ((p: { state: string }) => void) | null = null;
-
-  // B1: reconnecting banner shown when opponent disconnects temporarily
-  private reconnectingBanner: Phaser.GameObjects.Text | null = null;
-
-  // Queue for opponent moves that arrive while we're animating
-  private opponentMoveQueue: Array<{
-    r1: number;
-    c1: number;
-    r2: number;
-    c2: number;
-  }> = [];
 
   constructor() {
     super({ key: "GameScene" });
@@ -172,10 +119,23 @@ export class GameScene extends Phaser.Scene {
 
     this.myScore = 0;
     this.opponentScore = 0;
-    this.opponentMoveQueue = [];
 
     this.ctrl = new GameLoopController(seed);
     this.pool = new TileSpritePool(this);
+
+    this.hud = new Hud(this, this.mode);
+    this.choreographer = new TweenChoreographer(this);
+    this.multiplayer = new MultiplayerSync();
+    this.inputController = new InputController(this, {
+      canAct: () =>
+        this.state === "idle" && (this.mode === "solo" || this.myTurn),
+      canMoveCursor: () => this.state === "idle",
+      getBoardSize: () => ({
+        width: this.ctrl.board.width,
+        height: this.ctrl.board.height,
+      }),
+      onSwap: (r1, c1, r2, c2) => void this.doSwap(r1, c1, r2, c2),
+    });
 
     const rejoin = data?.rejoinState;
 
@@ -217,25 +177,18 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.initBoard();
-    this.buildInfoPanel();
+    this.hud.build();
+    if (this.mode !== "solo") {
+      this.hud.updateOpponentScore(this.opponentScore);
+      this.hud.updateScore(this.myScore);
+      this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
+      this.hud.updateTurnIndicator(this.myTurn);
+    }
 
     if (this.syncClient) this.wireMultiplayer();
     if (this.mode !== "solo") this.startTurnTimer();
 
-    this.input.on(
-      Phaser.Input.Events.POINTER_DOWN,
-      this.handlePointerDown,
-      this
-    );
-
-    // T-v0.7-02: keyboard input. Arrow keys move the cursor; Enter / Space
-    // confirms a selection or a swap target.
-    this.input.keyboard?.on("keydown-LEFT", () => this.moveCursor(0, -1));
-    this.input.keyboard?.on("keydown-RIGHT", () => this.moveCursor(0, 1));
-    this.input.keyboard?.on("keydown-UP", () => this.moveCursor(-1, 0));
-    this.input.keyboard?.on("keydown-DOWN", () => this.moveCursor(1, 0));
-    this.input.keyboard?.on("keydown-ENTER", () => this.handleCursorConfirm());
-    this.input.keyboard?.on("keydown-SPACE", () => this.handleCursorConfirm());
+    this.inputController.attach();
 
     // B08: subscribe to appLifecycle messages from the shell.
     // Registered once per scene creation; unregistered in shutdown().
@@ -250,6 +203,10 @@ export class GameScene extends Phaser.Scene {
 
   shutdown(): void {
     this.stopTurnTimer();
+    this.inputController?.dispose();
+    this.hud?.dispose();
+    this.choreographer?.dispose();
+    this.multiplayer?.dispose();
     // B08: clean up the appLifecycle handler reference (the handler list lives
     // in GameBridge; we don't have an off() yet, but the closure holds no
     // scene-specific state that would leak — set to null for GC hygiene).
@@ -273,9 +230,9 @@ export class GameScene extends Phaser.Scene {
     this._lifecycleHandler = (payload: { state: string }) => {
       const { state } = payload;
       if (state === "background" || state === "pause") {
-        this.tweens.pauseAll();
+        this.choreographer.pauseAll();
       } else if (state === "foreground" || state === "resume") {
-        this.tweens.resumeAll();
+        this.choreographer.resumeAll();
         // Reconnect probe: if the socket is disconnected (e.g. the OS killed
         // the connection while backgrounded), re-initiate the connection.
         if (this.syncClient && !this.syncClient.connected) {
@@ -301,7 +258,7 @@ export class GameScene extends Phaser.Scene {
     this.idAt = board.grid.map((row, r) =>
       row.map((sym, c) => {
         const id = this.ctrl.getTileId(r, c);
-        const { x, y } = this.cellToPixel(r, c);
+        const { x, y } = cellToPixel(r, c);
         const sprite = this.pool.acquire(id, sym, x, y);
         this.spriteAt.set(id, sprite);
         return id;
@@ -310,117 +267,62 @@ export class GameScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------------------
-  // UI construction
-  // -------------------------------------------------------------------------
-
-  private buildInfoPanel(): void {
-    this.scoreText = this.add
-      .text(PANEL_X, 30, "Score: 0", {
-        fontSize: "22px",
-        color: "#ffffff",
-        fontStyle: "bold",
-      })
-      .setDepth(20);
-
-    if (this.mode !== "solo") {
-      const opponentLabel = this.mode === "pve" ? "Bot: 0" : "Opponent: 0";
-      this.opponentScoreText = this.add
-        .text(PANEL_X, 70, opponentLabel, {
-          fontSize: "18px",
-          color: "#aaaaff",
-        })
-        .setDepth(20);
-
-      this.myTimerText = this.add
-        .text(PANEL_X, 120, "You:  5:00", {
-          fontSize: "20px",
-          color: "#44ff88",
-          fontStyle: "bold",
-        })
-        .setDepth(20);
-
-      this.opponentTimerText = this.add
-        .text(PANEL_X, 150, "Opp:  5:00", {
-          fontSize: "20px",
-          color: "#ff9944",
-        })
-        .setDepth(20);
-
-      this.turnIndicator = this.add
-        .text(PANEL_X, 190, "", {
-          fontSize: "15px",
-          color: "#ffffff",
-        })
-        .setDepth(20);
-
-      this.updateTurnIndicator();
-    }
-  }
-
-  // -------------------------------------------------------------------------
   // Multiplayer wiring (PvP turn_based only)
   // -------------------------------------------------------------------------
 
   private wireMultiplayer(): void {
-    this.syncClient!.onOpponentMove((move: OpponentMove) => {
-      this.opponentMoveQueue.push(move);
-      this.processOpponentQueue();
-    });
-
-    this.syncClient!.onTurnChanged((data: TurnChangedData) => {
-      this.myTurn = data.activePlayerId === this.myPlayerId;
-      if (this.myPlayerId !== null && data.times[this.myPlayerId] !== undefined) {
-        this.myTimeMs = data.times[this.myPlayerId]!;
-      }
-      const opponentId = Object.keys(data.times).find(
-        (id) => id !== this.myPlayerId
-      );
-      if (opponentId && data.times[opponentId] !== undefined) {
-        this.opponentTimeMs = data.times[opponentId]!;
-      }
-      this.updateTimerDisplay();
-      this.updateTurnIndicator();
-    });
-
-    this.syncClient!.onGameOver((gameOverData?: GameOverData) => {
-      if (gameOverData?.loserTimeUp) {
-        const won = gameOverData.loserTimeUp !== this.myPlayerId;
-        const myRemaining =
-          gameOverData.times?.[this.myPlayerId ?? ""] ?? 0;
-        const timeBonus = won
-          ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
-          : 0;
-        this.endGame(timeBonus);
-      } else {
-        this.endGame(0);
-      }
-    });
-
-    this.syncClient!.onOpponentDisconnect(() => {
-      const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
-      this.endGame(bonus);
-    });
-
-    this.syncClient!.onOpponentReconnecting(() => {
-      if (this.reconnectingBanner) return;
-      this.reconnectingBanner = this.add
-        .text(PANEL_X, 220, "Opponent reconnecting…", {
-          fontSize: "14px",
-          color: "#ffff44",
-        })
-        .setDepth(20);
-    });
-
-    this.syncClient!.onOpponentReconnected(() => {
-      this.reconnectingBanner?.destroy();
-      this.reconnectingBanner = null;
+    this.multiplayer.attach(this.syncClient!, {
+      onOpponentMove: () => {
+        this.processOpponentQueue();
+      },
+      onTurnChanged: (data: TurnChangedData) => {
+        this.myTurn = data.activePlayerId === this.myPlayerId;
+        if (
+          this.myPlayerId !== null &&
+          data.times[this.myPlayerId] !== undefined
+        ) {
+          this.myTimeMs = data.times[this.myPlayerId]!;
+        }
+        const opponentId = Object.keys(data.times).find(
+          (id) => id !== this.myPlayerId
+        );
+        if (opponentId && data.times[opponentId] !== undefined) {
+          this.opponentTimeMs = data.times[opponentId]!;
+        }
+        this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
+        this.hud.updateTurnIndicator(this.myTurn);
+      },
+      onGameOver: (gameOverData?: GameOverData) => {
+        if (gameOverData?.loserTimeUp) {
+          const won = gameOverData.loserTimeUp !== this.myPlayerId;
+          const myRemaining =
+            gameOverData.times?.[this.myPlayerId ?? ""] ?? 0;
+          const timeBonus = won
+            ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
+            : 0;
+          this.endGame(timeBonus);
+        } else {
+          this.endGame(0);
+        }
+      },
+      onOpponentDisconnect: () => {
+        const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
+        this.endGame(bonus);
+      },
+      onOpponentReconnecting: () => {
+        this.hud.showReconnectingBanner();
+      },
+      onOpponentReconnected: () => {
+        this.hud.hideReconnectingBanner();
+      },
     });
   }
 
   // Drain queued opponent moves one at a time (prevents animation overlap)
   private processOpponentQueue(): void {
-    if (this.state !== "idle" || this.opponentMoveQueue.length === 0) return;
-    const move = this.opponentMoveQueue.shift()!;
+    if (this.state !== "idle") return;
+    const move = this.multiplayer.dequeueOpponentMove();
+    if (!move) return;
     this.animateSwap(move.r1, move.c1, move.r2, move.c2, false).then(() => {
       this.processOpponentQueue();
     });
@@ -464,30 +366,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.updateTimerDisplay();
-  }
-
-  private updateTimerDisplay(): void {
-    const fmt = (ms: number): string => {
-      const totalSecs = Math.max(0, Math.ceil(ms / 1000));
-      const m = Math.floor(totalSecs / 60);
-      const s = totalSecs % 60;
-      return `${m}:${s.toString().padStart(2, "0")}`;
-    };
-    this.myTimerText?.setText(`You:  ${fmt(this.myTimeMs)}`);
-    this.opponentTimerText?.setText(`Opp:  ${fmt(this.opponentTimeMs)}`);
-  }
-
-  private updateTurnIndicator(): void {
-    if (!this.turnIndicator) return;
-    if (this.myTurn) {
-      this.turnIndicator.setText(">> YOUR TURN <<").setColor("#ffff44");
-    } else {
-      const label =
-        this.mode === "pve" ? "Bot's Turn..." : "Opponent's Turn";
-      // T-v0.7-06: bump waiting-state grey to clear AA against #1a1a2e bg.
-      this.turnIndicator.setText(label).setColor("#b0b0b0");
-    }
+    this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
   }
 
   // -------------------------------------------------------------------------
@@ -500,11 +379,7 @@ export class GameScene extends Phaser.Scene {
     this.stopTurnTimer();
 
     // Disable all further input immediately — no moves after match ends.
-    this.input.off(
-      Phaser.Input.Events.POINTER_DOWN,
-      this.handlePointerDown,
-      this
-    );
+    this.inputController.detachPointer();
 
     // B1: game is over — no need for a rejoin token anymore
     SyncClient.clearRejoinToken();
@@ -536,116 +411,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------------------
-  // Input
-  // -------------------------------------------------------------------------
-
-  private handlePointerDown(pointer: Phaser.Input.Pointer): void {
-    if (this.state !== "idle") return;
-    if (this.mode !== "solo" && !this.myTurn) return;
-
-    const col = Math.floor((pointer.x - BOARD_ORIGIN_X) / CELL_STRIDE);
-    const row = Math.floor((pointer.y - BOARD_ORIGIN_Y) / CELL_STRIDE);
-
-    const { width, height } = this.ctrl.board;
-    if (row < 0 || row >= height || col < 0 || col >= width) {
-      this.clearSelection();
-      return;
-    }
-
-    if (this.selected === null) {
-      this.selectTile(row, col);
-    } else {
-      const { row: selRow, col: selCol } = this.selected;
-      if (selRow === row && selCol === col) {
-        this.clearSelection();
-        return;
-      }
-      const dr = Math.abs(selRow - row);
-      const dc = Math.abs(selCol - col);
-      if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
-        this.clearSelection();
-        this.doSwap(selRow, selCol, row, col);
-      } else {
-        this.clearSelection();
-        this.selectTile(row, col);
-      }
-    }
-  }
-
-  private selectTile(row: number, col: number): void {
-    this.selected = { row, col };
-    const { x, y } = this.cellToPixel(row, col);
-    if (this.selectionOverlay) {
-      this.selectionOverlay.setPosition(x, y).setVisible(true);
-    } else {
-      this.selectionOverlay = this.add
-        .rectangle(x, y, TILE_SIZE, TILE_SIZE, HIGHLIGHT_COLOR, HIGHLIGHT_ALPHA)
-        .setOrigin(0, 0)
-        .setDepth(10);
-    }
-  }
-
-  private clearSelection(): void {
-    this.selected = null;
-    this.selectionOverlay?.setVisible(false);
-  }
-
-  // -------------------------------------------------------------------------
-  // T-v0.7-02 · Keyboard cursor + confirm-to-swap
-  // -------------------------------------------------------------------------
-
-  /** Move the keyboard cursor by (dr, dc) within board bounds. */
-  private moveCursor(dr: number, dc: number): void {
-    if (this.state !== "idle") return;
-    const { width, height } = this.ctrl.board;
-    const nextRow = Math.max(0, Math.min(height - 1, this.cursor.row + dr));
-    const nextCol = Math.max(0, Math.min(width - 1, this.cursor.col + dc));
-    this.cursor = { row: nextRow, col: nextCol };
-    this.renderCursor();
-  }
-
-  /** Render or update the cursor overlay (ring) at the current cursor cell. */
-  private renderCursor(): void {
-    const { x, y } = this.cellToPixel(this.cursor.row, this.cursor.col);
-    if (!this.cursorOverlay) {
-      this.cursorOverlay = this.add
-        .rectangle(x, y, TILE_SIZE, TILE_SIZE)
-        .setOrigin(0, 0)
-        .setStrokeStyle(3, 0xffffff, 0.9)
-        .setDepth(9);
-    } else {
-      this.cursorOverlay.setPosition(x, y).setVisible(true);
-    }
-  }
-
-  /** Enter / Space pressed: select cursor cell, or confirm a swap target. */
-  private handleCursorConfirm(): void {
-    if (this.state !== "idle") return;
-    if (this.mode !== "solo" && !this.myTurn) return;
-    const { row, col } = this.cursor;
-    if (this.selected === null) {
-      this.selectTile(row, col);
-      this.renderCursor();
-      return;
-    }
-    const { row: selRow, col: selCol } = this.selected;
-    if (selRow === row && selCol === col) {
-      this.clearSelection();
-      return;
-    }
-    const dr = Math.abs(selRow - row);
-    const dc = Math.abs(selCol - col);
-    if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
-      this.clearSelection();
-      void this.doSwap(selRow, selCol, row, col);
-    } else {
-      this.clearSelection();
-      this.selectTile(row, col);
-      this.renderCursor();
-    }
-  }
-
-  // -------------------------------------------------------------------------
   // Swap (player move entry point)
   // -------------------------------------------------------------------------
 
@@ -659,16 +424,16 @@ export class GameScene extends Phaser.Scene {
 
     if (resolved) {
       if (this.syncClient && this.roomId) {
-        this.syncClient.sendMove(this.roomId, r1, c1, r2, c2);
+        this.multiplayer.sendMove(this.roomId, r1, c1, r2, c2);
         if (this.mode === "turn_based") {
           this.myTurn = false;
-          this.updateTurnIndicator();
+          this.hud.updateTurnIndicator(this.myTurn);
         }
       }
 
       if (this.mode === "pve") {
         this.myTurn = false;
-        this.updateTurnIndicator();
+        this.hud.updateTurnIndicator(this.myTurn);
         this.scheduleBotTurn();
       }
     }
@@ -697,16 +462,16 @@ export class GameScene extends Phaser.Scene {
     const sprB = this.spriteAt.get(idB)!;
 
     await Promise.all([
-      this.tweenSpriteToCell(sprA, r2, c2, SWAP_MS),
-      this.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
+      this.choreographer.tweenSpriteToCell(sprA, r2, c2, SWAP_MS),
+      this.choreographer.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
     ]);
 
     const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
 
     if (result.kind === "no_match") {
       await Promise.all([
-        this.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
-        this.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
+        this.choreographer.tweenSpriteToCell(sprA, r1, c1, SWAP_MS),
+        this.choreographer.tweenSpriteToCell(sprB, r2, c2, SWAP_MS),
       ]);
       this.state = "idle";
       return false;
@@ -721,11 +486,10 @@ export class GameScene extends Phaser.Scene {
     // Credit points to the right player
     if (isMyMove) {
       this.myScore += result.pointsEarned;
-      this.scoreText.setText(`Score: ${this.myScore}`);
+      this.hud.updateScore(this.myScore);
     } else {
       this.opponentScore += result.pointsEarned;
-      const label = this.mode === "pve" ? "Bot" : "Opponent";
-      this.opponentScoreText?.setText(`${label}: ${this.opponentScore}`);
+      this.hud.updateOpponentScore(this.opponentScore);
     }
 
     this.state = "idle";
@@ -738,7 +502,7 @@ export class GameScene extends Phaser.Scene {
       const matchedIds = engineStep.matches.flatMap((m) =>
         m.cells.map(([r, c]) => this.idAt[r][c])
       );
-      await this.flashAndRemoveSprites(matchedIds);
+      await this.choreographer.flashAndRemoveSprites(matchedIds, this.spriteAt);
 
       for (const match of engineStep.matches) {
         for (const [r, c] of match.cells) {
@@ -753,7 +517,11 @@ export class GameScene extends Phaser.Scene {
       }
 
       // 2. Tween gravity
-      await this.tweenGravity(engineStep.movements);
+      await this.choreographer.tweenGravity(
+        engineStep.movements,
+        this.spriteAt,
+        this.idAt
+      );
 
       const snapshot = this.idAt.map((row) => [...row]);
       const updated = snapshot.map((row) => [...row]);
@@ -770,14 +538,17 @@ export class GameScene extends Phaser.Scene {
         const key = `${pos.row},${pos.col}`;
         const id = refillIds.get(key)!;
         const symbol = engineStep.afterRefill[pos.row][pos.col];
-        const { x } = this.cellToPixel(pos.row, pos.col);
-        const spawnY = BOARD_ORIGIN_Y - TILE_SIZE;
-        const spr = this.pool.acquire(id, symbol, x, spawnY);
+        const { x } = cellToPixel(pos.row, pos.col);
+        const spr = this.pool.acquire(id, symbol, x, REFILL_SPAWN_Y);
         this.spriteAt.set(id, spr);
         this.idAt[pos.row][pos.col] = id;
       }
 
-      await this.tweenRefillFall(engineStep.newTilePositions);
+      await this.choreographer.tweenRefillFall(
+        engineStep.newTilePositions,
+        this.spriteAt,
+        this.idAt
+      );
     }
   }
 
@@ -796,104 +567,13 @@ export class GameScene extends Phaser.Scene {
     const move = this.botPlayer!.findBestMove(this.ctrl.board.grid);
     if (!move) {
       this.myTurn = true;
-      this.updateTurnIndicator();
+      this.hud.updateTurnIndicator(this.myTurn);
       return;
     }
 
     await this.animateSwap(move.r1, move.c1, move.r2, move.c2, false);
 
     this.myTurn = true;
-    this.updateTurnIndicator();
-  }
-
-  // -------------------------------------------------------------------------
-  // Tween helpers
-  // -------------------------------------------------------------------------
-
-  private tweenSpriteToCell(
-    sprite: TileSprite,
-    row: number,
-    col: number,
-    duration: number
-  ): Promise<void> {
-    const { x, y } = this.cellToPixel(row, col);
-    return new Promise<void>((resolve) => {
-      let done = 0;
-      const onBothDone = () => {
-        if (++done === 2) resolve();
-      };
-      this.tweens.add({ targets: sprite.rect, x, y, duration, onComplete: onBothDone });
-      this.tweens.add({
-        targets: sprite.label,
-        x: x + TILE_SIZE / 2,
-        y: y + TILE_SIZE / 2,
-        duration,
-        onComplete: onBothDone,
-      });
-    });
-  }
-
-  private tweenSpriteAlpha(
-    sprite: TileSprite,
-    alpha: number,
-    duration: number
-  ): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let done = 0;
-      const onBothDone = () => {
-        if (++done === 2) resolve();
-      };
-      this.tweens.add({ targets: sprite.rect, alpha, duration, onComplete: onBothDone });
-      this.tweens.add({ targets: sprite.label, alpha, duration, onComplete: onBothDone });
-    });
-  }
-
-  private flashAndRemoveSprites(ids: number[]): Promise<void> {
-    if (ids.length === 0) return Promise.resolve();
-    return Promise.all(
-      ids.map((id) => {
-        const spr = this.spriteAt.get(id);
-        if (!spr) return Promise.resolve();
-        return this.tweenSpriteAlpha(spr, 0, FLASH_MS);
-      })
-    ).then(() => {});
-  }
-
-  private tweenGravity(movements: TileMovement[]): Promise<void> {
-    if (movements.length === 0) return Promise.resolve();
-    return Promise.all(
-      movements.map(({ col, fromRow, toRow }) => {
-        const id = this.idAt[fromRow][col];
-        const spr = this.spriteAt.get(id);
-        if (!spr) return Promise.resolve();
-        const duration = FALL_MS_PER_ROW * (toRow - fromRow);
-        return this.tweenSpriteToCell(spr, toRow, col, duration);
-      })
-    ).then(() => {});
-  }
-
-  private tweenRefillFall(
-    positions: { row: number; col: number }[]
-  ): Promise<void> {
-    if (positions.length === 0) return Promise.resolve();
-    return Promise.all(
-      positions.map((pos) => {
-        const id = this.idAt[pos.row][pos.col];
-        const spr = this.spriteAt.get(id);
-        if (!spr) return Promise.resolve();
-        return this.tweenSpriteToCell(spr, pos.row, pos.col, APPEAR_MS);
-      })
-    ).then(() => {});
-  }
-
-  // -------------------------------------------------------------------------
-  // Coordinate helper
-  // -------------------------------------------------------------------------
-
-  private cellToPixel(row: number, col: number): { x: number; y: number } {
-    return {
-      x: BOARD_ORIGIN_X + col * CELL_STRIDE,
-      y: BOARD_ORIGIN_Y + row * CELL_STRIDE,
-    };
+    this.hud.updateTurnIndicator(this.myTurn);
   }
 }
