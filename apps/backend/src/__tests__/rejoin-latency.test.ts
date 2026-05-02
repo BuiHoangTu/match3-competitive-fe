@@ -30,7 +30,7 @@ import type {
 
 
 async function makeTestServer(): Promise<{ server: ServerHandle; url: string; port: number }> {
-  const server = createMatch3Server({ requireRoomToken: true });
+  const server = createMatch3Server();
   await new Promise<void>((resolve) =>
     server.httpServer.listen(0, () => resolve())
   );

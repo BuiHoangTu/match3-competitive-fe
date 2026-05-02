@@ -2,7 +2,7 @@
  * Shell↔game bridge message runtime exports.
  *
  * This file exports the runtime constant BridgeMessageType. Type declarations
- * live in bridge.d.ts so that .d.ts files can declare types without runtime code.
+ * live in bridge-types.ts (was bridge.d.ts before Phase C).
  *
  * Both are exported from this module at runtime.
  */
@@ -23,7 +23,7 @@ export const BridgeMessageType = {
 export type BridgeMessageTypeName =
   (typeof BridgeMessageType)[keyof typeof BridgeMessageType];
 
-// Re-export all types from bridge.d.ts
+// Re-export all types from bridge-types
 export type {
   StartMatchMessage,
   AppLifecycleMessage,
@@ -34,4 +34,4 @@ export type {
   ShellToGameMessage,
   GameToShellMessage,
   BridgeMessage,
-} from "./bridge.d.js";
+} from "./bridge-types.js";

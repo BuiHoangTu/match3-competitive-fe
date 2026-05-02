@@ -3,3 +3,6 @@ dist/
 # Stale tsc emission artifacts when tsc is run directly in this folder
 src/**/*.js
 src/**/*.js.map
+src/**/*.d.ts
+# Test fixtures keep their .txt; the canonical .d.ts source is bridge-types.ts now.
+!src/__tests__/bridge-messages.txt

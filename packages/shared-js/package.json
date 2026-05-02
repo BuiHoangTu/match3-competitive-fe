@@ -2,7 +2,9 @@
   "name": "@match3/shared-js",
   "version": "1.0.0",
   "private": true,
+  "main": "dist/index.js",
   "scripts": {
+    "build": "tsc",
     "test": "vitest run"
   },
   "devDependencies": {
@@ -10,17 +12,17 @@
     "vitest": "^3.1.2"
   },
   "exports": {
-    "./engine/rng.js": "./src/engine/rng.ts",
-    "./engine/rng": "./src/engine/rng.ts",
-    "./engine/Board.js": "./src/engine/Board.ts",
-    "./engine/Board": "./src/engine/Board.ts",
-    "./engine/MatchEngine.js": "./src/engine/MatchEngine.ts",
-    "./engine/MatchEngine": "./src/engine/MatchEngine.ts",
-    "./bot/BotPlayer.js": "./src/bot/BotPlayer.ts",
-    "./bot/BotPlayer": "./src/bot/BotPlayer.ts",
-    "./protocol.js": "./src/protocol.d.ts",
-    "./protocol": "./src/protocol.d.ts",
-    "./bridge.js": "./src/bridge.ts",
-    "./bridge": "./src/bridge.ts"
+    "./engine/rng.js":          { "types": "./dist/engine/rng.d.ts",          "default": "./dist/engine/rng.js" },
+    "./engine/rng":             { "types": "./dist/engine/rng.d.ts",          "default": "./dist/engine/rng.js" },
+    "./engine/Board.js":        { "types": "./dist/engine/Board.d.ts",        "default": "./dist/engine/Board.js" },
+    "./engine/Board":           { "types": "./dist/engine/Board.d.ts",        "default": "./dist/engine/Board.js" },
+    "./engine/MatchEngine.js":  { "types": "./dist/engine/MatchEngine.d.ts",  "default": "./dist/engine/MatchEngine.js" },
+    "./engine/MatchEngine":     { "types": "./dist/engine/MatchEngine.d.ts",  "default": "./dist/engine/MatchEngine.js" },
+    "./bot/BotPlayer.js":       { "types": "./dist/bot/BotPlayer.d.ts",       "default": "./dist/bot/BotPlayer.js" },
+    "./bot/BotPlayer":          { "types": "./dist/bot/BotPlayer.d.ts",       "default": "./dist/bot/BotPlayer.js" },
+    "./protocol.js":            { "types": "./dist/protocol.d.ts",            "default": "./dist/protocol.js" },
+    "./protocol":               { "types": "./dist/protocol.d.ts",            "default": "./dist/protocol.js" },
+    "./bridge.js":              { "types": "./dist/bridge.d.ts",              "default": "./dist/bridge.js" },
+    "./bridge":                 { "types": "./dist/bridge.d.ts",              "default": "./dist/bridge.js" }
   }
 }

@@ -20,11 +20,12 @@
  */
 
 // ---------------------------------------------------------------------------
-// Message-name constants — see bridge.ts for the runtime const
-// Keep in sync with shell/lib/bridge/bridge_messages.dart
-// and shared/src/__tests__/bridge-messages.txt
+// Type definitions only. Runtime BridgeMessageType const lives in bridge.ts.
+// Keep in sync with apps/frontend/lib/bridge/bridge_messages.dart
+// and packages/shared-js/src/__tests__/bridge-messages.txt
 // ---------------------------------------------------------------------------
-// (Runtime exports are in bridge.ts; this file declares types only.)
+
+import type { BridgeMessageType } from "./bridge.js";
 
 // ---------------------------------------------------------------------------
 // Shell → game message interfaces

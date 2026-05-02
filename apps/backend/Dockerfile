@@ -1,35 +1,35 @@
-# Build stage — kept for type-checking but the runtime uses ts-node so the
-# .js output isn't strictly required. We still build to surface errors early.
+# ─── Build stage — compile shared-js + backend to JS ──────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared-js/ packages/shared-js/
 COPY apps/backend/ apps/backend/
 RUN npm ci
-WORKDIR /app/apps/backend
-RUN npm run build
+# Build shared-js first so backend's tsc can resolve its compiled types.
+RUN npm --prefix packages/shared-js run build
+RUN npm --prefix apps/backend run build
 
-# Runtime stage — uses ts-node so @match3/shared-js imports (which point at
-# .ts source files via the exports map) resolve cleanly without a separate
-# compile step for the shared package.
+# ─── Runtime stage — pure node, no ts-node, only production deps ──────────────
 FROM node:20-alpine
 WORKDIR /app
 COPY package.json package-lock.json ./
-COPY packages/shared-js/ ./packages/shared-js/
-COPY apps/backend/package.json apps/backend/tsconfig.json ./apps/backend/
+COPY apps/backend/package.json ./apps/backend/
 COPY apps/backend/migrations ./apps/backend/migrations
-COPY apps/backend/src ./apps/backend/src
-# T-Local-08 — install all deps (incl. ts-node, node-pg-migrate).
+# Compiled output of both packages.
+COPY --from=builder /app/packages/shared-js/dist ./packages/shared-js/dist
+COPY --from=builder /app/packages/shared-js/package.json ./packages/shared-js/package.json
+COPY --from=builder /app/apps/backend/dist ./apps/backend/dist
+# node-pg-migrate is in devDependencies but the entrypoint runs it on boot;
+# install all deps so migrate:up is available. Production tip: the omit-dev
+# variant is possible if migrations are run in a separate init container.
 RUN npm ci
 
 WORKDIR /app/apps/backend
 
 # Entrypoint: run migrations if DATABASE_URL is set, then start the server.
-# Migrations are idempotent (CREATE TABLE IF NOT EXISTS / etc.) so running on
-# every boot is safe. If DATABASE_URL is unset, server starts in in-memory mode.
 COPY apps/backend/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3001
 ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["npx", "ts-node", "--transpile-only", "src/server.ts"]
+CMD ["node", "dist/server.js"]
