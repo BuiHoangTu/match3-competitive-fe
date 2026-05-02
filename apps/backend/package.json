@@ -7,7 +7,9 @@
     "dev": "ts-node src/server.ts",
     "build": "tsc",
     "build:all": "npm --prefix ../../packages/shared-js run build && npm run build",
-    "test": "vitest run",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate:up": "node-pg-migrate up --migrations-dir migrations --database-url-var DATABASE_URL",
     "migrate:down": "node-pg-migrate down --migrations-dir migrations --database-url-var DATABASE_URL"
   },
