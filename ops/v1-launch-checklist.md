@@ -1,12 +1,14 @@
 # v1.0 Launch Checklist
 
-State as of 2026-04-25. The codebase is **code-complete** for everything that can be implemented inside the repo. What remains are external actions: dev accounts, infra provisioning, store submissions, paid reviews, and physical-device validation. Each item below points back to its task ID in [specification/implementation-plan.md](../specification/implementation-plan.md).
+State as of 2026-05-02. The codebase is **code-complete** for everything that can be implemented inside the repo. What remains are external actions: dev accounts, infra provisioning, store submissions, paid reviews, and physical-device validation. Each item below points back to its task ID in [specification/implementation-plan.md](../specification/implementation-plan.md).
 
 ## What's done in code
 
-- 124 backend tests, 74 frontend tests, 155 shell tests — all green via Docker.
+- **403 tests** green via Docker: shared-js 39, game-view 35, backend 148
+  (81 unit + 67 integration + 4 DATABASE_URL-skipped), frontend 181.
 - Bridge contract + transports + integration test (TS + Dart parity guards).
 - Identity flow: handshake room-token verification, HTTP `/matchmaking/{join,resume}`, `/account/delete`, `/user/history`.
+- Local-account auth (username + password) — coexists with future SSO.
 - Persistence: `users`, `match_history`, deletion + tombstone, DB-outage buffering.
 - v0.7 accessibility: keyboard focus, prefers-reduced-motion (shell + game), AA contrast.
 - v1.0 code: structured logger, metrics counters, runbook draft.

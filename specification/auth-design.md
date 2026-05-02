@@ -1,6 +1,8 @@
 # Auth design — local accounts + SSO coexistence
 
-Status: **PLANNED + IN PROGRESS**. Owner: codebase. Last updated: 2026-04-25.
+Status: **SHIPPED** — local-account auth + SSO interface coexist on master.
+SSO buttons gated behind "Under development" until C01–C04 complete.
+Owner: codebase. Last updated: 2026-05-02.
 
 ## Goals
 

@@ -2,6 +2,8 @@
 
 Audience: contributors who'll maintain this. Pure structure: no behaviour changes, no new features. Each phase keeps every test green.
 
+> **Status: SHIPPED on master (2026-05-02).** Phases A → E complete in 11 commits. Phase F (doc consolidation) skipped per recommendation. Original analysis preserved below for context.
+
 ---
 
 ## 1. What's wrong with the current layout
