@@ -1,9 +1,14 @@
 /// Asserts that the Dart bridge message-name constants match the canonical
-/// fixture at shared/src/__tests__/bridge-messages.txt.
+/// fixture at packages/shared-js/src/__tests__/bridge-messages.txt.
 ///
 /// This is the Dart half of the parity test — the TypeScript half lives at
-/// fe/src/__tests__/bridge-contract.test.ts. Both read the same fixture so
-/// drift on either side breaks a test immediately.
+/// packages/game-view/src/__tests__/bridge-contract.test.ts. Both read the
+/// same fixture so drift on either side breaks a test immediately.
+///
+/// Phase E note: the previous duplicate copy at apps/frontend/test/bridge/
+/// has been deleted. `flutter test` must be run from the repo root so the
+/// upstream path resolves. Docker invocations: mount the whole repo, not
+/// just apps/frontend/.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -11,17 +16,16 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../lib/bridge/bridge_messages.dart';
 
 void main() {
-  // Resolve the fixture path. The canonical source lives under
-  // shared/src/__tests__/, but a sibling copy under shell/test/bridge/ keeps
-  // the test runnable when shell/ is mounted in isolation (e.g. inside a
-  // Docker volume that does not include the rest of the monorepo).
+  // Single source of truth — relative to the apps/frontend cwd that
+  // `flutter test` runs from.
   final fixturePath = [
-    'test/bridge/bridge-messages.txt',
-    '../shared/src/__tests__/bridge-messages.txt',
-    'shared/src/__tests__/bridge-messages.txt',
+    '../../packages/shared-js/src/__tests__/bridge-messages.txt',
+    // Fallback if invoked from repo root.
+    'packages/shared-js/src/__tests__/bridge-messages.txt',
   ].firstWhere((p) => File(p).existsSync(), orElse: () {
     throw StateError(
-      'bridge-messages.txt fixture not found; run from shell/ or repo root',
+      'bridge-messages.txt fixture not found. Run `flutter test` from '
+      'apps/frontend or repo root, with the full repo on disk.',
     );
   });
 
