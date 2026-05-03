@@ -57,6 +57,7 @@ services:
         VITE_BACKEND_URL: http://localhost:3001
     ports:
       - "8080:80"
+    cpus: 2.0
     depends_on:
       - backend
 
