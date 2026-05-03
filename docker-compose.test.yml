@@ -1,0 +1,47 @@
+# Containerised test pipeline — no Node, vitest, or Postgres required on
+# the host. Run with:
+#
+#   docker compose -f docker-compose.test.yml build
+#   docker compose -f docker-compose.test.yml run --rm tests
+#
+# Tear down volumes between runs to guarantee a clean Postgres:
+#
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Flutter widget tests under apps/frontend/test/ are intentionally NOT
+# wired in here. The cirruslabs/flutter image is ~2 GB and pulling it
+# just to run `flutter test` would slow the dev loop noticeably. Run
+# `cd apps/frontend && flutter test` on the host (or in the existing
+# shell-builder image) when you need them.
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: match3
+      POSTGRES_PASSWORD: match3dev
+      POSTGRES_DB: match3
+    # Ephemeral — tmpfs means each `docker compose up` starts with an
+    # empty cluster, so migrations apply cleanly every time.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U match3 -d match3"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  tests:
+    build:
+      context: .
+      dockerfile: ops/test/Dockerfile
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://match3:match3dev@postgres-test:5432/match3
+      # Both secrets are required for any handshake-related integration
+      # test that boots the real server. Values are throwaway — never
+      # reuse for non-test deployments.
+      ROOM_TOKEN_SECRET: test_room_token_secret_not_for_production_use_only
+      SESSION_TOKEN_SECRET: test_session_token_secret_not_for_production_use_only
