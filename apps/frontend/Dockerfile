@@ -11,6 +11,8 @@ COPY package.json package-lock.json ./
 COPY packages/shared-js/ packages/shared-js/
 COPY packages/game-view/ packages/game-view/
 RUN npm ci
+# Build shared-js first so game-view's tsc + vite can resolve its compiled output.
+RUN npm --prefix packages/shared-js run build
 WORKDIR /app/packages/game-view
 ARG VITE_BACKEND_URL=http://localhost:3001
 RUN VITE_BACKEND_URL=${VITE_BACKEND_URL} npm run build
