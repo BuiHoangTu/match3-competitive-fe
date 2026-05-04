@@ -43,6 +43,21 @@ const BACKEND_URL =
 
 let _activeSyncClient: SyncClient | null = null;
 
+// Bridge: shell → game requestLeaveMatch handler
+//
+// The shell's "Leave match" dialog sends RequestLeaveMatch when confirmed.
+// The shell has already navigated away locally; our job here is to release
+// the server-side room. We forfeit (server marks us the loser, awards the
+// opponent the win + remaining-time bonus, cleans up the room) and then
+// disconnect the socket.
+GameBridge.onRequestLeaveMatch(() => {
+  if (_activeSyncClient) {
+    _activeSyncClient.forfeit();
+    _activeSyncClient.disconnect();
+    _activeSyncClient = null;
+  }
+});
+
 GameBridge.onStartMatch(({ roomToken }) => {
   // Tear down any previous connection before starting a new one.
   if (_activeSyncClient) {

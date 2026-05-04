@@ -14,6 +14,7 @@ import { computeOutcome, recordMatchEnd, roomCleanup } from "../matchEnd";
 import { registerMoveHandler } from "./move";
 import { registerRejoinHandler } from "./rejoin";
 import { registerDisconnectHandler } from "./disconnect";
+import { registerForfeitHandler } from "./forfeit";
 
 export function registerConnectionHandler(io: Server, ctx: ServerContext): void {
   io.on("connection", (socket: Socket) => {
@@ -92,6 +93,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
 
     registerRejoinHandler(socket, ctx);
     registerMoveHandler(socket, ctx);
+    registerForfeitHandler(socket, ctx);
     registerDisconnectHandler(socket, ctx);
   });
 }

@@ -161,6 +161,15 @@ export class SyncClient {
     this.socket.emit("move", { roomId, r1, c1, r2, c2 });
   }
 
+  /**
+   * Voluntarily end the match. Server treats the caller as the loser and
+   * emits game_over to the room (incl. this socket). No-op when not
+   * connected — the leave button can fire after a network drop.
+   */
+  forfeit(): void {
+    this.socket?.emit("forfeit");
+  }
+
   onMatchFound(
     cb: (roomId: string, seed: number, opponentId: string) => void
   ): void {
