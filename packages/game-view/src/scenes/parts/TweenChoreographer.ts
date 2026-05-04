@@ -44,7 +44,7 @@ export const REFILL_SPAWN_Y = BOARD_ORIGIN_Y - TILE_SIZE;
 export class TweenChoreographer {
   constructor(private scene: Phaser.Scene) {}
 
-  /** Tween a sprite (rect + label) to the pixel position of (row, col). */
+  /** Tween a sprite to the pixel position of (row, col). */
   tweenSpriteToCell(
     sprite: TileSprite,
     row: number,
@@ -53,49 +53,28 @@ export class TweenChoreographer {
   ): Promise<void> {
     const { x, y } = cellToPixel(row, col);
     return new Promise<void>((resolve) => {
-      let done = 0;
-      const onBothDone = () => {
-        if (++done === 2) resolve();
-      };
       this.scene.tweens.add({
-        targets: sprite.rect,
+        targets: sprite.image,
         x,
         y,
         duration,
-        onComplete: onBothDone,
-      });
-      this.scene.tweens.add({
-        targets: sprite.label,
-        x: x + TILE_SIZE / 2,
-        y: y + TILE_SIZE / 2,
-        duration,
-        onComplete: onBothDone,
+        onComplete: () => resolve(),
       });
     });
   }
 
-  /** Tween a sprite's alpha (rect + label). */
+  /** Tween a sprite's alpha. */
   tweenSpriteAlpha(
     sprite: TileSprite,
     alpha: number,
     duration: number
   ): Promise<void> {
     return new Promise<void>((resolve) => {
-      let done = 0;
-      const onBothDone = () => {
-        if (++done === 2) resolve();
-      };
       this.scene.tweens.add({
-        targets: sprite.rect,
+        targets: sprite.image,
         alpha,
         duration,
-        onComplete: onBothDone,
-      });
-      this.scene.tweens.add({
-        targets: sprite.label,
-        alpha,
-        duration,
-        onComplete: onBothDone,
+        onComplete: () => resolve(),
       });
     });
   }

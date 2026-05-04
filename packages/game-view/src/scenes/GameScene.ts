@@ -5,6 +5,8 @@ import {
 } from "../game/GameLoopController.js";
 import {
   TileSpritePool,
+  preloadTileTextures,
+  TILE_SIZE,
   type TileSprite,
 } from "../rendering/TileSpritePool.js";
 import { SyncClient } from "../net/SyncClient.js";
@@ -109,6 +111,10 @@ export class GameScene extends Phaser.Scene {
   // -------------------------------------------------------------------------
   // Phaser lifecycle
   // -------------------------------------------------------------------------
+
+  preload(): void {
+    preloadTileTextures(this);
+  }
 
   create(data?: GameSceneData): void {
     const seed = data?.seed ?? DEFAULT_SEED;
@@ -253,6 +259,7 @@ export class GameScene extends Phaser.Scene {
   private initBoard(): void {
     this.pool.releaseAll();
     this.spriteAt.clear();
+    this._drawCellBorders();
 
     const board = this.ctrl.board;
     this.idAt = board.grid.map((row, r) =>
@@ -264,6 +271,24 @@ export class GameScene extends Phaser.Scene {
         return id;
       })
     );
+  }
+
+  /**
+   * Draws a 1-px stroke around each cell of the board so empty / mid-cascade
+   * cells remain visually delineated. Single Graphics object at depth 0; tile
+   * images sit on top at depth 1. Phaser destroys it automatically when the
+   * scene shuts down, so initBoard() only needs to recreate-on-restart.
+   */
+  private _drawCellBorders(): void {
+    const g = this.add.graphics().setDepth(0);
+    g.lineStyle(1, 0xffffff, 0.18);
+    const board = this.ctrl.board;
+    for (let r = 0; r < board.height; r++) {
+      for (let c = 0; c < board.width; c++) {
+        const { x, y } = cellToPixel(r, c);
+        g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
