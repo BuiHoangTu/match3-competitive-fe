@@ -36,8 +36,12 @@ services:
     environment:
       DATABASE_URL: postgresql://match3:match3dev@postgres:5432/match3
       PORT: 3001
-      # Local dev secrets only — replace with `openssl rand -hex 32` values
-      # for any non-local deployment.
+      # SECURITY: these are placeholder dev secrets. Anyone who knows these
+      # strings can forge valid session JWTs and room tokens against this
+      # deployment. Before exposing this stack on any network beyond
+      # localhost, replace BOTH values via docker-compose.override.yml or a
+      # .env file with strong random values:
+      #   openssl rand -hex 32
       ROOM_TOKEN_SECRET: dev_room_token_secret_change_me_use_openssl_rand_hex_32
       SESSION_TOKEN_SECRET: dev_session_token_secret_change_me_use_openssl_rand_hex_32
     healthcheck:

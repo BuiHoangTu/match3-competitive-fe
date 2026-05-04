@@ -23,8 +23,19 @@ import {
   DuplicateUsernameError,
 } from "./persistence/LocalAccountStore";
 import { signSession } from "./LocalSessionSigner";
+import { RateLimiter } from "./RateLimiter";
 
 const MAX_BODY_BYTES = 4 * 1024;
+
+/**
+ * Shared rate limiter for /auth/login and /auth/register.
+ * 5 requests per minute per IP — one bucket covers both endpoints so a
+ * brute-forcer can't dodge by alternating them.
+ */
+const _authRateLimiter = new RateLimiter({
+  limit: 5,
+  windowMs: 60 * 1000,
+});
 
 export interface MatchmakingHttpDeps {
   roomManager: RoomManager;
@@ -105,12 +116,14 @@ export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
 
     // ── POST /auth/register ────────────────────────────────────────────────────
     if (url === "/auth/register") {
+      if (!checkAuthRateLimit(req, res)) return;
       await handleAuthRegister(deps, req, res);
       return;
     }
 
     // ── POST /auth/login ───────────────────────────────────────────────────────
     if (url === "/auth/login") {
+      if (!checkAuthRateLimit(req, res)) return;
       await handleAuthLogin(deps, req, res);
       return;
     }
@@ -368,6 +381,30 @@ async function handleAccountDelete(
 // T-Local-04 · /auth/register and /auth/login
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * Check rate limit for /auth/* endpoints. Returns true if allowed.
+ * On exceed: writes HTTP 429 with Retry-After and returns false.
+ */
+function checkAuthRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+  const ip = req.socket?.remoteAddress ?? "unknown";
+  const result = _authRateLimiter.check(ip);
+  if (!result.allowed) {
+    const body = JSON.stringify({
+      code: "RATE_LIMITED",
+      message: "Too many auth attempts, try again later",
+    });
+    res.writeHead(429, {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+      "Retry-After": String(result.retryAfterSecs),
+      ...CORS_HEADERS,
+    });
+    res.end(body);
+    return false;
+  }
+  return true;
+}
+
 const USERNAME_RE = /^[a-zA-Z0-9_-]{3,32}$/;
 const MIN_PASSWORD_LEN = 6;
 const MAX_PASSWORD_LEN = 200;
@@ -500,6 +537,16 @@ async function handleAuthLogin(
 }
 
 /** Expose helpers for tests. */
-export const __test__ = { extractBearerToken, isValidMode };
+export const __test__ = { extractBearerToken, isValidMode, _authRateLimiter };
+
+/**
+ * Reset the auth rate limiter between test runs. Only call from test code.
+ * The limiter is a module-level singleton; without this, sequential integration
+ * tests that make many /auth/* requests exhaust the bucket for loopback IPs.
+ */
+export function _resetAuthRateLimiterForTests(): void {
+  _authRateLimiter.clear();
+}
+
 // Silence "unused" lint for AUTH_MISSING_TOKEN since it flows through AuthError.code.
 void AUTH_MISSING_TOKEN;

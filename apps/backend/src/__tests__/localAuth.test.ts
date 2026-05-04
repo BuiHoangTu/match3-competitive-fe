@@ -16,9 +16,10 @@ import {
   verifySession,
   initSessionSecret,
   _resetForTests,
+  DEFAULT_SESSION_TTL_MS,
 } from "../LocalSessionSigner";
 import { verifyToken, AuthError, clearTokenCache } from "../AuthMiddleware";
-import { createMatchmakingHttpHandler } from "../matchmakingHttp";
+import { createMatchmakingHttpHandler, _resetAuthRateLimiterForTests } from "../matchmakingHttp";
 import { RoomManager } from "../RoomManager";
 import { MatchmakingService } from "../MatchmakingService";
 import { NullPersistenceAdapter } from "../persistence/PersistenceAdapter";
@@ -27,8 +28,12 @@ beforeEach(() => {
   _resetForTests();
   initSessionSecret("0".repeat(64));
   clearTokenCache();
+  _resetAuthRateLimiterForTests();
 });
-afterEach(() => clearTokenCache());
+afterEach(() => {
+  clearTokenCache();
+  _resetAuthRateLimiterForTests();
+});
 
 // ─── LocalAccountStore ────────────────────────────────────────────────────────
 
@@ -91,37 +96,95 @@ describe("hashPassword / verifyPassword", () => {
   });
 });
 
-// ─── LocalSessionSigner ───────────────────────────────────────────────────────
+// ─── LocalSessionSigner — JWT shape ──────────────────────────────────────────
 
 describe("LocalSessionSigner", () => {
+  it("token has three dot-separated parts (standard JWT)", () => {
+    const { token } = signSession({ userId: "local:abc" });
+    const parts = token.split(".");
+    expect(parts).toHaveLength(3);
+  });
+
+  it("middle part decodes to correct claims", () => {
+    const nowMs = Date.now();
+    const { token } = signSession({ userId: "local:abc", now: nowMs });
+    const parts = token.split(".");
+    const payloadJson = Buffer.from(
+      parts[1].replace(/-/g, "+").replace(/_/g, "/"),
+      "base64"
+    ).toString("utf8");
+    const payload = JSON.parse(payloadJson);
+    expect(payload.sub).toBe("local:abc");
+    expect(payload.kind).toBe("session");
+    expect(typeof payload.exp).toBe("number");
+    // iat is auto-set by jsonwebtoken to real time (in seconds).
+    expect(typeof payload.iat).toBe("number");
+    // exp should be approximately nowMs/1000 + DEFAULT_SESSION_TTL_MS/1000.
+    const expectedExpSec = Math.floor(nowMs / 1000) + DEFAULT_SESSION_TTL_MS / 1000;
+    // Allow ±2 s to account for the real clock tick between sign and assert.
+    expect(payload.exp).toBeGreaterThanOrEqual(expectedExpSec - 2);
+    expect(payload.exp).toBeLessThanOrEqual(expectedExpSec + 2);
+  });
+
   it("round-trips sign → verify", () => {
     const { token } = signSession({ userId: "local:abc" });
     const out = verifySession(token);
     expect(out?.userId).toBe("local:abc");
   });
 
-  it("rejects tampered payload", () => {
-    const { token } = signSession({ userId: "local:abc" });
-    const [p, s] = token.split(".");
-    const tampered = `${p}x.${s}`;
-    expect(verifySession(tampered)).toBeNull();
+  it("verifySession returns exp in ms (not seconds)", () => {
+    const now = Date.now();
+    const { token, expiresAt } = signSession({ userId: "local:abc", now });
+    const out = verifySession(token);
+    expect(out).not.toBeNull();
+    // The JWT stores exp in whole seconds; verifySession returns it as epoch ms.
+    // expiresAt has sub-second precision from Date.now(), so we allow up to 1 s
+    // of rounding difference (floor truncation in signSession).
+    expect(out!.exp).toBeGreaterThanOrEqual(expiresAt - 1000);
+    expect(out!.exp).toBeLessThanOrEqual(expiresAt);
+    // Sanity: clearly in milliseconds range (> year 2020 in ms).
+    expect(out!.exp).toBeGreaterThan(1_577_836_800_000);
   });
 
-  it("rejects tampered signature", () => {
-    const { token } = signSession({ userId: "local:abc" });
-    const [p, s] = token.split(".");
-    expect(verifySession(`${p}.${s}x`)).toBeNull();
+  it("expiresAt from signSession is ~4 hours from now in ms", () => {
+    const now = Date.now();
+    const { expiresAt } = signSession({ userId: "local:abc", now });
+    const expectedTtlMs = DEFAULT_SESSION_TTL_MS; // 4 * 60 * 60 * 1000
+    expect(expiresAt - now).toBe(expectedTtlMs);
+    expect(expectedTtlMs).toBe(4 * 60 * 60 * 1000);
   });
 
   it("rejects expired token", () => {
-    const { token } = signSession({ userId: "local:abc", ttlMs: 1, now: 0 });
+    // Issue a token that expired 1 ms ago.
+    const now = Date.now() - 10_000;
+    const { token } = signSession({ userId: "local:abc", ttlMs: 1, now });
     expect(verifySession(token)).toBeNull();
   });
 
-  it("rejects garbage", () => {
+  it("rejects token signed with a different secret", () => {
+    const { token } = signSession({ userId: "local:abc" });
+    // Reset to a new random secret.
+    _resetForTests();
+    initSessionSecret("f".repeat(64));
+    expect(verifySession(token)).toBeNull();
+    // Restore for afterEach/beforeEach cleanup.
+    _resetForTests();
+    initSessionSecret("0".repeat(64));
+  });
+
+  it("rejects garbage strings", () => {
     expect(verifySession("not-a-token")).toBeNull();
     expect(verifySession("")).toBeNull();
+    expect(verifySession("a.b.c")).toBeNull();
     expect(verifySession(".")).toBeNull();
+  });
+
+  it("rejects tampered payload (middle segment modified)", () => {
+    const { token } = signSession({ userId: "local:abc" });
+    const parts = token.split(".");
+    // Replace payload with a different base64url string.
+    const tampered = [parts[0], parts[1] + "x", parts[2]].join(".");
+    expect(verifySession(tampered)).toBeNull();
   });
 });
 
@@ -140,8 +203,8 @@ describe("AuthMiddleware accepts a local session token", () => {
   });
 
   it("verifyToken throws when neither local nor Firebase recognise the token", async () => {
-    // Random base64-ish strings that aren't valid session HMAC.
-    await expect(verifyToken("aaa.bbb")).rejects.toBeInstanceOf(AuthError);
+    // Three-part string that isn't a valid HS256 JWT signed with our secret.
+    await expect(verifyToken("aaa.bbb.ccc")).rejects.toBeInstanceOf(AuthError);
   });
 });
 
@@ -196,7 +259,8 @@ describe("POST /auth/register", () => {
         password: "secret123",
       });
       expect(r.status).toBe(201);
-      expect(r.body.sessionToken).toMatch(/.+\..+/);
+      // Token is a proper three-part JWT now.
+      expect(r.body.sessionToken.split(".")).toHaveLength(3);
       expect(r.body.userId).toMatch(/^local:/);
       expect(r.body.username).toBe("alice");
     }, store);
@@ -256,7 +320,8 @@ describe("POST /auth/login", () => {
         password: "secret123",
       });
       expect(r.status).toBe(200);
-      expect(r.body.sessionToken).toMatch(/.+\..+/);
+      // Three-part JWT.
+      expect(r.body.sessionToken.split(".")).toHaveLength(3);
     }, store);
   });
 

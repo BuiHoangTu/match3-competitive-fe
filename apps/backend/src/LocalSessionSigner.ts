@@ -1,26 +1,23 @@
 /**
- * T-Local-03 · LocalSessionSigner — HMAC-signed session tokens for local accounts.
+ * T-Local-03 · LocalSessionSigner — JWT-signed session tokens for local accounts.
  *
- * Mirrors RoomTokenSigner but with a different secret, longer TTL (7 days),
- * and a different `kind` claim ("session"). The same downstream verifier in
- * AuthMiddleware can recognise tokens with `kind: "session"` and treat them
- * as Firebase-equivalent (just yielding {userId} without a Firebase call).
+ * Issues standard HS256 JWTs. Claims:
+ *   sub  — userId
+ *   exp  — expiry (seconds since epoch, standard JWT claim)
+ *   iat  — issued-at (seconds since epoch)
+ *   kind — "session" (custom claim so AuthMiddleware can distinguish local
+ *          sessions from Firebase id-tokens)
  *
- * Format: base64url(payload).base64url(hmacSha256(payload))
+ * The Flutter client reads `expiresAt` as epoch ms; signSession returns that
+ * in ms and verifySession returns exp in ms — both callers expect ms.
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import jwt from "jsonwebtoken";
+import { randomBytes } from "crypto";
 
-export const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+export const DEFAULT_SESSION_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-interface SessionPayload {
-  kind: "session";
-  userId: string;
-  /** Epoch ms when this token expires. */
-  exp: number;
-}
-
-let _secret: Buffer | null = null;
+let _secret: string | null = null;
 
 /**
  * Initialise the signing secret. In production, pass a 32-byte random value
@@ -43,9 +40,9 @@ export function initSessionSecret(secret?: string): void {
         "SESSION_TOKEN_SECRET must be ≥ 16 bytes (32 hex chars or 16 utf8 chars)"
       );
     }
-    _secret = buf;
+    _secret = buf.toString("hex");
   } else {
-    _secret = randomBytes(32);
+    _secret = randomBytes(32).toString("hex");
     console.warn(
       "[LocalSessionSigner] no SESSION_TOKEN_SECRET set — generated ephemeral " +
         "secret for this process. Sessions will not survive a restart."
@@ -53,25 +50,9 @@ export function initSessionSecret(secret?: string): void {
   }
 }
 
-function getSecret(): Buffer {
+function getSecret(): string {
   if (!_secret) initSessionSecret(process.env.SESSION_TOKEN_SECRET);
   return _secret!;
-}
-
-function b64url(buf: Buffer): string {
-  return buf
-    .toString("base64")
-    .replace(/=+$/, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
-}
-
-function b64urlDecode(s: string): Buffer {
-  let pad = s.length % 4;
-  if (pad === 2) s += "==";
-  else if (pad === 3) s += "=";
-  else if (pad === 1) throw new Error("invalid base64url length");
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 }
 
 export function signSession(params: {
@@ -80,61 +61,52 @@ export function signSession(params: {
   now?: number;
 }): { token: string; expiresAt: number } {
   const ttl = params.ttlMs ?? DEFAULT_SESSION_TTL_MS;
-  const now = params.now ?? Date.now();
-  const exp = now + ttl;
-  const payload: SessionPayload = {
-    kind: "session",
-    userId: params.userId,
-    exp,
-  };
-  const payloadB64 = b64url(Buffer.from(JSON.stringify(payload), "utf8"));
-  const sig = createHmac("sha256", getSecret()).update(payloadB64).digest();
-  const sigB64 = b64url(sig);
-  return { token: `${payloadB64}.${sigB64}`, expiresAt: exp };
+  const nowMs = params.now ?? Date.now();
+  const expMs = nowMs + ttl;
+  const expSec = Math.floor(expMs / 1000);
+
+  // jsonwebtoken auto-sets iat from real time; exp is passed explicitly.
+  // Note: `now` affects exp but not iat (the library controls iat).
+  const token = jwt.sign(
+    {
+      sub: params.userId,
+      kind: "session",
+      exp: expSec,
+    },
+    getSecret(),
+    { algorithm: "HS256" }
+  );
+
+  return { token, expiresAt: expMs };
 }
 
 export function verifySession(
   token: string
 ): { userId: string; exp: number } | null {
   if (!token || typeof token !== "string") return null;
-  const dot = token.indexOf(".");
-  if (dot <= 0 || dot === token.length - 1) return null;
-  const payloadB64 = token.slice(0, dot);
-  const sigB64 = token.slice(dot + 1);
 
-  let providedSig: Buffer;
+  let decoded: jwt.JwtPayload;
   try {
-    providedSig = b64urlDecode(sigB64);
-  } catch {
-    return null;
-  }
-  const expectedSig = createHmac("sha256", getSecret())
-    .update(payloadB64)
-    .digest();
-  if (
-    providedSig.length !== expectedSig.length ||
-    !timingSafeEqual(providedSig, expectedSig)
-  ) {
-    return null;
-  }
-
-  let payload: SessionPayload;
-  try {
-    const json = b64urlDecode(payloadB64).toString("utf8");
-    payload = JSON.parse(json);
+    decoded = jwt.verify(token, getSecret(), {
+      algorithms: ["HS256"],
+    }) as jwt.JwtPayload;
   } catch {
     return null;
   }
 
   if (
-    payload.kind !== "session" ||
-    typeof payload.userId !== "string" ||
-    typeof payload.exp !== "number"
+    decoded.kind !== "session" ||
+    typeof decoded.sub !== "string" ||
+    typeof decoded.exp !== "number"
   ) {
     return null;
   }
-  if (payload.exp <= Date.now()) return null;
-  return { userId: payload.userId, exp: payload.exp };
+
+  const expMs = decoded.exp * 1000;
+  // jwt.verify already checks expiry, but we also guard here for clarity.
+  if (expMs <= Date.now()) return null;
+
+  return { userId: decoded.sub, exp: expMs };
 }
 
 /** Test helper to reset state between runs. */

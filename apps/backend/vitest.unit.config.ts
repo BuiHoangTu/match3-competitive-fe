@@ -19,6 +19,7 @@ export default defineConfig({
       "src/__tests__/matchmakingHttp.test.ts",
       "src/__tests__/localAuth.test.ts",
       "src/__tests__/auth.test.ts",
+      // RateLimiter.test.ts is intentionally NOT excluded — pure unit test.
     ],
   },
 });

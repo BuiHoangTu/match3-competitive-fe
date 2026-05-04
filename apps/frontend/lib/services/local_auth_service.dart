@@ -4,12 +4,18 @@
 /// consume it interchangeably with FirebaseAuthService when SSO ships.
 ///
 /// Talks to the backend endpoints:
-///   POST /auth/register {username, email?, password} → 201 {sessionToken, userId}
-///   POST /auth/login {username, password}            → 200 {sessionToken, userId}
+///   POST /auth/register {username, email?, password} → 201 {sessionToken, userId, expiresAt}
+///   POST /auth/login {username, password}            → 200 {sessionToken, userId, expiresAt}
 ///
-/// The session token is stored in memory only (no persistent storage in v1.0).
-/// On restart, the user signs in again. This is a deliberate simplicity choice
-/// for the immediate-deploy goal; persistent storage is a v1.x concern.
+/// `sessionToken` is an HS256 JWT issued by the backend with a 4-hour TTL
+/// (see apps/backend/src/LocalSessionSigner.ts). The token is persisted in
+/// SharedPreferences alongside its expiry so a browser refresh or app
+/// restart can resume the session — `restoreSession()` clears storage when
+/// the stored expiry has elapsed.
+///
+/// Both auth endpoints are rate-limited server-side to 5 requests / minute
+/// per IP across login + register combined; the limiter returns HTTP 429
+/// with code RATE_LIMITED, which surfaces here as [LocalAuthTransport].
 library;
 
 import 'dart:async';
