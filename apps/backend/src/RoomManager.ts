@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { Move } from "@match3/shared-js/protocol";
+import type { RootSeedSource } from "./lib/RootSeedSource";
 import { createBoard } from "@match3/shared-js/engine/Board";
 
 export type { Move };
@@ -37,8 +38,21 @@ export class RoomManager {
   private playerRoom: Map<string, string> = new Map();
   private userRoom: Map<string, string> = new Map();
 
+  /**
+   * Optional seed source. If injected, seeds come from a single rotating
+   * crypto-initialised RNG; otherwise falls back to Math.random for tests
+   * that construct RoomManager without context.
+   */
+  constructor(private rootSeedSource?: RootSeedSource) {}
+
+  private nextSeed(): number {
+    return this.rootSeedSource
+      ? this.rootSeedSource.nextSeed()
+      : Math.floor(Math.random() * 2 ** 31);
+  }
+
   createRoom(playerId: string, gameMode: "turn_based" | "pve" = "turn_based"): Room {
-    const seed = Math.floor(Math.random() * 2 ** 31);
+    const seed = this.nextSeed();
     const room: Room = {
       id: generateId(),
       players: [playerId],
@@ -71,7 +85,7 @@ export class RoomManager {
     userIdSlot1: string,
     gameMode: "turn_based" | "pve" = "turn_based"
   ): Room {
-    const seed = Math.floor(Math.random() * 2 ** 31);
+    const seed = this.nextSeed();
     const isBotMatch = userIdSlot1 === "bot:default" || userIdSlot0 === "bot:default";
     const effectiveMode = isBotMatch ? "pve" : gameMode;
     const room: Room = {

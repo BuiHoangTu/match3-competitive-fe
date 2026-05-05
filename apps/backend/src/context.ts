@@ -11,6 +11,7 @@ import type { TimerManager } from "./TimerManager";
 import type { BotManager } from "./BotManager";
 import type { SocketBridge } from "./services/SocketBridge";
 import type { PersistenceAdapter } from "./persistence/PersistenceAdapter";
+import type { RootSeedSource } from "./lib/RootSeedSource";
 
 export interface ServerContext {
   io: Server;
@@ -21,6 +22,8 @@ export interface ServerContext {
   /** Judge bridge for turn_based rooms. Wires MatchEngineService ↔ Socket.IO. */
   socketBridge: SocketBridge;
   persistence: PersistenceAdapter;
+  /** Crypto-seeded rotating RNG used to generate match seeds. */
+  rootSeedSource: RootSeedSource;
   /** Wall-clock start times for active matches (roomId → epoch ms). */
   matchStartTimes: Map<string, number>;
   /** Grace-period timers keyed by socket ID (cleared on rejoin). */

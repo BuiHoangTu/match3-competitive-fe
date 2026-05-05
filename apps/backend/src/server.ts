@@ -8,6 +8,7 @@ import { IdleSweeper } from "./IdleSweeper";
 import { MatchmakingService } from "./MatchmakingService";
 import { MatchEngineService } from "./services/MatchEngineService";
 import { SocketBridge } from "./services/SocketBridge";
+import { RootSeedSource } from "./lib/RootSeedSource";
 import { createMatchmakingHttpHandler } from "./matchmakingHttp";
 import { registerHandshake } from "./handshake";
 import { registerConnectionHandler } from "./handlers/connection";
@@ -81,7 +82,8 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
       });
   }
 
-  const roomManager = new RoomManager();
+  const rootSeedSource = new RootSeedSource();
+  const roomManager = new RoomManager(rootSeedSource);
   const rejoinManager = new RejoinManager();
   const timerManager = new TimerManager(io, roomManager);
   const botManager = new BotManager(io, roomManager, timerManager);
@@ -126,6 +128,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     timerManager,
     botManager,
     persistence,
+    rootSeedSource,
     matchStartTimes,
     disconnectedPlayers,
   };
