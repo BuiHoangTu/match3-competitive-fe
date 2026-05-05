@@ -9,6 +9,7 @@ import type { RoomManager } from "./RoomManager";
 import type { RejoinManager } from "./RejoinManager";
 import type { TimerManager } from "./TimerManager";
 import type { BotManager } from "./BotManager";
+import type { SocketBridge } from "./services/SocketBridge";
 import type { PersistenceAdapter } from "./persistence/PersistenceAdapter";
 
 export interface ServerContext {
@@ -17,6 +18,8 @@ export interface ServerContext {
   rejoinManager: RejoinManager;
   timerManager: TimerManager;
   botManager: BotManager;
+  /** Judge bridge for turn_based rooms. Wires MatchEngineService ↔ Socket.IO. */
+  socketBridge: SocketBridge;
   persistence: PersistenceAdapter;
   /** Wall-clock start times for active matches (roomId → epoch ms). */
   matchStartTimes: Map<string, number>;

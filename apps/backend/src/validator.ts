@@ -1,4 +1,5 @@
 import type { Move, Room } from "./RoomManager";
+import { findMatches } from "@match3/shared-js/engine/MatchEngine";
 
 const BOARD_MIN = 0;
 const BOARD_MAX = 7;
@@ -20,6 +21,29 @@ export function isValidMove(move: Move): boolean {
 
   // Exactly adjacent: one axis differs by 1, the other by 0
   return (dr === 1 && dc === 0) || (dr === 0 && dc === 1);
+}
+
+/**
+ * Engine-level validation for the server-authoritative PvP path.
+ *
+ * Applies the swap immutably to the provided grid and checks whether at least
+ * one match would result. Returns true iff the swap produces a match.
+ *
+ * Pure function — no I/O, no state mutation.
+ */
+export function validateProducesMatch(
+  grid: number[][],
+  r1: number,
+  c1: number,
+  r2: number,
+  c2: number
+): boolean {
+  // Deep-copy the grid, swap, then run match detection.
+  const candidate = grid.map((row) => [...row]);
+  const tmp = candidate[r1][c1];
+  candidate[r1][c1] = candidate[r2][c2];
+  candidate[r2][c2] = tmp;
+  return findMatches(candidate).length > 0;
 }
 
 /**

@@ -3,9 +3,15 @@
  *
  * Starts a real Match-3 server on an ephemeral port, wires two Node-side
  * socket.io-client instances, and wraps their emit / on to inject a
- * configurable RTT. Scripts 50 alternating valid moves and returns final
+ * configurable RTT. Scripts N alternating valid moves and returns final
  * board state from both clients so determinism and reconnection tests can
  * run against it.
+ *
+ * After the server-authoritative PvP refactor (turn_based rooms), the server
+ * now emits `move_resolved { finalGrid, ... }` instead of relying on clients
+ * to locally reconstruct the board via `opponent_move`. Both clients track
+ * the server-broadcast finalGrid — desync is structurally impossible since
+ * both receive the exact same payload. The test validates this contract.
  *
  * Tuning: set the env var `SIM_RTT_MS` (0 / 100 / 300 / 500). When imported
  * programmatically the same value can be passed via the `rttMs` option.
@@ -14,16 +20,12 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
-import { createBoard, swapTiles, type Board } from "@match3/shared-js/engine/Board";
-import { createRng } from "@match3/shared-js/engine/rng";
-import {
-  findMatches,
-  resolveBoard,
-} from "@match3/shared-js/engine/MatchEngine";
+import { createBoard } from "@match3/shared-js/engine/Board";
+import { findMatches } from "@match3/shared-js/engine/MatchEngine";
 import type {
   MatchFoundPayload,
   TurnChangedPayload,
-  Move,
+  MoveResolvedPayload,
 } from "@match3/shared-js/protocol";
 
 export interface LatencyHarnessOptions {
@@ -36,7 +38,11 @@ export interface LatencyHarnessOptions {
 }
 
 export interface LatencyHarnessResult {
-  /** Final board grid (immutable copy) as replayed on each client. */
+  /**
+   * Final board grid as seen by each client (the server-broadcast finalGrid
+   * from the last move_resolved event). Both should be identical — the server
+   * emits the same authoritative payload to both sockets.
+   */
   boardA: number[][];
   boardB: number[][];
   /** Per-move client-observed roundtrip timings in ms. */
@@ -124,8 +130,8 @@ function wrapWithLatency(socket: ClientSocket, rttMs: number): DelayedClient {
 /**
  * Drives a deterministic scripted match: for each turn, finds a swap whose
  * resulting board produces a match, sends it to the server, and waits for
- * the corresponding `turn_changed` echo. Clients replay every move via the
- * shared engine so we can compare final grids.
+ * the server-broadcast `move_resolved` echo. Both clients track the
+ * server-authoritative `finalGrid` from `move_resolved` — no local replay.
  */
 export async function runLatencyHarness(
   opts: LatencyHarnessOptions = {}
@@ -141,11 +147,7 @@ export async function runLatencyHarness(
   const port = (server.httpServer.address() as AddressInfo).port;
   const url = `http://127.0.0.1:${port}`;
 
-  // Pair the two clients via the HTTP matchmaking endpoint. Both calls
-  // present a session token (HMAC, no DB) so the AuthMiddleware accepts them
-  // without any local-accounts store. The first call enqueues; the second
-  // pairs and resolves both. We then connect Socket.IO with each client's
-  // room token.
+  // Pair the two clients via the HTTP matchmaking endpoint.
   const sessionA = signSession({ userId: "harness:A" }).token;
   const sessionB = signSession({ userId: "harness:B" }).token;
 
@@ -213,40 +215,28 @@ export async function runLatencyHarness(
     const seed = mA.seed;
     const roomId = mA.roomId;
 
-    // Both clients track their own engine state (seed + move list)
-    const boardA: { board: Board; rng: () => number } = {
-      board: createBoard(seed),
-      rng: createRng(seed + 1),
-    };
-    const boardB: { board: Board; rng: () => number } = {
-      board: createBoard(seed),
-      rng: createRng(seed + 1),
-    };
+    // Clients start from the server-broadcast boardGrid (match_found).
+    // If absent (shouldn't be for turn_based), fall back to local createBoard.
+    let boardA: number[][] = mA.boardGrid
+      ? mA.boardGrid.map((r) => [...r])
+      : createBoard(seed).grid.map((r) => [...r]);
+    let boardB: number[][] = mB.boardGrid
+      ? mB.boardGrid.map((r) => [...r])
+      : createBoard(seed).grid.map((r) => [...r]);
 
-    function applyResolved(
-      state: { board: Board; rng: () => number },
-      r1: number,
-      c1: number,
-      r2: number,
-      c2: number
-    ): void {
-      const swapped = swapTiles(state.board, r1, c1, r2, c2);
-      const { grid } = resolveBoard(swapped.grid, state.rng);
-      state.board = { ...swapped, grid };
-    }
-
-    // Wire opponent_move — both clients replay each other's moves through
-    // the latency wrapper so the inbound delay is counted.
-    const onOppMove = (state: typeof boardA) => (...args: unknown[]) => {
-      const m = args[0] as Move;
-      applyResolved(state, m.r1, m.c1, m.r2, m.c2);
-    };
-    a.on("opponent_move", onOppMove(boardA));
-    b.on("opponent_move", onOppMove(boardB));
+    // Wire move_resolved — both clients update their grid from the server payload.
+    // This is the new authoritative-state contract: no local board computation.
+    a.on("move_resolved", (...args: unknown[]) => {
+      const p = args[0] as MoveResolvedPayload;
+      boardA = p.finalGrid.map((r) => [...r]);
+    });
+    b.on("move_resolved", (...args: unknown[]) => {
+      const p = args[0] as MoveResolvedPayload;
+      boardB = p.finalGrid.map((r) => [...r]);
+    });
 
     // Helper: returns a promise resolving when `turn_changed` fires with
-    // `activePlayerId === expected` on the given client (through the latency
-    // wrapper, so the inbound delay is counted).
+    // `activePlayerId === expected` on the given client.
     function waitForTurn(
       client: DelayedClient,
       expectedActiveId: string
@@ -291,21 +281,20 @@ export async function runLatencyHarness(
     }
 
     const activePlayerId = mA.firstPlayerId;
-    const startingState =
-      activePlayerId === mA.myPlayerId ? boardA : boardB;
+    // Determine which client goes first.
     const startingClient = activePlayerId === mA.myPlayerId ? a : b;
     const otherClient = startingClient === a ? b : a;
-    let currentState = startingState;
     let currentClient = startingClient;
     let nextClient = otherClient;
-    let nextState = currentState === boardA ? boardB : boardA;
 
     const roundtripsMs: number[] = [];
     let movesPlayed = 0;
 
     for (let i = 0; i < moveCount; i++) {
-      const move = pickValidSwap(currentState.board.grid);
-      if (!move) break;
+      // The active client uses the current client's board view to pick a swap.
+      const currentBoard = currentClient === a ? boardA : boardB;
+      const swap = pickValidSwap(currentBoard);
+      if (!swap) break;
 
       const myId = currentClient === a ? mA.myPlayerId : mB.myPlayerId;
       const opponentId = currentClient === a ? mB.myPlayerId : mA.myPlayerId;
@@ -315,20 +304,16 @@ export async function runLatencyHarness(
       const t0 = Date.now();
       currentClient.emit("move", {
         roomId,
-        r1: move.r1,
-        c1: move.c1,
-        r2: move.r2,
-        c2: move.c2,
+        r1: swap.r1,
+        c1: swap.c1,
+        r2: swap.r2,
+        c2: swap.c2,
       });
       await senderTurnChanged;
       const t1 = Date.now();
       roundtripsMs.push(t1 - t0);
 
-      // Sender applies own move to their engine
-      applyResolved(currentState, move.r1, move.c1, move.r2, move.c2);
-
-      // Give the opponent_move event time to traverse half-latency before
-      // swapping roles. 2*halfDelay + a tiny buffer is safe.
+      // Give the move_resolved event time to traverse half-latency to both clients.
       await new Promise((r) => setTimeout(r, rttMs + 20));
 
       movesPlayed++;
@@ -340,14 +325,12 @@ export async function runLatencyHarness(
 
       // Swap current / next
       [currentClient, nextClient] = [nextClient, currentClient];
-      [currentState, nextState] = [nextState, currentState];
-      void myId;
       void opponentId;
     }
 
     return {
-      boardA: boardA.board.grid.map((r) => [...r]),
-      boardB: boardB.board.grid.map((r) => [...r]),
+      boardA: boardA.map((r) => [...r]),
+      boardB: boardB.map((r) => [...r]),
       roundtripsMs,
       movesPlayed,
       seed,

@@ -1,10 +1,16 @@
 /**
  * socket.on("rejoin", ...) handler.
  * T-v0.6-G02/G03 · userId-keyed rejoin via verified socket identity.
+ *
+ * turn_based rooms: emits a one-shot board snapshot (boardGrid + rngState +
+ * scores + originalSeed) instead of the legacy moves[] list.
+ *
+ * pve rooms: retains the legacy seed + moves[] shape (unchanged).
  */
 
 import type { Socket } from "socket.io";
 import type { ServerContext } from "../context";
+import type { PlayerState } from "../services/MatchEngineService";
 import { logEvent } from "../logger";
 
 export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void {
@@ -65,12 +71,7 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
     socket.join(roomId);
     ctx.rejoinManager.delete(userId);
 
-    const times = ctx.timerManager.getTimes(roomId);
     const opponentId = updatedRoom.players.find((p) => p !== socket.id) ?? null;
-
-    const remappedMoves = updatedRoom.moves.map((m) =>
-      oldPlayerId && m.playerId === oldPlayerId ? { ...m, playerId: socket.id } : m
-    );
 
     logEvent("rejoin", {
       matchId: roomId,
@@ -79,16 +80,77 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
       ok: true,
     });
 
-    socket.emit("rejoin_ok", {
-      roomId,
-      seed: updatedRoom.seed,
-      moves: remappedMoves,
-      myPlayerId: socket.id,
-      activePlayerId: updatedRoom.activePlayer,
-      times: times ?? {},
-      opponentId,
-      rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
-    });
+    if (updatedRoom.gameMode === "turn_based") {
+      // ── Snapshot rejoin for turn_based ───────────────────────────────────
+      // Remap scores: the old socket ID may have changed — map to current IDs.
+      const remappedScores: { [playerId: string]: number } = {};
+      for (const [pid, pts] of Object.entries(updatedRoom.scores ?? {})) {
+        const newPid = oldPlayerId && pid === oldPlayerId ? socket.id : pid;
+        remappedScores[newPid] = pts;
+      }
+      // Also ensure the rejoining socket key exists even if score was zero.
+      if (!(socket.id in remappedScores)) {
+        remappedScores[socket.id] = 0;
+      }
+
+      // Pull playerStates from the judge; fall back to default if not yet started.
+      const rawPlayerStates = ctx.socketBridge.getPlayerStates(roomId);
+      // Remap any stale socket-ID key to the current socket.id.
+      const playerStates: Record<string, PlayerState> = {};
+      const defaultStamina = 5 * 60 * 1000;
+      if (rawPlayerStates) {
+        for (const [pid, ps] of Object.entries(rawPlayerStates)) {
+          const newPid = oldPlayerId && pid === oldPlayerId ? socket.id : pid;
+          playerStates[newPid] = ps;
+        }
+      }
+      // Ensure rejoining socket has an entry.
+      if (!(socket.id in playerStates)) {
+        playerStates[socket.id] = { stamina: defaultStamina, health: 100, mana: 100 };
+      }
+
+      socket.emit("rejoin_ok", {
+        roomId,
+        seed: updatedRoom.seed,
+        myPlayerId: socket.id,
+        activePlayerId: updatedRoom.activePlayer,
+        playerStates,
+        opponentId,
+        rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
+        // Snapshot fields:
+        boardGrid: updatedRoom.boardGrid,
+        rngState: updatedRoom.rngState,
+        scores: remappedScores,
+        originalSeed: updatedRoom.originalSeed,
+      });
+    } else {
+      // ── Legacy move-replay rejoin for pve ────────────────────────────────
+      const remappedMoves = updatedRoom.moves.map((m) =>
+        oldPlayerId && m.playerId === oldPlayerId ? { ...m, playerId: socket.id } : m
+      );
+      // For pve rooms, build playerStates from TimerManager times.
+      const times = ctx.timerManager.getTimes(roomId);
+      const pvePlayerStates: Record<string, PlayerState> = {};
+      if (times) {
+        for (const [pid, stamina] of Object.entries(times)) {
+          pvePlayerStates[pid] = { stamina, health: 100, mana: 100 };
+        }
+      }
+      if (!(socket.id in pvePlayerStates)) {
+        pvePlayerStates[socket.id] = { stamina: 5 * 60 * 1000, health: 100, mana: 100 };
+      }
+
+      socket.emit("rejoin_ok", {
+        roomId,
+        seed: updatedRoom.seed,
+        moves: remappedMoves,
+        myPlayerId: socket.id,
+        activePlayerId: updatedRoom.activePlayer,
+        playerStates: pvePlayerStates,
+        opponentId,
+        rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
+      });
+    }
 
     socket.to(roomId).emit("opponent_reconnected");
   });

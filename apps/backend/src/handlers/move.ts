@@ -1,6 +1,13 @@
 /**
  * socket.on("move", ...) handler.
- * Validates the move, relays it to the opponent, and switches the active player.
+ *
+ * turn_based rooms: routed through SocketBridge → MatchEngineService (the
+ * judge). All validation, board resolution, score tracking, and event emission
+ * happen inside the service. This handler is a thin authentication + routing
+ * layer only.
+ *
+ * pve rooms: relay-only path (unchanged from v0.5) — validates adjacency/bounds
+ * then forwards opponent_move to the room and advances the bot turn.
  */
 
 import type { Socket } from "socket.io";
@@ -26,44 +33,61 @@ export function registerMoveHandler(socket: Socket, ctx: ServerContext): void {
         timestamp: Date.now(),
       };
 
+      // ── Tier 1: adjacency + bounds (both paths) ───────────────────────────
       if (!isValidMove(move)) {
-        socket.emit("move_rejected", { reason: "invalid move", move });
-        logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "invalid move" });
+        const reason = (() => {
+          const { r1, c1, r2, c2 } = data;
+          const inBounds = (v: number) => Number.isInteger(v) && v >= 0 && v <= 7;
+          if (!inBounds(r1) || !inBounds(c1) || !inBounds(r2) || !inBounds(c2))
+            return "out_of_bounds";
+          return "non_adjacent";
+        })();
+        socket.emit("move_rejected", { reason });
+        logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason });
         return;
       }
 
       const room = ctx.roomManager.getRoom(data.roomId);
       if (!room) {
-        socket.emit("move_rejected", { reason: "room not found", move });
+        socket.emit("move_rejected", { reason: "room not found" });
         logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "room not found" });
         return;
       }
 
       if (!room.players.includes(socket.id)) {
-        socket.emit("move_rejected", { reason: "not in room", move });
+        socket.emit("move_rejected", { reason: "not in room" });
         logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "not in room" });
         return;
       }
 
-      // T-v0.6-D04 · userId slot check: the socket's verified userId must own a slot in the room.
+      // T-v0.6-D04 · userId slot check
       const socketUserId = socket.data.userId as string | undefined;
       if (socketUserId) {
         const slotCheck = checkUserIdOwnsSlot(socketUserId, room);
         if (!slotCheck.ok) {
-          socket.emit("move_rejected", { reason: slotCheck.reason, move });
+          socket.emit("move_rejected", { reason: slotCheck.reason });
           logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: slotCheck.reason });
           return;
         }
       }
 
+      // ── Branch: turn_based → judge (SocketBridge / MatchEngineService) ────
+      if (room.gameMode === "turn_based") {
+        // The bridge handles turn-order check, engine validation, resolution,
+        // scoring, and event emission.
+        ctx.socketBridge.handleMove(socket, data);
+        return;
+      }
+
+      // ── PvE relay-only path (unchanged) ──────────────────────────────────
       if (room.activePlayer && room.activePlayer !== socket.id) {
-        socket.emit("move_rejected", { reason: "not your turn", move });
-        logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "not your turn" });
+        socket.emit("move_rejected", { reason: "not_your_turn" });
+        logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "not_your_turn" });
         return;
       }
 
       if (!ctx.roomManager.addMove(data.roomId, move)) {
-        socket.emit("move_rejected", { reason: "room not found", move });
+        socket.emit("move_rejected", { reason: "room not found" });
         logEvent("move_rejected", { matchId: data.roomId, playerId: socket.id, reason: "room not found" });
         return;
       }

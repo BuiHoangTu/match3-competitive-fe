@@ -6,6 +6,8 @@ import { TimerManager } from "./TimerManager";
 import { BotManager } from "./BotManager";
 import { IdleSweeper } from "./IdleSweeper";
 import { MatchmakingService } from "./MatchmakingService";
+import { MatchEngineService } from "./services/MatchEngineService";
+import { SocketBridge } from "./services/SocketBridge";
 import { createMatchmakingHttpHandler } from "./matchmakingHttp";
 import { registerHandshake } from "./handshake";
 import { registerConnectionHandler } from "./handlers/connection";
@@ -84,6 +86,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   const timerManager = new TimerManager(io, roomManager);
   const botManager = new BotManager(io, roomManager, timerManager);
   const matchmaking = new MatchmakingService(roomManager, botManager);
+  const matchEngineService = new MatchEngineService();
   const idleSweeper = new IdleSweeper(io, roomManager, timerManager, (id) => {
     botManager.cleanup(id);
     rejoinManager.cleanupRoom(id);
@@ -114,7 +117,9 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   const matchStartTimes = new Map<string, number>();
   const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  const ctx: ServerContext = {
+  // socketBridge needs ctx, but ctx needs socketBridge — break the cycle by
+  // creating a partial context first and then injecting the bridge.
+  const ctxPartial = {
     io,
     roomManager,
     rejoinManager,
@@ -124,6 +129,9 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     matchStartTimes,
     disconnectedPlayers,
   };
+  const socketBridge = new SocketBridge(io, ctxPartial as ServerContext, matchEngineService);
+  (ctxPartial as ServerContext).socketBridge = socketBridge;
+  const ctx: ServerContext = ctxPartial as ServerContext;
 
   // T-v0.6-D02 — Room-token handshake middleware.
   registerHandshake(io, roomManager);

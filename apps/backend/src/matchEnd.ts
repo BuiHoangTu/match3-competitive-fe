@@ -29,18 +29,27 @@ export function computeOutcome(
 }
 
 /**
- * Insert a match_history row for the given room. Scores default to 0 since
- * the server does not track client-side scores — the row captures outcome and
- * duration; score columns can be back-filled when the protocol carries them.
+ * Insert a match_history row for the given room.
+ *
+ * For turn_based rooms, p1Score / p2Score are authoritative (tracked on the
+ * Room). Callers may pass 0/0 for pve/solo rooms where server score tracking
+ * is not implemented.
  */
 export async function recordMatchEnd(
   ctx: Pick<ServerContext, "persistence" | "matchStartTimes">,
   roomId: string,
-  room: { players: string[]; userIds: [string, string] },
+  room: { players: string[]; userIds: [string, string]; scores?: { [playerId: string]: number } },
   p1Score: number,
   p2Score: number,
   outcome: MatchOutcome
 ): Promise<void> {
+  // If the room carries authoritative scores, use them for the history row.
+  if (room.scores && room.players.length >= 1) {
+    const p1Socket = room.players[0];
+    const p2Socket = room.players[1];
+    p1Score = room.scores[p1Socket ?? ""] ?? p1Score;
+    p2Score = room.scores[p2Socket ?? ""] ?? p2Score;
+  }
   const startedAt = ctx.matchStartTimes.get(roomId) ?? Date.now();
   ctx.matchStartTimes.delete(roomId);
   const durationMs = Date.now() - startedAt;

@@ -1,24 +1,33 @@
 /**
- * T-v0.5-12 — No-desync assertion at 300 ms RTT.
+ * T-v0.5-12 — Server-authoritative board-state contract.
  *
- * Runs the latency harness across many iterations and asserts both clients
- * end on cell-identical board state. This is the gate for NFR-3 / NFR-6:
- * identical seeds + identical move order must produce identical grids,
- * independent of timing.
+ * After the server-authoritative PvP refactor, the server holds the
+ * canonical board for turn_based rooms and broadcasts `move_resolved`
+ * with `finalGrid` to both sockets. Desync is structurally impossible —
+ * both clients receive the identical server payload.
+ *
+ * These tests validate:
+ *  1. Both clients' last-seen boardGrid (from move_resolved) are byte-identical.
+ *  2. Same originalSeed + same move sequence → byte-identical boardGrid and
+ *     rngState at every step (determinism lives in the server engine, not in
+ *     clients separately running the RNG).
+ *  3. A regression detector: seeding the engine with wall-clock time instead
+ *     of originalSeed produces a divergent board, proving the determinism path
+ *     would catch the bug.
  */
 import { describe, it, expect } from "vitest";
 import { runLatencyHarness } from "./latency-harness";
-import { createBoard, swapTiles, type Board } from "@match3/shared-js/engine/Board";
-import { createRng } from "@match3/shared-js/engine/rng";
-import { resolveBoard } from "@match3/shared-js/engine/MatchEngine";
+import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
+import { createStatefulRng } from "@match3/shared-js/engine/rng";
+import { resolveBoardAnimated, findMatches } from "@match3/shared-js/engine/MatchEngine";
 
 const ITERATIONS = 100;
 const QUICK_MOVES = 5;
 const QUICK_RTT_MS = 50;
 
-describe("T-v0.5-12 no-desync under timing pressure", () => {
+describe("T-v0.5-12 server-authoritative board-state contract", () => {
   it(
-    "one representative 300 ms RTT / 50-move match ends cell-identical",
+    "one representative 300 ms RTT / 10-move match: both clients see identical finalGrid",
     async () => {
       const res = await runLatencyHarness({ rttMs: 300, moveCount: 10 });
       expect(res.boardA).toEqual(res.boardB);
@@ -27,7 +36,7 @@ describe("T-v0.5-12 no-desync under timing pressure", () => {
   );
 
   it(
-    `${ITERATIONS} back-to-back matches all end cell-identical`,
+    `${ITERATIONS} back-to-back matches: server-broadcast move_resolved.finalGrid is identical for both clients`,
     async () => {
       for (let i = 0; i < ITERATIONS; i++) {
         const res = await runLatencyHarness({
@@ -36,7 +45,7 @@ describe("T-v0.5-12 no-desync under timing pressure", () => {
         });
         if (JSON.stringify(res.boardA) !== JSON.stringify(res.boardB)) {
           throw new Error(
-            `desync at iteration ${i} (seed=${res.seed}):\n` +
+            `finalGrid mismatch at iteration ${i} (seed=${res.seed}):\n` +
               `A=${JSON.stringify(res.boardA)}\n` +
               `B=${JSON.stringify(res.boardB)}`
           );
@@ -47,27 +56,95 @@ describe("T-v0.5-12 no-desync under timing pressure", () => {
   );
 
   /**
+   * Server-internal determinism: given the same originalSeed and the same
+   * sequence of valid moves applied to two independent Room simulations, the
+   * resulting boardGrid and rngState must be byte-identical at every step.
+   *
+   * This test runs the server engine (createBoard + swapTiles +
+   * resolveBoardAnimated + createStatefulRng) directly — no sockets needed.
+   */
+  it("server engine is deterministic: same seed + same moves → identical boardGrid and rngState", () => {
+    const seed = 987654321;
+
+    // Discover a few match-producing swaps on the canonical board.
+    const moves: Array<{ r1: number; c1: number; r2: number; c2: number }> = [];
+    {
+      let grid = createBoard(seed).grid;
+      let rng = createStatefulRng(seed);
+      for (let turn = 0; turn < 5; turn++) {
+        let found = false;
+        outer: for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            if (c + 1 < 8) {
+              const candidate = grid.map((row) => [...row]);
+              const tmp = candidate[r][c];
+              candidate[r][c] = candidate[r][c + 1];
+              candidate[r][c + 1] = tmp;
+              if (findMatches(candidate).length > 0) {
+                const boardObj = { grid, width: 8, height: 8 };
+                const swapped = swapTiles(boardObj, r, c, r, c + 1);
+                const result = resolveBoardAnimated(swapped.grid, rng.next);
+                grid = result.grid;
+                // rng state is now advanced by the resolution
+                moves.push({ r1: r, c1: c, r2: r, c2: c + 1 });
+                found = true;
+                break outer;
+              }
+            }
+          }
+        }
+        if (!found) break;
+      }
+    }
+
+    // Replay the same moves twice from the same seed in two independent sims.
+    function simulate(initialSeed: number, moveList: typeof moves): {
+      boardGrid: number[][];
+      rngState: number;
+    } {
+      let grid = createBoard(initialSeed).grid;
+      const rng = createStatefulRng(initialSeed);
+      for (const m of moveList) {
+        const boardObj = { grid, width: 8, height: 8 };
+        const swapped = swapTiles(boardObj, m.r1, m.c1, m.r2, m.c2);
+        const result = resolveBoardAnimated(swapped.grid, rng.next);
+        grid = result.grid;
+      }
+      return { boardGrid: grid, rngState: rng.state() };
+    }
+
+    const sim1 = simulate(seed, moves);
+    const sim2 = simulate(seed, moves);
+
+    expect(sim1.boardGrid).toEqual(sim2.boardGrid);
+    expect(sim1.rngState).toBe(sim2.rngState);
+  });
+
+  /**
    * Demonstrates that the test *would* catch a mutation that injects
    * wall-clock entropy into a board-affecting path. We replay the same
    * move list once through the canonical seeded RNG and once through a
-   * wall-clock-seeded RNG; the final grids must diverge, proving that a
-   * regression would be visible.
+   * wall-clock-seeded RNG; the final grids must diverge.
    */
   it("fails deterministically if wall-clock time leaks into board code", () => {
     const seed = 987654321;
     const moves: Array<{ r1: number; c1: number; r2: number; c2: number }> = [];
     {
-      // Discover a few match-producing swaps on the canonical board
-      let board = createBoard(seed);
-      const rng = createRng(seed + 1);
+      let grid = createBoard(seed).grid;
+      const rng = createStatefulRng(seed);
       for (let turn = 0; turn < 3; turn++) {
-        outer: for (let r = 0; r < board.height; r++) {
-          for (let c = 0; c < board.width; c++) {
-            if (c + 1 < board.width) {
-              const trial = swapTiles(board, r, c, r, c + 1);
-              const { grid } = resolveBoard(trial.grid, rng);
-              if (JSON.stringify(grid) !== JSON.stringify(trial.grid)) {
-                board = { ...trial, grid };
+        outer: for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            if (c + 1 < 8) {
+              const candidate = grid.map((row) => [...row]);
+              const tmp = candidate[r][c];
+              candidate[r][c] = candidate[r][c + 1];
+              candidate[r][c + 1] = tmp;
+              if (findMatches(candidate).length > 0) {
+                const boardObj = { grid, width: 8, height: 8 };
+                const swapped = swapTiles(boardObj, r, c, r, c + 1);
+                const result = resolveBoardAnimated(swapped.grid, rng.next);
+                grid = result.grid;
                 moves.push({ r1: r, c1: c, r2: r, c2: c + 1 });
                 break outer;
               }
@@ -77,20 +154,21 @@ describe("T-v0.5-12 no-desync under timing pressure", () => {
       }
     }
 
-    function replay(rngFactory: () => () => number): Board {
-      let board = createBoard(seed);
-      const rng = rngFactory();
+    function replay(rngSeed: number): number[][] {
+      let grid = createBoard(seed).grid;
+      const rng = createStatefulRng(rngSeed);
       for (const m of moves) {
-        const swapped = swapTiles(board, m.r1, m.c1, m.r2, m.c2);
-        const { grid } = resolveBoard(swapped.grid, rng);
-        board = { ...swapped, grid };
+        const boardObj = { grid, width: 8, height: 8 };
+        const swapped = swapTiles(boardObj, m.r1, m.c1, m.r2, m.c2);
+        const result = resolveBoardAnimated(swapped.grid, rng.next);
+        grid = result.grid;
       }
-      return board;
+      return grid;
     }
 
-    const canonical = replay(() => createRng(seed + 1));
-    // Simulate the forbidden pattern: seed with wall-clock time
-    const poisoned = replay(() => createRng(Date.now()));
-    expect(canonical.grid).not.toEqual(poisoned.grid);
+    const canonical = replay(seed);
+    // Simulate the forbidden pattern: seed with wall-clock time.
+    const poisoned = replay(Date.now());
+    expect(canonical).not.toEqual(poisoned);
   });
 });

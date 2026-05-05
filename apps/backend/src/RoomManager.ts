@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import type { Move } from "@match3/shared-js/protocol";
+import { createBoard } from "@match3/shared-js/engine/Board";
 
 export type { Move };
 
@@ -14,6 +15,17 @@ export type Room = {
   status: "active" | "over";
   /** Epoch ms of the last event that should reset the idle-match timer. */
   lastActivityAt: number;
+  /** Game mode — determines whether server-authoritative board state is used. */
+  gameMode: "turn_based" | "pve";
+  // ── Server-authoritative fields (turn_based rooms only) ──────────────────
+  /** The seed used to generate the initial board. Immutable; useful for debug. */
+  originalSeed?: number;
+  /** Authoritative board grid for turn_based rooms. Updated after every move. */
+  boardGrid?: number[][];
+  /** mulberry32 integer state after the last resolution. Advances each move. */
+  rngState?: number;
+  /** Per-player running score totals (socket ID → points). turn_based only. */
+  scores?: { [playerId: string]: number };
 };
 
 function generateId(): string {
@@ -25,17 +37,25 @@ export class RoomManager {
   private playerRoom: Map<string, string> = new Map();
   private userRoom: Map<string, string> = new Map();
 
-  createRoom(playerId: string): Room {
+  createRoom(playerId: string, gameMode: "turn_based" | "pve" = "turn_based"): Room {
+    const seed = Math.floor(Math.random() * 2 ** 31);
     const room: Room = {
       id: generateId(),
       players: [playerId],
       userIds: ["", ""],
-      seed: Math.floor(Math.random() * 2 ** 31),
+      seed,
       moves: [],
       activePlayer: null,
       status: "active",
       lastActivityAt: Date.now(),
+      gameMode,
     };
+    if (gameMode === "turn_based") {
+      room.originalSeed = seed;
+      room.boardGrid = createBoard(seed).grid;
+      room.rngState = seed;
+      room.scores = {};
+    }
     this.rooms.set(room.id, room);
     this.playerRoom.set(playerId, room.id);
     return room;
@@ -46,17 +66,31 @@ export class RoomManager {
    * attached later when the clients connect using their room tokens.
    * T-v0.6-D09.
    */
-  createRoomForMatch(userIdSlot0: string, userIdSlot1: string): Room {
+  createRoomForMatch(
+    userIdSlot0: string,
+    userIdSlot1: string,
+    gameMode: "turn_based" | "pve" = "turn_based"
+  ): Room {
+    const seed = Math.floor(Math.random() * 2 ** 31);
+    const isBotMatch = userIdSlot1 === "bot:default" || userIdSlot0 === "bot:default";
+    const effectiveMode = isBotMatch ? "pve" : gameMode;
     const room: Room = {
       id: generateId(),
       players: [],
       userIds: [userIdSlot0, userIdSlot1],
-      seed: Math.floor(Math.random() * 2 ** 31),
+      seed,
       moves: [],
       activePlayer: null,
       status: "active",
       lastActivityAt: Date.now(),
+      gameMode: effectiveMode,
     };
+    if (effectiveMode === "turn_based") {
+      room.originalSeed = seed;
+      room.boardGrid = createBoard(seed).grid;
+      room.rngState = seed;
+      room.scores = {};
+    }
     this.rooms.set(room.id, room);
     if (userIdSlot0) this.userRoom.set(userIdSlot0, room.id);
     if (userIdSlot1) this.userRoom.set(userIdSlot1, room.id);

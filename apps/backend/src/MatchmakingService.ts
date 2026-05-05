@@ -153,20 +153,23 @@ export class MatchmakingService {
     userIdSlot1: string,
     mode: MatchmakingMode
   ): { partnerResult: MatchmakingResult; selfResult: MatchmakingResult } {
-    const room = this.roomManager.createRoomForMatch(userIdSlot0, userIdSlot1);
+    const roomMode = mode === "turn_based" ? "turn_based" : "pve";
+    const room = this.roomManager.createRoomForMatch(userIdSlot0, userIdSlot1, roomMode);
     const partnerResult = this.signForSlot(room, 0, mode, { userId: userIdSlot1 });
     const selfResult = this.signForSlot(room, 1, mode, { userId: userIdSlot0 });
     return { partnerResult, selfResult };
   }
 
   private createBotMatch(userId: string, mode: MatchmakingMode): MatchmakingResult {
-    const room = this.roomManager.createRoomForMatch(userId, BOT_USER_ID);
+    // Bot matches are always pve regardless of requested mode.
+    const room = this.roomManager.createRoomForMatch(userId, BOT_USER_ID, "pve");
     if (this.botManager) this.botManager.setup(room.id);
     return this.signForSlot(room, 0, mode, { userId: BOT_USER_ID });
   }
 
   private createSoloMatch(userId: string): MatchmakingResult {
-    const room = this.roomManager.createRoomForMatch(userId, "");
+    // Solo rooms use pve mode (no server-authoritative board needed).
+    const room = this.roomManager.createRoomForMatch(userId, "", "pve");
     return this.signForSlot(room, 0, "solo", null);
   }
 

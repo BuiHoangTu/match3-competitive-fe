@@ -26,6 +26,23 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
     const tokenUserId = socket.data.userId as string | undefined;
     const tokenSlot = socket.data.slot as 0 | 1 | undefined;
     if (tokenRoomId && tokenUserId !== undefined && tokenSlot !== undefined) {
+      // Reconnect case: if this userId already has an old socket in the room
+      // (still present because the grace-period hasn't expired), replace it
+      // with the new socket ID before calling attachSocketToSlot.
+      const existingRoom = ctx.roomManager.getRoom(tokenRoomId);
+      if (existingRoom && tokenSlot !== undefined) {
+        const oldSocketId = existingRoom.players[tokenSlot];
+        if (oldSocketId && oldSocketId !== socket.id) {
+          // Clear any pending disconnect grace timer for the old socket.
+          const grace = ctx.disconnectedPlayers.get(oldSocketId);
+          if (grace) {
+            clearTimeout(grace);
+            ctx.disconnectedPlayers.delete(oldSocketId);
+          }
+          ctx.roomManager.replacePlayer(oldSocketId, socket.id);
+        }
+      }
+
       const room = ctx.roomManager.attachSocketToSlot(tokenRoomId, tokenSlot, socket.id);
       if (room) {
         socket.join(tokenRoomId);
@@ -48,6 +65,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
             ctx.matchStartTimes.set(room.id, Date.now());
           }
           if (isBotOpponent) {
+            // pve bot rooms use TimerManager (unchanged path).
             ctx.botManager.setup(room.id);
             ctx.timerManager.startRoomTimer(
               room.id,
@@ -61,7 +79,17 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
                 ctx.timerManager.scheduleRoomClose(id);
               }
             );
+          } else if (room.players.length === 2 && room.gameMode === "turn_based") {
+            // turn_based human-vs-human: judge takes over from here.
+            const [p0, p1] = room.players as [string, string];
+            ctx.socketBridge.startMatch(
+              room.id,
+              [p0, p1],
+              room.originalSeed ?? room.seed,
+              room.gameMode
+            );
           } else if (room.players.length === 2) {
+            // pve fallback (non-bot, non-turn_based): keep TimerManager path.
             const [p0, p1] = room.players as [string, string];
             ctx.timerManager.startRoomTimer(room.id, p0, p1, (id, loserId) => {
               const r = ctx.roomManager.getRoom(id);
@@ -74,13 +102,20 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
 
           for (const pid of room.players) {
             const opponentSocketId = room.players.find((p) => p !== pid) ?? BOT_ID;
+            const isTurnBased = room.gameMode === "turn_based";
             io.to(pid).emit("match_found", {
               roomId: room.id,
               seed: room.seed,
               opponentId: isBotOpponent ? BOT_ID : opponentSocketId,
               myPlayerId: pid,
               firstPlayerId: room.activePlayer,
-              mode: "turn_based",
+              mode: room.gameMode,
+              // turn_based only: initial authoritative board snapshot
+              ...(isTurnBased && {
+                boardGrid: room.boardGrid,
+                rngState: room.rngState,
+                originalSeed: room.originalSeed,
+              }),
             });
           }
 

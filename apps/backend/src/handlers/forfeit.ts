@@ -18,6 +18,10 @@ import { computeOutcome, recordMatchEnd, roomCleanup } from "../matchEnd";
 
 export function registerForfeitHandler(socket: Socket, ctx: ServerContext): void {
   socket.on("forfeit", () => {
+    // turn_based rooms are handled by the judge via SocketBridge.
+    if (ctx.socketBridge.handleForfeit(socket)) return;
+
+    // ── pve / non-judge path (unchanged) ─────────────────────────────────
     const room = ctx.roomManager.getRoomByPlayer(socket.id);
     if (!room || room.status === "over") return;
 

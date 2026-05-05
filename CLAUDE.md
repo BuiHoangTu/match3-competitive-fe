@@ -57,7 +57,7 @@ npm run build   # TypeScript + Vite production build
 **Backend (`apps/backend/`)**
 ```bash
 npm run dev     # ts-node src/server.ts  →  port 3001
-npm test        # Vitest unit tests (36 tests)
+npm test        # Vitest: 99 unit + 80 integration tests
 npm run build   # tsc → dist/
 ```
 
@@ -82,10 +82,10 @@ Four strict layers — **never mix them**:
    - `apps/backend/tsconfig.json` uses `rootDir: ".."` (monorepo root) to allow importing shared `.ts` source files; build output is `dist/apps/backend/src/server.js`
 
 1. **Engine** (`packages/game-view/src/engine/`) — re-export shims only; real source lives in `packages/shared-js/`.
-   - `rng.ts` — mulberry32 seeded PRNG (`createRng`, `randInt`)
+   - `rng.ts` — mulberry32 seeded PRNG: `createRng` (closure, existing callers unchanged), `createStatefulRng` (returns `{ next, state }` so the server can snapshot RNG position between moves), `randInt`
    - `Board.ts` — grid state, `createBoard(seed)`, `swapTiles()` (immutable)
    - `MatchEngine.ts` — `findMatches`, `removeMatches`, `applyGravity`, `refill`, `resolveBoard`, plus animation variants `applyGravityWithMovements` and `resolveBoardAnimated`
-   - All randomness flows through seeded RNG; same seed + moves = identical board on every client.
+   - All randomness flows through seeded RNG; same seed + moves = identical board on the server.
 
 2. **Game loop** (`packages/game-view/src/game/`) — pure TypeScript, zero Phaser imports.
    - `GameLoopController.ts` — owns `Board`, score, tile ID grid. `attemptSwap()` returns animation choreography data (`ResolvedStep[]`). This is the single source of truth for game state in the rendering layer.
@@ -101,19 +101,27 @@ Four strict layers — **never mix them**:
    - Scans all adjacent pairs, returns the swap that clears the most cells
    - Used client-side (PvE mode) and server-side (matchmaking fallback when no human opponent)
 
-5. **Network** (`apps/backend/`, `packages/game-view/src/net/`) — server relays seed + moves only; never full board state.
-   - `apps/backend/src/server.ts` — Socket.IO, matchmaking, move relay, per-player 5-min turn timers, `turn_changed` / `game_over` relay; falls back to bot opponent after 5 s if no human joins
-   - `apps/backend/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking
-   - `apps/backend/src/validator.ts` — adjacency + bounds validation
-   - `packages/game-view/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match
+5. **Network** (`apps/backend/`, `packages/game-view/src/net/`) — server is authoritative for `turn_based` (PvP) board state; `pve`/`solo` remain client-deterministic.
+   - `apps/backend/src/server.ts` — Socket.IO bootstrap; wires all services and handlers.
+   - `apps/backend/src/services/MatchEngineService.ts` — **the judge** for `turn_based` rooms. Pure-ish service (no Socket.IO). Owns board state (`boardGrid`, `rngState`, `scores`), per-player stamina ticks (`setInterval(1000)`), move validation, and typed event emission (`move_resolved`, `move_rejected`, `turn_changed`, `match_ended`, `match_started`).
+   - `apps/backend/src/services/SocketBridge.ts` — subscribes to judge events and rebroadcasts them as Socket.IO events; translates incoming socket moves/forfeits into judge method calls for `turn_based` rooms.
+   - `apps/backend/src/lib/TypedEmitter.ts` — generic typed wrapper around Node `EventEmitter`.
+   - `apps/backend/src/RoomManager.ts` — room lifecycle, seed generation, `activePlayer` tracking; `turn_based` rooms carry `boardGrid`, `rngState`, `originalSeed`, `scores` (kept in sync by SocketBridge).
+   - `apps/backend/src/validator.ts` — adjacency + bounds validation; `validateProducesMatch` for engine-level 0-match rejection (used by MatchEngineService).
+   - `apps/backend/src/TimerManager.ts` — `setInterval`-based turn clock for `pve`/bot rooms only. `turn_based` rooms use the judge's internal stamina tick instead.
+   - `packages/game-view/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match.
+   - **`turn_based` wire events**: `move_resolved { playerId, r1,c1,r2,c2, steps, finalGrid, rngState, pointsEarned, scores, playerStates }` broadcast to both sockets; `turn_changed { activePlayerId, playerStates }` after each turn; `game_over { loserTimeUp?, playerStates }`.
+   - **`playerStates`** field replaces the old `times` field on all `turn_based` events. Shape: `{ [socketId]: { health: number, mana: number, stamina: number } }`. Defaults: `health=100`, `mana=100`, `stamina=5*60*1000`. Stamina is the live turn clock; health/mana are placeholders.
+   - **Snapshot rejoin** (`turn_based`): `match_found` and reconnect both include `boardGrid + rngState + originalSeed`; client restores from snapshot instead of replaying moves.
 
 ## Key Constraints
 
-- **Determinism is sacred**: same seed → same board on all clients. Never break this.
+- **Server is authoritative for PvP.** The shared engine still runs deterministically, but client-side determinism is no longer load-bearing for `turn_based` rooms — clients render server-broadcast steps (`move_resolved.steps`) and sync to `move_resolved.finalGrid`. The engine remains deterministic: same `originalSeed` + same move sequence → same `boardGrid` and `rngState` at every step.
+- **`pve` and `solo` modes are unchanged**: client-side determinism still applies for those modes (no `move_resolved` event; board is reconstructed locally from seed + moves).
 - Engine layer (`packages/game-view/src/engine/`) must have zero Phaser imports. Tests run in Node.
 - `GameLoopController` (`packages/game-view/src/game/`) must have zero Phaser imports.
 - Rendering layer reads engine state; it never mutates it.
-- Server sends seed + moves only — no board state over the wire.
+- For `turn_based`: server sends `boardGrid` snapshot + per-step animation data (`move_resolved`). For `pve`/`solo`: server sends seed + moves only.
 
 ## Canvas & Layout
 
@@ -166,11 +174,17 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 
 Both players play on **the same board**. There is no separate opponent board or minimap.
 
+**`turn_based` (PvP) — server-authoritative path (after the Phase 3 refactor):**
+- Server holds `boardGrid` + `rngState` on the Room; `match_found` delivers the initial snapshot to both clients
+- When player A makes a move, the server validates it, resolves cascades, updates `boardGrid`, and broadcasts `move_resolved { steps, finalGrid, rngState, pointsEarned, scores }` to both sockets
+- Clients animate from `steps` and sync board truth from `finalGrid` — no local board computation
+- Snapshot rejoin: on reconnect, `match_found` carries the current `boardGrid + rngState + originalSeed`; no move-replay needed
+- Scores (`pointsEarned`, running `scores`) are tracked and broadcast by the server
+
+**`pve` / `solo` — unchanged client-deterministic path:**
 - Both clients receive the same `seed` and run one `GameLoopController(seed)` each
-- When player A makes a move, it is applied to their `ctrl` (with animations) and relayed to B via the server
-- When B receives the `opponent_move` event, it is applied to B's `ctrl` (same board, same animations)
-- Same seed + same moves in same order = identical board state on every client (deterministic)
-- Each player's `myScore` / `opponentScore` is tracked locally from the `pointsEarned` returned by `attemptSwap`
+- When player A makes a move, it is relayed to B via `opponent_move`; both sides apply it locally
+- Same seed + same moves in same order = identical board state (deterministic)
 - In bot rooms, the server applies human moves to its shared board state so the bot always plays on the current board
 
 ---
