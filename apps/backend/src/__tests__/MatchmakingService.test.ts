@@ -60,15 +60,6 @@ describe("MatchmakingService (T-v0.6-D09, D10)", () => {
     expect(r2.opponent?.userId).toBe("bot:default");
   });
 
-  it("solo mode creates a solo room with empty opponent slot", async () => {
-    const r = await svc.join("alice", "solo");
-    expect(r.opponent).toBeNull();
-    expect(r.slot).toBe(0);
-    const room = rm.getRoom(r.roomId);
-    expect(room!.userIds[0]).toBe("alice");
-    expect(room!.userIds[1]).toBe("");
-  });
-
   it("cancel removes a waiter before pairing", async () => {
     const p1 = svc.join("alice", "turn_based");
     // Cancel alice before the bot fallback fires and before anyone arrives.
@@ -78,7 +69,10 @@ describe("MatchmakingService (T-v0.6-D09, D10)", () => {
   });
 
   it("resume returns a fresh token for an existing slot", async () => {
-    const result = await svc.join("alice", "solo");
+    // Pair two users instantly to get alice an active room.
+    const p1 = svc.join("alice", "pve");
+    const p2 = svc.join("bob", "pve");
+    const [result] = await Promise.all([p1, p2]);
     const resumed = svc.resume("alice", result.roomId);
     if ("error" in resumed) throw new Error("expected success");
     expect(resumed.roomId).toBe(result.roomId);
@@ -89,7 +83,9 @@ describe("MatchmakingService (T-v0.6-D09, D10)", () => {
   });
 
   it("resume rejects a user who is not a slot in the room", async () => {
-    const result = await svc.join("alice", "solo");
+    const p1 = svc.join("alice", "pve");
+    const p2 = svc.join("bob", "pve");
+    const [result] = await Promise.all([p1, p2]);
     const resumed = svc.resume("eve", result.roomId);
     expect("error" in resumed).toBe(true);
     if ("error" in resumed) expect(resumed.error).toBe("forbidden");

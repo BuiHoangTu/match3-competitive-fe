@@ -363,14 +363,26 @@ describe("session token works against /matchmaking/join", () => {
         password: "secret123",
       });
       const sessionToken = reg.body.sessionToken;
-      const join = await fetch(`http://127.0.0.1:${port}/matchmaking/join`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({ mode: "solo" }),
-      });
+      // Use two concurrent pve requests so they pair instantly (no bot wait).
+      const [join] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/matchmaking/join`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionToken}`,
+          },
+          body: JSON.stringify({ mode: "pve" }),
+        }),
+        // Pair partner — use a fresh token so they don't collide in AR-7.
+        fetch(`http://127.0.0.1:${port}/matchmaking/join`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionToken}-partner`,
+          },
+          body: JSON.stringify({ mode: "pve" }),
+        }),
+      ]);
       expect(join.status).toBe(200);
       const data = await join.json();
       expect(data.roomToken).toMatch(/.+\..+/);

@@ -1,5 +1,6 @@
 /**
- * T-v0.6-D09, D10 — HTTP integration tests for /matchmaking/join and /resume.
+ * T-v0.6-D09, D10 — HTTP integration tests for /matchmaking/join, /resume,
+ * and /matchmaking/status.
  *
  * Uses the in-process createMatch3Server() factory. Mocks the Firebase Admin
  * verifyIdToken via setVerifyIdTokenImpl so no Firebase project is required.
@@ -46,6 +47,44 @@ async function postJson(
   return { status: res.status, body: parsed };
 }
 
+async function getJson(
+  port: number,
+  path: string,
+  token?: string
+): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`http://localhost:${port}${path}`, {
+    method: "GET",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    /* leave as text */
+  }
+  return { status: res.status, body: parsed };
+}
+
+/**
+ * Helper: pair two users instantly (no bot wait) and return the room token
+ * payload for the first user (slot 0).
+ */
+async function pairUsers(
+  port: number,
+  user1: string,
+  user2: string,
+  mode: "turn_based" | "pve" = "pve"
+): Promise<JoinResponse> {
+  const [r1] = await Promise.all([
+    postJson(port, "/matchmaking/join", { mode }, user1),
+    postJson(port, "/matchmaking/join", { mode }, user2),
+  ]);
+  return r1.body as JoinResponse;
+}
+
 describe("POST /matchmaking/join — T-v0.6-D09", () => {
   let handle: ServerHandle;
 
@@ -83,16 +122,10 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(r2.status).toBe(400);
   });
 
-  it("solo match returns a room token with no opponent", async () => {
+  it("400 INVALID_MODE when mode is solo (solo is now client-side only)", async () => {
     const r = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "alice");
-    expect(r.status).toBe(200);
-    const body = r.body as JoinResponse;
-    expect(body.mode).toBe("solo");
-    expect(body.opponent).toBeNull();
-    const payload = verifyRoomToken(body.roomToken);
-    expect(payload).not.toBeNull();
-    expect(payload!.userId).toBe("user:alice");
-    expect(payload!.slot).toBe(0);
+    expect(r.status).toBe(400);
+    expect((r.body as { code: string }).code).toBe("INVALID_MODE");
   });
 
   it("two concurrent requests for the same mode pair up", async () => {
@@ -127,23 +160,21 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
   }, BOT_WAIT_MS + 2000);
 
   it("409 when the user already has an active room", async () => {
-    // First request gets a room via bot fallback.
-    const r1 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "alice");
-    expect(r1.status).toBe(200);
-    // Second immediate request should be rejected.
-    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "alice");
+    // Pair alice+bob instantly so alice has an active room with no wait.
+    await pairUsers(handle.port, "alice", "bob");
+    // Second join attempt for alice must be rejected.
+    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
     expect(r2.status).toBe(409);
     expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
   });
 
   // T-v0.6-G05 · AR-7 single-active-match enforcement
   it("409 response includes the existing roomId so client can call /resume", async () => {
-    const r1 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "carol");
-    expect(r1.status).toBe(200);
-    const firstPayload = verifyRoomToken((r1.body as { roomToken: string }).roomToken)!;
+    const firstJoin = await pairUsers(handle.port, "carol", "carol2");
+    const firstPayload = verifyRoomToken(firstJoin.roomToken)!;
     const firstRoomId = firstPayload.roomId;
 
-    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "carol");
+    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "carol");
     expect(r2.status).toBe(409);
     const body = r2.body as { code: string; roomId: string };
     expect(body.code).toBe("ACTIVE_ROOM");
@@ -151,9 +182,8 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(body.roomId).toBe(firstRoomId);
   });
 
-  it("AR-7 enforced across different modes (first solo, then turn_based rejected)", async () => {
-    const r1 = await postJson(handle.port, "/matchmaking/join", { mode: "solo" }, "dave");
-    expect(r1.status).toBe(200);
+  it("AR-7 enforced across different modes (first pve, then turn_based rejected)", async () => {
+    await pairUsers(handle.port, "dave", "dave2", "pve");
     // Attempting a different mode is still rejected.
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "dave");
     expect(r2.status).toBe(409);
@@ -180,13 +210,8 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
   });
 
   it("returns a fresh token for the caller's active slot", async () => {
-    const join = await postJson(
-      handle.port,
-      "/matchmaking/join",
-      { mode: "solo" },
-      "alice"
-    );
-    const joinBody = join.body as JoinResponse;
+    // Pair alice+alice2 to get alice an active room instantly.
+    const joinBody = await pairUsers(handle.port, "alice", "alice2");
     const joinPayload = verifyRoomToken(joinBody.roomToken)!;
 
     const resume = await postJson(
@@ -204,13 +229,8 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
   });
 
   it("403 when userId is not a slot in the room", async () => {
-    const join = await postJson(
-      handle.port,
-      "/matchmaking/join",
-      { mode: "solo" },
-      "alice"
-    );
-    const joinPayload = verifyRoomToken((join.body as JoinResponse).roomToken)!;
+    const joinBody = await pairUsers(handle.port, "alice", "alice2");
+    const joinPayload = verifyRoomToken(joinBody.roomToken)!;
     const resume = await postJson(
       handle.port,
       "/matchmaking/resume",
@@ -231,12 +251,60 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
   });
 
   it("400 when roomId is missing", async () => {
-    const resume = await postJson(
-      handle.port,
-      "/matchmaking/resume",
-      {},
-      "alice"
-    );
+    const resume = await postJson(handle.port, "/matchmaking/resume", {}, "alice");
     expect(resume.status).toBe(400);
+  });
+});
+
+describe("GET /matchmaking/status", () => {
+  let handle: ServerHandle;
+
+  beforeEach(async () => {
+    clearTokenCache();
+    setVerifyIdTokenImpl(async (token: string) => {
+      if (token === "BAD") throw new Error("invalid");
+      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+    });
+    handle = await startServer(0);
+  });
+
+  afterEach(async () => {
+    resetVerifyIdTokenImpl();
+    clearTokenCache();
+    await handle.close();
+  });
+
+  it("401 when Authorization header is missing", async () => {
+    const r = await getJson(handle.port, "/matchmaking/status");
+    expect(r.status).toBe(401);
+  });
+
+  it("401 when token is invalid", async () => {
+    const r = await getJson(handle.port, "/matchmaking/status", "BAD");
+    expect(r.status).toBe(401);
+  });
+
+  it("{ active: false } when user has no active match", async () => {
+    const r = await getJson(handle.port, "/matchmaking/status", "alice");
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ active: false });
+  });
+
+  it("{ active: true, mode, roomId } when user has an active match", async () => {
+    // Pair alice+alice2 to give alice an active pve room instantly.
+    const joinBody = await pairUsers(handle.port, "alice", "alice2", "pve");
+    const joinPayload = verifyRoomToken(joinBody.roomToken)!;
+
+    const r = await getJson(handle.port, "/matchmaking/status", "alice");
+    expect(r.status).toBe(200);
+    const body = r.body as { active: boolean; mode: string; roomId: string };
+    expect(body.active).toBe(true);
+    expect(body.mode).toBe("pve");
+    expect(body.roomId).toBe(joinPayload.roomId);
+  });
+
+  it("405 when called with POST instead of GET", async () => {
+    const r = await postJson(handle.port, "/matchmaking/status", {}, "alice");
+    expect(r.status).toBe(405);
   });
 });

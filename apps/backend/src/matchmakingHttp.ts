@@ -100,7 +100,7 @@ function extractBearerToken(req: IncomingMessage): string | null {
 }
 
 function isValidMode(v: unknown): v is MatchmakingMode {
-  return v === "turn_based" || v === "pve" || v === "solo";
+  return v === "turn_based" || v === "pve";
 }
 
 export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
@@ -148,6 +148,16 @@ export function createMatchmakingHttpHandler(deps: MatchmakingHttpDeps) {
 
     // ── /matchmaking/* ─────────────────────────────────────────────────────────
     if (!url.startsWith("/matchmaking/")) return;
+
+    // /matchmaking/status is GET; all others require POST.
+    if (url === "/matchmaking/status") {
+      if (req.method !== "GET") {
+        sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
+        return;
+      }
+      await handleStatus(deps, req, res);
+      return;
+    }
 
     if (req.method !== "POST") {
       sendJson(res, 405, { code: "METHOD_NOT_ALLOWED" });
@@ -197,6 +207,15 @@ async function handleJoin(
 ): Promise<void> {
   const { roomManager, matchmaking, persistence } = deps;
   const mode = (body as { mode?: unknown }).mode;
+  // Forward-compat: old clients that still send mode:"solo" get a clear error.
+  if (mode === "solo") {
+    sendJson(res, 400, {
+      code: "INVALID_MODE",
+      message:
+        "Solo mode is client-side only — use GET /matchmaking/status to check for active matches before starting.",
+    });
+    return;
+  }
   if (!isValidMode(mode)) {
     sendJson(res, 400, { code: "BAD_MODE" });
     return;
@@ -269,6 +288,44 @@ async function handleResume(
     mode: result.mode,
     opponent: result.opponent,
   });
+}
+
+/**
+ * GET /matchmaking/status
+ *
+ * Auth-required (Bearer token). Returns whether the caller has an active
+ * server-side match so the shell can decide whether to launch solo locally
+ * or reconnect to an existing room.
+ *
+ * 200 { active: false }
+ * 200 { active: true, mode: "turn_based" | "pve", roomId: string }
+ * 401 on auth failure
+ */
+async function handleStatus(
+  deps: MatchmakingHttpDeps,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  const token = extractBearerToken(req);
+  let userId: string;
+  try {
+    const verified = await verifyToken(token);
+    userId = verified.userId;
+  } catch (err) {
+    if (err instanceof AuthError) {
+      sendJson(res, 401, { code: err.code, message: err.message });
+    } else {
+      sendJson(res, 401, { code: AUTH_INVALID_TOKEN, message: "Auth failed" });
+    }
+    return;
+  }
+
+  const room = deps.roomManager.getRoomByUserId(userId);
+  if (!room) {
+    sendJson(res, 200, { active: false });
+    return;
+  }
+  sendJson(res, 200, { active: true, mode: room.gameMode, roomId: room.id });
 }
 
 /**

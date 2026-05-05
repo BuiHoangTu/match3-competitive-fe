@@ -200,14 +200,11 @@ describe("POST /account/delete (T-v0.6-F01)", () => {
   });
 
   it("409 when caller has an active match (AR-7)", async () => {
-    // Join alice to a match so she has an active room.
-    const joinR = await httpJson(
-      handle.port,
-      "POST",
-      "/matchmaking/join",
-      { mode: "solo" },
-      "alice"
-    );
+    // Pair alice+alice2 instantly so alice has an active room with no bot wait.
+    const [joinR] = await Promise.all([
+      httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice"),
+      httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice2"),
+    ]);
     expect(joinR.status).toBe(200);
 
     const r = await httpJson(handle.port, "POST", "/account/delete", {}, "alice");
@@ -254,32 +251,47 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
   });
 
   it("creates a user row on first join", async () => {
-    const r = await httpJson(handle.port, "POST", "/matchmaking/join", {
-      mode: "solo",
-      displayName: "Alice",
-      avatarUrl: "https://example.com/avatar.png",
-      provider: "google.com",
-    }, "alice");
+    // Pair alice+alice2 instantly (no bot wait) so the join resolves immediately.
+    const [r] = await Promise.all([
+      httpJson(handle.port, "POST", "/matchmaking/join", {
+        mode: "pve",
+        displayName: "Alice",
+        avatarUrl: "https://example.com/avatar.png",
+        provider: "google.com",
+      }, "alice"),
+      httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice2"),
+    ]);
     expect(r.status).toBe(200);
     expect(userStore.rows.has("user:alice")).toBe(true);
     expect(userStore.rows.get("user:alice")?.displayName).toBe("Alice");
   });
 
   it("updates display fields on second join (one row)", async () => {
-    await httpJson(handle.port, "POST", "/matchmaking/join", {
-      mode: "solo",
-      displayName: "Alice",
-    }, "alice");
+    const [firstJoin] = await Promise.all([
+      httpJson(handle.port, "POST", "/matchmaking/join", {
+        mode: "pve",
+        displayName: "Alice",
+      }, "alice"),
+      httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice2"),
+    ]);
+    const firstToken = (firstJoin.body as { roomToken: string }).roomToken;
 
     // Close the room so alice can join again.
-    handle.roomManager.closeRoom([...handle.roomManager["rooms"].keys()][0]);
+    const { verify } = await import("../RoomTokenSigner");
+    const payload = verify(firstToken)!;
+    handle.roomManager.closeRoom(payload.roomId);
 
-    await httpJson(handle.port, "POST", "/matchmaking/join", {
-      mode: "solo",
-      displayName: "Alice Renamed",
-    }, "alice");
+    const [secondJoin] = await Promise.all([
+      httpJson(handle.port, "POST", "/matchmaking/join", {
+        mode: "pve",
+        displayName: "Alice Renamed",
+      }, "alice"),
+      httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice3"),
+    ]);
+    expect(secondJoin.status).toBe(200);
 
-    expect(userStore.rows.size).toBe(1);
+    // alice row updated; alice2 and alice3 are also upserted (no displayName).
+    expect(userStore.rows.has("user:alice")).toBe(true);
     expect(userStore.rows.get("user:alice")?.displayName).toBe("Alice Renamed");
   });
 });

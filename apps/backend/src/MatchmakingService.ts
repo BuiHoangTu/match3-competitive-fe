@@ -3,7 +3,7 @@ import type { BotManager } from "./BotManager";
 import { sign as signRoomToken } from "./RoomTokenSigner";
 import { BOT_USER_ID, BOT_WAIT_MS, ROOM_TOKEN_TTL_MS } from "./constants";
 
-export type MatchmakingMode = "turn_based" | "pve" | "solo";
+export type MatchmakingMode = "turn_based" | "pve";
 
 export interface MatchmakingResult {
   roomToken: string;
@@ -40,14 +40,6 @@ export class MatchmakingService {
    */
   join(userId: string, mode: MatchmakingMode): Promise<MatchmakingResult> {
     return new Promise<MatchmakingResult>((resolve, reject) => {
-      // Solo mode short-circuits with no opponent, no token enqueue — the client
-      // gets a room token for a solo-play room.
-      if (mode === "solo") {
-        const result = this.createSoloMatch(userId);
-        resolve(result);
-        return;
-      }
-
       const queue = this.waiting.get(mode) ?? [];
 
       // Pair with the oldest waiter for the same mode, if any.
@@ -165,12 +157,6 @@ export class MatchmakingService {
     const room = this.roomManager.createRoomForMatch(userId, BOT_USER_ID, "pve");
     if (this.botManager) this.botManager.setup(room.id);
     return this.signForSlot(room, 0, mode, { userId: BOT_USER_ID });
-  }
-
-  private createSoloMatch(userId: string): MatchmakingResult {
-    // Solo rooms use pve mode (no server-authoritative board needed).
-    const room = this.roomManager.createRoomForMatch(userId, "", "pve");
-    return this.signForSlot(room, 0, "solo", null);
   }
 
   private signForSlot(
