@@ -42,6 +42,12 @@ export class SyncClient {
   firstPlayerId: string | null = null;
   gameMode: string | null = null;
   rejoinToken: string | null = null;
+  /**
+   * pve only: the move log carried in match_found. Empty on first connect,
+   * populated on reconnect so the client can replay locally and restore
+   * mid-match state. Not used for turn_based (server is authoritative there).
+   */
+  initialMoves: Move[] = [];
 
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
@@ -181,6 +187,7 @@ export class SyncClient {
       this.firstPlayerId = data.firstPlayerId;
       this.gameMode = data.mode;
       this.rejoinToken = data.rejoinToken;
+      this.initialMoves = data.moves ?? [];
       try {
         sessionStorage.setItem(REJOIN_STORAGE_KEY, data.rejoinToken);
       } catch {

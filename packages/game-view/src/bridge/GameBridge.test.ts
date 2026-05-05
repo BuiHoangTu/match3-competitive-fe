@@ -92,6 +92,73 @@ describe("GameBridge", () => {
     expect(handler).toHaveBeenCalledWith({ state: "background" });
   });
 
+  it("dispatches startLocalMatch payload to registered handler", () => {
+    const handler = vi.fn();
+    GameBridge.onStartLocalMatch(handler);
+
+    const msg = JSON.stringify({
+      type: BridgeMessageType.START_LOCAL_MATCH,
+      version: "1",
+      payload: {
+        seed: 1234567,
+        savedState: null,
+        userId: "user-alice",
+      },
+    });
+
+    GameBridge._testInjectMessage(msg);
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledWith({
+      seed: 1234567,
+      savedState: null,
+      userId: "user-alice",
+    });
+  });
+
+  it("dispatches startLocalMatch with a saved snapshot payload", () => {
+    const handler = vi.fn();
+    GameBridge.onStartLocalMatch(handler);
+
+    const savedState = {
+      version: 1 as const,
+      board: [
+        [0, 1, 2],
+        [3, 4, 0],
+      ],
+      rngState: 42,
+      score: 250,
+      nextTileId: 96,
+    };
+
+    GameBridge._testInjectMessage(
+      JSON.stringify({
+        type: BridgeMessageType.START_LOCAL_MATCH,
+        version: "1",
+        payload: { seed: 999, savedState, userId: "user-bob" },
+      })
+    );
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler.mock.calls[0][0].savedState).toEqual(savedState);
+  });
+
+  it("startLocalMatch with a malformed payload does not crash dispatch", () => {
+    const handler = vi.fn();
+    GameBridge.onStartLocalMatch(handler);
+
+    // Missing `payload` field entirely. The dispatcher just hands whatever
+    // payload is on the JSON to the handler; we assert no throw.
+    expect(() =>
+      GameBridge._testInjectMessage(
+        JSON.stringify({
+          type: BridgeMessageType.START_LOCAL_MATCH,
+          version: "1",
+        })
+      )
+    ).not.toThrow();
+  });
+
   it("dispatches requestLeaveMatch to registered handler", () => {
     const handler = vi.fn();
     GameBridge.onRequestLeaveMatch(handler);

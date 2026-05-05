@@ -89,6 +89,12 @@ export interface MatchFoundPayload {
    * Included for debug/replay purposes.
    */
   originalSeed?: number;
+  /**
+   * pve only: the move log so the client can replay on reconnect. Empty on
+   * first connect. Not present for turn_based (server drives resolution
+   * authoritatively via move_resolved events).
+   */
+  moves?: Move[];
 }
 
 // ─── Per-player state (replaces the flat `times` field) ─────────────────────

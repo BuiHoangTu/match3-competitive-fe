@@ -23,6 +23,7 @@
 import {
   BridgeMessageType,
   type StartMatchMessage,
+  type StartLocalMatchMessage,
   type AppLifecycleMessage,
   type MatchEndedMessage,
   type ShellToGameMessage,
@@ -33,10 +34,14 @@ import {
 // ---------------------------------------------------------------------------
 
 type StartMatchHandler = (payload: StartMatchMessage["payload"]) => void;
+type StartLocalMatchHandler = (
+  payload: StartLocalMatchMessage["payload"]
+) => void;
 type AppLifecycleHandler = (payload: AppLifecycleMessage["payload"]) => void;
 type RequestLeaveMatchHandler = () => void;
 
 let _startMatchHandlers: StartMatchHandler[] = [];
+let _startLocalMatchHandlers: StartLocalMatchHandler[] = [];
 let _appLifecycleHandlers: AppLifecycleHandler[] = [];
 let _requestLeaveMatchHandlers: RequestLeaveMatchHandler[] = [];
 
@@ -95,6 +100,11 @@ function _dispatch(raw: unknown): void {
       // After this case, TypeScript narrows typed to StartMatchMessage.
       const startMsg = typed as StartMatchMessage;
       for (const h of _startMatchHandlers) h(startMsg.payload);
+      break;
+    }
+    case BridgeMessageType.START_LOCAL_MATCH: {
+      const localMsg = typed as StartLocalMatchMessage;
+      for (const h of _startLocalMatchHandlers) h(localMsg.payload);
       break;
     }
     case BridgeMessageType.APP_LIFECYCLE: {
@@ -208,6 +218,16 @@ export const GameBridge = {
     _startMatchHandlers.push(handler);
   },
 
+  /**
+   * Register a handler that fires when the shell sends startLocalMatch.
+   * This is the solo-mode equivalent of [onStartMatch] — no server room is
+   * involved; the shell supplies a CSPRNG seed and (optionally) a saved
+   * snapshot from localStorage.
+   */
+  onStartLocalMatch(handler: StartLocalMatchHandler): void {
+    _startLocalMatchHandlers.push(handler);
+  },
+
   /** Register a handler for appLifecycle messages. */
   onAppLifecycle(handler: AppLifecycleHandler): void {
     _appLifecycleHandlers.push(handler);
@@ -282,6 +302,7 @@ export const GameBridge = {
   /** Reset all handler lists and initialised flag. For use in tests only. */
   _testReset(): void {
     _startMatchHandlers = [];
+    _startLocalMatchHandlers = [];
     _appLifecycleHandlers = [];
     _requestLeaveMatchHandlers = [];
     _initialised = false;

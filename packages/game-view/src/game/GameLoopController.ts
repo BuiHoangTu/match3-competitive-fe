@@ -1,10 +1,15 @@
-import { createBoard, swapTiles, type Board } from "@match3/shared-js/engine/Board.js";
+import {
+  boardFromGrid,
+  createBoard,
+  swapTiles,
+  type Board,
+} from "@match3/shared-js/engine/Board.js";
 import {
   findMatches,
   resolveBoardAnimated,
   type AnimatedResolveStep,
 } from "@match3/shared-js/engine/MatchEngine.js";
-import { createRng } from "@match3/shared-js/engine/rng.js";
+import { createStatefulRng } from "@match3/shared-js/engine/rng.js";
 
 export interface ResolvedStep {
   engineStep: AnimatedResolveStep;
@@ -16,18 +21,81 @@ export type SwapResult =
   | { kind: "no_match" }
   | { kind: "resolved"; steps: ResolvedStep[]; pointsEarned: number };
 
+/**
+ * Wire-format snapshot of a GameLoopController, suitable for JSON.stringify
+ * into localStorage. Used for solo-mode auto-resume across page reloads.
+ *
+ * `version` is bumped if the layout of this struct ever changes; callers are
+ * expected to discard older snapshots and restart fresh on mismatch.
+ */
+export interface SoloSnapshot {
+  version: 1;
+  board: number[][];
+  rngState: number;
+  score: number;
+  nextTileId: number;
+}
+
 let nextTileId = 0;
 
 export class GameLoopController {
   private _board: Board;
-  private _rng: () => number;
+  private _rng: { next: () => number; state: () => number };
   private _tileIds: number[][];
   private _score = 0;
 
   constructor(seed: number) {
     this._board = createBoard(seed);
-    this._rng = createRng(seed + 1);
+    this._rng = createStatefulRng(seed + 1);
     this._tileIds = this._board.grid.map((row) => row.map(() => nextTileId++));
+  }
+
+  /**
+   * Serialise the controller's mutable state into a plain JSON-safe object.
+   *
+   * Used by the solo-mode auto-resume path: GameScene calls this after every
+   * settled cascade and persists the result under `match3:solo:${userId}`. On
+   * page reload, the shell hands the snapshot back via the StartLocalMatch
+   * bridge message and the caller restores via [deserialize].
+   */
+  serialize(): SoloSnapshot {
+    return {
+      version: 1,
+      board: this._board.grid.map((row) => [...row]),
+      rngState: this._rng.state(),
+      score: this._score,
+      nextTileId,
+    };
+  }
+
+  /**
+   * Restore a controller from a previously-saved snapshot. Returns null when
+   * the snapshot's `version` is not understood by this build — callers should
+   * treat that as "discard the save and start fresh".
+   *
+   * Tile IDs are minted fresh from the current `nextTileId` counter; the
+   * snapshot's stored `nextTileId` is honoured by advancing the counter past
+   * any IDs that were live at save time, so we never collide with IDs from a
+   * previously-running session.
+   */
+  static deserialize(snapshot: SoloSnapshot): GameLoopController | null {
+    if (!snapshot || snapshot.version !== 1) return null;
+
+    // Construct an empty controller cheaply, then overwrite its internals.
+    // Static methods can read private fields on instances of the same class.
+    const ctrl = Object.create(GameLoopController.prototype) as GameLoopController;
+    ctrl._board = boardFromGrid(snapshot.board);
+    ctrl._rng = createStatefulRng(snapshot.rngState);
+    ctrl._score = snapshot.score;
+
+    // Mint a fresh tile-ID grid; sprite identity is reset on restore (the
+    // renderer rebuilds its sprite map from these IDs).
+    if (snapshot.nextTileId > nextTileId) {
+      nextTileId = snapshot.nextTileId;
+    }
+    ctrl._tileIds = ctrl._board.grid.map((row) => row.map(() => nextTileId++));
+
+    return ctrl;
   }
 
   get board(): Board {
@@ -60,7 +128,7 @@ export class GameLoopController {
 
     const { grid: finalGrid, steps: engineSteps } = resolveBoardAnimated(
       this._board.grid,
-      this._rng
+      () => this._rng.next()
     );
 
     let pointsEarned = 0;

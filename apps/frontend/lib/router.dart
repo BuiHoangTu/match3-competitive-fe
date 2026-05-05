@@ -320,8 +320,10 @@ GoRouter createRouter({
               );
 
           // Launches the game view in the given mode and navigates to /match.
-          // Delegates orchestration to [MatchSessionLauncher.launch]; this
-          // callsite only handles UI side-effects (snackbars, navigation).
+          // Delegates orchestration to [MatchSessionLauncher.launch] (server
+          // matchmaking) or [MatchSessionLauncher.launchLocal] (solo, pure
+          // client-side). This callsite only handles UI side-effects
+          // (snackbars, navigation).
           Future<void> launchGame(BuildContext ctx, String mode) async {
             developer.log('Launching game mode=$mode', name: 'router');
             final tok = auth.idToken;
@@ -331,10 +333,53 @@ GoRouter createRouter({
               );
               return;
             }
+
+            // Solo branches into the client-side path. We still call the
+            // active-session probe before launching so a player who's mid-
+            // game in turn_based or pve can't accidentally drop their match.
+            if (mode == 'solo') {
+              final userId = auth.currentUser?.userId;
+              if (userId == null) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Please sign in first')),
+                );
+                return;
+              }
+              try {
+                final handle = await launcher.launchLocal(
+                  idToken: tok,
+                  userId: userId,
+                  onActiveMatchBlock: () {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text(
+                            'You already have an active match — finish or leave it first'),
+                      ));
+                    }
+                  },
+                );
+                if (handle == null) return; // blocked by active-session
+                if (!ctx.mounted) return;
+                ctx.goNamed(Routes.match, extra: handle);
+              } on LaunchAuthRejected {
+                if (!ctx.mounted) return;
+                await auth.signOut();
+                if (!ctx.mounted) return;
+                ctx.goNamed(Routes.signIn);
+              } on LaunchTransport catch (e) {
+                developer.log('launchGame solo failed: $e', name: 'router');
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text('Failed to launch game: ${e.message}')),
+                );
+              }
+              return;
+            }
+
             final mmMode = switch (mode) {
               'pve' => MatchmakingMode.pve,
               'turn_based' => MatchmakingMode.turnBased,
-              _ => MatchmakingMode.solo,
+              _ => MatchmakingMode.turnBased,
             };
             try {
               final handle = await launcher.launch(

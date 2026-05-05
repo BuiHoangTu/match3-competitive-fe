@@ -116,6 +116,10 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
                 rngState: room.rngState,
                 originalSeed: room.originalSeed,
               }),
+              // pve only: ship the move log so the client can replay on
+              // reconnect. Empty on first connect; populated on resume after
+              // the user has already played some moves.
+              ...(!isTurnBased && { moves: room.moves }),
             });
           }
 

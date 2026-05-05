@@ -2,6 +2,10 @@ import Phaser from "phaser";
 import { GameScene } from "./scenes/GameScene.js";
 import { GameBridge } from "./bridge/GameBridge.js";
 import { SyncClient } from "./net/SyncClient.js";
+import {
+  GameLoopController,
+  type SoloSnapshot,
+} from "./game/GameLoopController.js";
 
 // Initialise the bridge transport listener before Phaser starts.
 // This ensures startMatch / appLifecycle messages from the shell are captured
@@ -43,6 +47,28 @@ const BACKEND_URL =
 
 let _activeSyncClient: SyncClient | null = null;
 
+/**
+ * The userId currently driving solo mode, if any. Used to wipe the
+ * `match3:solo:${userId}` localStorage save on requestLeaveMatch. Cleared on
+ * non-solo startMatch and on game-over (the latter is owned by GameScene
+ * which writes through to the same key).
+ */
+let _activeSoloUserId: string | null = null;
+
+/**
+ * Wipe the localStorage save for [userId]. Swallows quota / SecurityErrors —
+ * a missing save is harmless (the player just starts fresh next time).
+ */
+function _wipeSoloSave(userId: string): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(`match3:solo:${userId}`);
+    }
+  } catch (e) {
+    console.warn("[main] solo save wipe failed:", e);
+  }
+}
+
 // Bridge: shell → game requestLeaveMatch handler
 //
 // The shell's "Leave match" dialog sends RequestLeaveMatch when confirmed.
@@ -50,12 +76,61 @@ let _activeSyncClient: SyncClient | null = null;
 // the server-side room. We forfeit (server marks us the loser, awards the
 // opponent the win + remaining-time bonus, cleans up the room) and then
 // disconnect the socket.
+//
+// Solo branch: there is no socket — the only side-effect we own is wiping
+// the localStorage snapshot so the next solo run starts fresh.
 GameBridge.onRequestLeaveMatch(() => {
   if (_activeSyncClient) {
     _activeSyncClient.forfeit();
     _activeSyncClient.disconnect();
     _activeSyncClient = null;
   }
+  if (_activeSoloUserId !== null) {
+    _wipeSoloSave(_activeSoloUserId);
+    _activeSoloUserId = null;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bridge: shell → game startLocalMatch handler
+//
+// Solo mode is fully client-side — no SyncClient is constructed. The shell
+// supplies a fresh CSPRNG seed and (optionally) a previously-saved snapshot.
+// We restore the controller from the snapshot when present, otherwise create
+// a new one from the seed, then start GameScene with mode="solo".
+//
+// Idempotence: any in-flight networked SyncClient is torn down (mirroring
+// onStartMatch) so a stray "play solo while we're paired-up" can't happen.
+// ---------------------------------------------------------------------------
+GameBridge.onStartLocalMatch(({ seed, savedState, userId }) => {
+  // Tear down any previous networked connection before launching solo.
+  if (_activeSyncClient) {
+    _activeSyncClient.disconnect();
+    _activeSyncClient = null;
+  }
+
+  // Decide whether to restore from snapshot or start fresh.
+  let ctrl: GameLoopController | null = null;
+  if (savedState) {
+    ctrl = GameLoopController.deserialize(savedState as SoloSnapshot);
+    if (ctrl === null) {
+      // Snapshot version mismatch — wipe and start fresh.
+      console.warn("[main] discarding solo snapshot: incompatible version");
+      _wipeSoloSave(userId);
+    }
+  }
+  if (ctrl === null) {
+    ctrl = new GameLoopController(seed);
+  }
+
+  _activeSoloUserId = userId;
+
+  game.scene.start("GameScene", {
+    seed,
+    mode: "solo",
+    soloUserId: userId,
+    soloController: ctrl,
+  });
 });
 
 GameBridge.onStartMatch(({ roomToken }) => {
@@ -64,6 +139,10 @@ GameBridge.onStartMatch(({ roomToken }) => {
     _activeSyncClient.disconnect();
     _activeSyncClient = null;
   }
+  // Switching to a networked match — drop any solo session ownership. The
+  // localStorage save itself is left intact so a future solo can resume; only
+  // requestLeaveMatch + game-over wipe it.
+  _activeSoloUserId = null;
 
   const syncClient = new SyncClient(BACKEND_URL);
   _activeSyncClient = syncClient;

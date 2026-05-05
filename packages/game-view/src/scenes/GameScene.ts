@@ -51,6 +51,10 @@ interface GameSceneData {
   firstPlayerId?: string;
   /** Present when re-joining a live game after a disconnect. */
   rejoinState?: RejoinOkPayload;
+  /** Solo-mode only: pre-built controller (fresh-or-restored by main.ts). */
+  soloController?: GameLoopController;
+  /** Solo-mode only: keys the localStorage save slot. */
+  soloUserId?: string;
 }
 
 // -------------------------------------------------------------------------
@@ -95,6 +99,13 @@ export class GameScene extends Phaser.Scene {
   private syncClient: SyncClient | null = null;
   private botPlayer: BotPlayer | null = null;
 
+  /**
+   * Solo-mode persistence key. When non-null, GameScene writes a serialised
+   * snapshot of `ctrl` to `localStorage[match3:solo:${soloUserId}]` after
+   * every settled cascade and wipes it on game-end. Null in non-solo modes.
+   */
+  private soloUserId: string | null = null;
+
   // Parts
   private hud!: Hud;
   private inputController!: InputController;
@@ -122,11 +133,20 @@ export class GameScene extends Phaser.Scene {
     this.syncClient = data?.syncClient ?? null;
     this.mode = (data?.mode as GameMode) ?? "solo";
     this.myPlayerId = data?.myPlayerId ?? null;
+    this.soloUserId = this.mode === "solo" ? data?.soloUserId ?? null : null;
 
     this.myScore = 0;
     this.opponentScore = 0;
 
-    this.ctrl = new GameLoopController(seed);
+    // Solo mode: main.ts may pre-construct (or rehydrate) the controller from a
+    // localStorage snapshot and pass it via scene-start data. Use it when present;
+    // otherwise fall through to the seed-based constructor.
+    if (data?.soloController) {
+      this.ctrl = data.soloController;
+      this.myScore = this.ctrl.score;
+    } else {
+      this.ctrl = new GameLoopController(seed);
+    }
     this.pool = new TileSpritePool(this);
 
     this.hud = new Hud(this, this.mode);
@@ -146,8 +166,10 @@ export class GameScene extends Phaser.Scene {
     const rejoin = data?.rejoinState;
 
     if (rejoin) {
-      // B1: silent move replay to reconstruct board state
-      for (const m of rejoin.moves) {
+      // B1: silent move replay to reconstruct board state. `moves` is now
+      // optional on RejoinOkPayload (turn_based rooms use boardGrid + rngState
+      // snapshots instead) — guard with `?? []`.
+      for (const m of rejoin.moves ?? []) {
         const result = this.ctrl.attemptSwap(m.r1, m.c1, m.r2, m.c2);
         if (result.kind === "resolved") {
           if (m.playerId === rejoin.myPlayerId) {
@@ -157,13 +179,16 @@ export class GameScene extends Phaser.Scene {
           }
         }
       }
-      this.myTimeMs = rejoin.times[rejoin.myPlayerId] ?? TURN_TIME_MS;
-      const opponentId = Object.keys(rejoin.times).find(
+      // Phase 2.5 renamed `times` → `playerStates` (richer per-player state).
+      // Stamina holds the per-player remaining turn-time (ms).
+      this.myTimeMs =
+        rejoin.playerStates[rejoin.myPlayerId]?.stamina ?? TURN_TIME_MS;
+      const opponentId = Object.keys(rejoin.playerStates).find(
         (id) => id !== rejoin.myPlayerId
       );
       this.opponentTimeMs =
         opponentId !== undefined
-          ? (rejoin.times[opponentId] ?? TURN_TIME_MS)
+          ? (rejoin.playerStates[opponentId]?.stamina ?? TURN_TIME_MS)
           : TURN_TIME_MS;
       this.myTurn = rejoin.activePlayerId === rejoin.myPlayerId;
     } else if (this.mode !== "solo") {
@@ -180,6 +205,28 @@ export class GameScene extends Phaser.Scene {
 
     if (this.mode === "pve") {
       this.botPlayer = new BotPlayer();
+    }
+
+    // pve reconnect: replay the move log embedded in match_found so the
+    // local engine matches the server's bot/move history. No-op on first
+    // connect (server sends an empty array) and for non-pve modes (server
+    // doesn't send moves there).
+    if (
+      this.mode === "pve" &&
+      !rejoin &&
+      this.syncClient &&
+      this.syncClient.initialMoves.length > 0
+    ) {
+      for (const m of this.syncClient.initialMoves) {
+        const result = this.ctrl.attemptSwap(m.r1, m.c1, m.r2, m.c2);
+        if (result.kind === "resolved") {
+          if (m.playerId === this.myPlayerId) {
+            this.myScore += result.pointsEarned;
+          } else {
+            this.opponentScore += result.pointsEarned;
+          }
+        }
+      }
     }
 
     this.initBoard();
@@ -217,6 +264,39 @@ export class GameScene extends Phaser.Scene {
     // in GameBridge; we don't have an off() yet, but the closure holds no
     // scene-specific state that would leak — set to null for GC hygiene).
     this._lifecycleHandler = null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Solo-mode localStorage persistence
+  //
+  // Save the controller snapshot after every settled cascade so a page reload
+  // can pick up where the player left off. Quota / SecurityErrors (e.g.
+  // private-mode Safari) are swallowed — the player can still play, they just
+  // won't have resume next time.
+  // -------------------------------------------------------------------------
+
+  private persistSoloSave(): void {
+    if (this.mode !== "solo" || this.soloUserId === null) return;
+    try {
+      if (typeof localStorage === "undefined") return;
+      const snapshot = this.ctrl.serialize();
+      localStorage.setItem(
+        `match3:solo:${this.soloUserId}`,
+        JSON.stringify(snapshot)
+      );
+    } catch (e) {
+      console.warn("[GameScene] solo save failed:", e);
+    }
+  }
+
+  private wipeSoloSave(): void {
+    if (this.soloUserId === null) return;
+    try {
+      if (typeof localStorage === "undefined") return;
+      localStorage.removeItem(`match3:solo:${this.soloUserId}`);
+    } catch (e) {
+      console.warn("[GameScene] solo wipe failed:", e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -302,17 +382,20 @@ export class GameScene extends Phaser.Scene {
       },
       onTurnChanged: (data: TurnChangedData) => {
         this.myTurn = data.activePlayerId === this.myPlayerId;
+        // Phase 2.5: turn_changed now carries `playerStates` (PlayerState
+        // per id) rather than a flat `times` map. Stamina is the remaining
+        // turn-time in ms.
         if (
           this.myPlayerId !== null &&
-          data.times[this.myPlayerId] !== undefined
+          data.playerStates[this.myPlayerId] !== undefined
         ) {
-          this.myTimeMs = data.times[this.myPlayerId]!;
+          this.myTimeMs = data.playerStates[this.myPlayerId]!.stamina;
         }
-        const opponentId = Object.keys(data.times).find(
+        const opponentId = Object.keys(data.playerStates).find(
           (id) => id !== this.myPlayerId
         );
-        if (opponentId && data.times[opponentId] !== undefined) {
-          this.opponentTimeMs = data.times[opponentId]!;
+        if (opponentId && data.playerStates[opponentId] !== undefined) {
+          this.opponentTimeMs = data.playerStates[opponentId]!.stamina;
         }
         this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
         this.hud.updateTurnIndicator(this.myTurn);
@@ -321,7 +404,7 @@ export class GameScene extends Phaser.Scene {
         if (gameOverData?.loserTimeUp) {
           const won = gameOverData.loserTimeUp !== this.myPlayerId;
           const myRemaining =
-            gameOverData.times?.[this.myPlayerId ?? ""] ?? 0;
+            gameOverData.playerStates?.[this.myPlayerId ?? ""]?.stamina ?? 0;
           const timeBonus = won
             ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
             : 0;
@@ -408,6 +491,10 @@ export class GameScene extends Phaser.Scene {
 
     // B1: game is over — no need for a rejoin token anymore
     SyncClient.clearRejoinToken();
+
+    // Solo mode: discard the auto-resume snapshot so the next solo session
+    // starts fresh. No-op in non-solo modes.
+    this.wipeSoloSave();
 
     // Compute final totals: timeBonus is added to myScore for the outcome check.
     // The shell receives these via matchEnded and shows the result screen natively.
@@ -516,6 +603,10 @@ export class GameScene extends Phaser.Scene {
       this.opponentScore += result.pointsEarned;
       this.hud.updateOpponentScore(this.opponentScore);
     }
+
+    // Solo-mode auto-resume: persist the controller's state after every
+    // settled cascade. No-ops in non-solo modes.
+    this.persistSoloSave();
 
     this.state = "idle";
     return true;

@@ -17,6 +17,7 @@ library;
 
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'dart:math';
 
 import '../bridge/bridge_messages.dart';
 import '../services/game_view_bootstrap.dart';
@@ -183,6 +184,90 @@ class MatchSessionLauncher {
     return handle;
   }
 
+  /// Launch a pure client-side solo match.
+  ///
+  /// Steps:
+  ///   1. GET /matchmaking/status — query whether the user has an active
+  ///      server-side room. If yes, fire [onActiveMatchBlock] and return null
+  ///      without launching anything. The caller surfaces the snackbar.
+  ///   2. If status check fails (network error, server down, transport
+  ///      throw), proceed with the launch — the user's directive is "be
+  ///      permissive when offline". Auth-rejection rethrows.
+  ///   3. Generate a fresh CSPRNG seed via `Random.secure()`.
+  ///   4. Mount the game view via [loadView].
+  ///   5. After [ReadyMessage] (or 2 s fallback), send [StartLocalMatchMessage]
+  ///      carrying the seed, userId, and a null savedState. The game view
+  ///      checks its own localStorage for a saved snapshot; the shell does
+  ///      not need to fetch and re-send it.
+  ///
+  /// Returns the [GameViewHandle] on success, or null when blocked by an
+  /// active server-side match.
+  ///
+  /// Throws:
+  ///   - [LaunchAuthRejected]  — 401 from /matchmaking/status.
+  ///   - [LaunchTransport]     — failure to mount the game view.
+  Future<GameViewHandle?> launchLocal({
+    required String idToken,
+    required String userId,
+    void Function()? onActiveMatchBlock,
+  }) async {
+    developer.log(
+      'MatchSessionLauncher.launchLocal userId=$userId',
+      name: 'launcher',
+    );
+
+    // Step 1: active-session probe. Network failures are non-fatal — proceed.
+    try {
+      final session = await matchmaking.getActiveSession(idToken: idToken);
+      if (session != null) {
+        developer.log(
+          'launchLocal blocked: active room=${session.roomId}',
+          name: 'launcher',
+        );
+        onActiveMatchBlock?.call();
+        return null;
+      }
+    } on MatchmakingAuthRejected catch (e) {
+      throw LaunchAuthRejected(e.message);
+    } on MatchmakingError catch (e) {
+      // Transport / unexpected — be permissive: log and continue.
+      developer.log(
+        'launchLocal status probe failed (proceeding anyway): ${e.message}',
+        name: 'launcher',
+      );
+    } catch (e) {
+      // Unknown — be permissive.
+      developer.log(
+        'launchLocal status probe threw (proceeding anyway): $e',
+        name: 'launcher',
+      );
+    }
+
+    // Step 2: generate a fresh CSPRNG seed.
+    // dart:math's Random.secure() bridges to the OS CSPRNG. Mulberry32 only
+    // uses the low 32 bits, so 0x7FFFFFFF is the right ceiling.
+    final seed = Random.secure().nextInt(0x7FFFFFFF);
+
+    // Step 3: mount the game view.
+    late GameViewHandle handle;
+    try {
+      handle = await loadView(assetUrl: assetUrl);
+    } catch (e) {
+      throw LaunchTransport('Failed to create game view: $e');
+    }
+
+    // Step 4: dispatch StartLocalMatchMessage on ready (or 2 s fallback).
+    // The game view consults its own localStorage for a saved snapshot — we
+    // don't need to plumb it through Dart.
+    _dispatchStartLocalMatch(
+      handle,
+      seed: seed,
+      userId: userId,
+    );
+
+    return handle;
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
@@ -221,6 +306,43 @@ class MatchSessionLauncher {
     Future.delayed(const Duration(seconds: 2), start);
 
     // Hard cleanup of the listener after 5 s in case ready never fires.
+    Future.delayed(const Duration(seconds: 5), readySub.cancel);
+  }
+
+  /// Solo-mode equivalent of [_dispatchStartMatch]. Sends
+  /// [StartLocalMatchMessage] over the bridge after the ready signal (or a
+  /// 2 s fallback). The game view will consult its own localStorage for a
+  /// saved snapshot keyed by [userId]; the shell does not need to plumb it
+  /// through.
+  void _dispatchStartLocalMatch(
+    GameViewHandle handle, {
+    required int seed,
+    required String userId,
+  }) {
+    bool started = false;
+
+    void start() {
+      if (started) return;
+      started = true;
+      developer.log(
+        'sending startLocalMatch userId=$userId seed=$seed',
+        name: 'launcher',
+      );
+      handle.transport.send(StartLocalMatchMessage(
+        seed: seed,
+        userId: userId,
+      ));
+    }
+
+    late StreamSubscription<BridgeMessage> readySub;
+    readySub = handle.transport.incoming.listen((msg) {
+      if (msg is ReadyMessage) {
+        start();
+        readySub.cancel();
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 2), start);
     Future.delayed(const Duration(seconds: 5), readySub.cancel);
   }
 }

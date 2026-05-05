@@ -404,6 +404,151 @@ void main() {
     });
   });
 
+  group('MatchSessionLauncher.launchLocal', () {
+    test(
+        'when getActiveSession returns null, mounts the view and sends startLocalMatch',
+        () async {
+      final (loader, transport) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async =>
+            http.Response(jsonEncode({'active': false}), 200),
+        postFn: _poster(status: 200, responseBody: _joinOk()),
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      var blocked = false;
+      final handle = await launcher.launchLocal(
+        idToken: idToken,
+        userId: 'user-alice',
+        onActiveMatchBlock: () => blocked = true,
+      );
+
+      expect(handle, isNotNull);
+      expect(blocked, isFalse);
+      transport.inject(const ReadyMessage());
+      await Future<void>.delayed(Duration.zero);
+      expect(transport.sent, hasLength(1));
+      final sent = transport.sent.first;
+      expect(sent, isA<StartLocalMatchMessage>());
+      final start = sent as StartLocalMatchMessage;
+      expect(start.userId, 'user-alice');
+      expect(start.savedState, isNull);
+      // Seed is CSPRNG-generated; assert it's in the documented range.
+      expect(start.seed, greaterThanOrEqualTo(0));
+      expect(start.seed, lessThan(0x7FFFFFFF));
+    });
+
+    test('when active session returns, blocks launch and returns null',
+        () async {
+      final (loader, _) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async => http.Response(
+          jsonEncode({
+            'active': true,
+            'mode': 'turn_based',
+            'roomId': 'r-1',
+          }),
+          200,
+        ),
+        postFn: _poster(status: 200, responseBody: _joinOk()),
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      var blocked = false;
+      final handle = await launcher.launchLocal(
+        idToken: idToken,
+        userId: 'user-alice',
+        onActiveMatchBlock: () => blocked = true,
+      );
+
+      expect(handle, isNull);
+      expect(blocked, isTrue);
+    });
+
+    test('on 401 from status, throws LaunchAuthRejected', () async {
+      final (loader, _) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async =>
+            http.Response(jsonEncode({'code': 'AUTH_INVALID_TOKEN'}), 401),
+        postFn: _poster(status: 200, responseBody: _joinOk()),
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      expect(
+        () => launcher.launchLocal(
+          idToken: idToken,
+          userId: 'user-alice',
+        ),
+        throwsA(isA<LaunchAuthRejected>()),
+      );
+    });
+
+    test('when status probe fails (network), proceeds with launch', () async {
+      final (loader, transport) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) => throw const _FakeSocketException(),
+        postFn: _poster(status: 200, responseBody: _joinOk()),
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      final handle = await launcher.launchLocal(
+        idToken: idToken,
+        userId: 'user-alice',
+      );
+
+      expect(handle, isNotNull, reason: 'permissive: should still launch');
+      transport.inject(const ReadyMessage());
+      await Future<void>.delayed(Duration.zero);
+      expect(transport.sent, hasLength(1));
+      expect(transport.sent.first, isA<StartLocalMatchMessage>());
+    });
+
+    test('when status probe returns 500, proceeds with launch (permissive)',
+        () async {
+      final (loader, transport) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async => http.Response('boom', 500),
+        postFn: _poster(status: 200, responseBody: _joinOk()),
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      final handle = await launcher.launchLocal(
+        idToken: idToken,
+        userId: 'user-bob',
+      );
+
+      expect(handle, isNotNull);
+      transport.inject(const ReadyMessage());
+      await Future<void>.delayed(Duration.zero);
+      expect(transport.sent.first, isA<StartLocalMatchMessage>());
+    });
+  });
+
   group('MatchSessionLauncher — LaunchError hierarchy', () {
     test('LaunchAuthRejected is a LaunchError', () {
       const e = LaunchAuthRejected('401');

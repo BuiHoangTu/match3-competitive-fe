@@ -14,6 +14,7 @@ import { BridgeMessageType } from "../bridge.js";
 // The canonical list of bridge message types per bridge-messages.txt.
 const EXPECTED_TYPES = [
   "startMatch",
+  "startLocalMatch",
   "appLifecycle",
   "requestLeaveMatch",
   "ready",
@@ -46,7 +47,11 @@ describe("BridgeMessageType constants (AR-3)", () => {
     expect(BridgeMessageType.MATCH_ENDED).toBe("matchEnded");
   });
 
-  it("exports exactly the six message types documented in bridge-messages.txt", () => {
+  it("START_LOCAL_MATCH equals 'startLocalMatch'", () => {
+    expect(BridgeMessageType.START_LOCAL_MATCH).toBe("startLocalMatch");
+  });
+
+  it("exports exactly the message types documented in bridge-messages.txt", () => {
     const exported = Object.values(BridgeMessageType) as string[];
     // Every expected type must be present.
     for (const type of EXPECTED_TYPES) {

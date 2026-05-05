@@ -62,12 +62,13 @@ describe("bridge contract — message name parity (T-v0.6-I06)", () => {
     ).toEqual([]);
   });
 
-  it("has exactly six messages (three shell→game, three game→shell)", () => {
-    expect(Object.keys(BridgeMessageType)).toHaveLength(6);
+  it("has exactly seven messages (four shell→game, three game→shell)", () => {
+    expect(Object.keys(BridgeMessageType)).toHaveLength(7);
   });
 
   it("shell→game names are present", () => {
     expect(Object.values(BridgeMessageType)).toContain("startMatch");
+    expect(Object.values(BridgeMessageType)).toContain("startLocalMatch");
     expect(Object.values(BridgeMessageType)).toContain("appLifecycle");
     expect(Object.values(BridgeMessageType)).toContain("requestLeaveMatch");
   });

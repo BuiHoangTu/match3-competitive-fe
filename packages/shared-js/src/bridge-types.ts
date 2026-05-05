@@ -55,6 +55,51 @@ export interface StartMatchMessage {
 }
 
 /**
+ * Wire-format snapshot of solo-mode game state, persisted client-side in
+ * localStorage and replayed back into the game view via [StartLocalMatchMessage]
+ * on auto-resume.
+ *
+ * Mirrors `SoloSnapshot` in
+ * packages/game-view/src/game/GameLoopController.ts. The `version` field guards
+ * against forward-incompatible layout changes — receivers discard mismatched
+ * snapshots and start fresh.
+ */
+export interface SoloSnapshotPayload {
+  version: 1;
+  /** Symbol grid: rows × cols of integers in the engine's symbol range. */
+  board: number[][];
+  /** Mulberry32 RNG state at the moment of save. */
+  rngState: number;
+  /** Local player's accumulated score at the moment of save. */
+  score: number;
+  /** Tile-ID counter at save time. Restored to avoid sprite-id collisions. */
+  nextTileId: number;
+}
+
+/**
+ * shell → game
+ * Sent by the shell to start a pure client-side solo match. Solo no longer
+ * goes through the matchmaking server — the shell generates the seed locally
+ * and the game view persists state in localStorage for reload-resume.
+ *
+ * If [savedState] is non-null the game view restores the controller from the
+ * snapshot rather than seeding fresh; the [seed] is then unused. If null, the
+ * game view starts a new match from [seed].
+ */
+export interface StartLocalMatchMessage {
+  type: typeof BridgeMessageType.START_LOCAL_MATCH;
+  version: "1";
+  payload: {
+    /** CSPRNG-generated seed for a fresh solo match. Ignored if [savedState] is non-null. */
+    seed: number;
+    /** Previously-persisted controller state, or null to start fresh. */
+    savedState: SoloSnapshotPayload | null;
+    /** Owning user's ID — used to key the localStorage save slot. */
+    userId: string;
+  };
+}
+
+/**
  * shell → game
  * Signals a platform lifecycle transition so the game view can pause animations
  * and timers during background, and trigger a reconnect probe on resume.
@@ -134,6 +179,7 @@ export interface MatchEndedMessage {
 /** All shell → game messages. */
 export type ShellToGameMessage =
   | StartMatchMessage
+  | StartLocalMatchMessage
   | AppLifecycleMessage
   | RequestLeaveMatchMessage;
 

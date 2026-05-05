@@ -1,4 +1,5 @@
 startMatch
+startLocalMatch
 appLifecycle
 requestLeaveMatch
 ready

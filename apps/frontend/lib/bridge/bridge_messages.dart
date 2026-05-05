@@ -27,6 +27,7 @@ import 'dart:convert';
 abstract final class BridgeMessageType {
   // shell → game
   static const String startMatch = 'startMatch';
+  static const String startLocalMatch = 'startLocalMatch';
   static const String appLifecycle = 'appLifecycle';
   static const String requestLeaveMatch = 'requestLeaveMatch';
 
@@ -39,6 +40,7 @@ abstract final class BridgeMessageType {
   /// contract and the canonical fixture file.
   static const Set<String> all = {
     startMatch,
+    startLocalMatch,
     appLifecycle,
     requestLeaveMatch,
     ready,
@@ -75,6 +77,8 @@ sealed class BridgeMessage {
     switch (type) {
       case BridgeMessageType.startMatch:
         return StartMatchMessage.fromMap(map);
+      case BridgeMessageType.startLocalMatch:
+        return StartLocalMatchMessage.fromMap(map);
       case BridgeMessageType.appLifecycle:
         return AppLifecycleMessage.fromMap(map);
       case BridgeMessageType.requestLeaveMatch:
@@ -137,6 +141,118 @@ final class StartMatchMessage extends BridgeMessage {
           'expiresAt': expiresAt,
         },
       };
+}
+
+/// Wire-format snapshot of solo-mode game state, persisted client-side in
+/// localStorage and replayed back into the game view via [StartLocalMatchMessage]
+/// on auto-resume.
+///
+/// Mirrors `SoloSnapshot` in
+/// packages/game-view/src/game/GameLoopController.ts. The [version] field
+/// guards against forward-incompatible layout changes — receivers discard
+/// mismatched snapshots and start fresh.
+final class SoloSnapshot {
+  const SoloSnapshot({
+    required this.board,
+    required this.rngState,
+    required this.score,
+    required this.nextTileId,
+    this.version = 1,
+  });
+
+  final int version;
+
+  /// Symbol grid: rows × cols of integers in the engine's symbol range.
+  final List<List<int>> board;
+
+  /// Mulberry32 RNG state at the moment of save.
+  final int rngState;
+
+  /// Local player's accumulated score at the moment of save.
+  final int score;
+
+  /// Tile-ID counter at save time. Restored to avoid sprite-id collisions.
+  final int nextTileId;
+
+  Map<String, Object> toMap() => {
+        'version': version,
+        'board': board,
+        'rngState': rngState,
+        'score': score,
+        'nextTileId': nextTileId,
+      };
+
+  factory SoloSnapshot.fromMap(Map<String, dynamic> map) {
+    final rawBoard = map['board'] as List<dynamic>;
+    return SoloSnapshot(
+      version: map['version'] as int? ?? 1,
+      board: rawBoard
+          .map((row) => (row as List<dynamic>).map((c) => c as int).toList())
+          .toList(),
+      rngState: map['rngState'] as int,
+      score: map['score'] as int,
+      nextTileId: map['nextTileId'] as int,
+    );
+  }
+}
+
+/// shell → game
+///
+/// Sent by the shell to start a pure client-side solo match. Solo no longer
+/// goes through the matchmaking server — the shell generates the seed locally
+/// and the game view persists state in localStorage for reload-resume.
+///
+/// If [savedState] is non-null the game view restores the controller from the
+/// snapshot rather than seeding fresh; the [seed] is then unused. If null,
+/// the game view starts a new match from [seed].
+final class StartLocalMatchMessage extends BridgeMessage {
+  const StartLocalMatchMessage({
+    required this.seed,
+    required this.userId,
+    this.savedState,
+    super.version,
+  }) : super(type: BridgeMessageType.startLocalMatch);
+
+  /// CSPRNG-generated seed for a fresh solo match. Ignored if [savedState] is
+  /// non-null.
+  final int seed;
+
+  /// Owning user's ID — used by the game view to key the localStorage save
+  /// slot (`match3:solo:${userId}`).
+  final String userId;
+
+  /// Previously-persisted controller state, or null to start fresh.
+  final SoloSnapshot? savedState;
+
+  factory StartLocalMatchMessage.fromMap(Map<String, dynamic> map) {
+    final payload = map['payload'] as Map<String, dynamic>;
+    final rawSaved = payload['savedState'];
+    return StartLocalMatchMessage(
+      seed: payload['seed'] as int,
+      userId: payload['userId'] as String,
+      savedState: rawSaved is Map<String, dynamic>
+          ? SoloSnapshot.fromMap(rawSaved)
+          : null,
+      version: map['version'] as String? ?? '1',
+    );
+  }
+
+  @override
+  Map<String, Object> toMap() {
+    // Note: jsonEncode handles a null value inside a Map<String, Object?>
+    // correctly. We declare the inner map as Object? to allow the null literal,
+    // then cast the outer return type back to satisfy BridgeMessage.toMap.
+    final inner = <String, Object?>{
+      'seed': seed,
+      'userId': userId,
+      'savedState': savedState?.toMap(),
+    };
+    return <String, Object>{
+      'type': type,
+      'version': version,
+      'payload': inner,
+    };
+  }
 }
 
 /// shell → game

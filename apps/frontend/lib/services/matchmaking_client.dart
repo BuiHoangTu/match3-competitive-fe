@@ -19,11 +19,31 @@ import 'package:http/http.dart' as http;
 import '../errors/matchmaking_errors.dart';
 import '../models/matchmaking_result.dart';
 
+/// Result shape of GET /matchmaking/status.
+///
+/// Returned when the user has an active server-side room. Used by the shell
+/// to decide whether to allow starting a fresh solo match — if active, we
+/// surface a snackbar; if null, solo can launch.
+class ActiveSession {
+  const ActiveSession({required this.mode, required this.roomId});
+  final String mode;
+  final String roomId;
+
+  factory ActiveSession.fromJson(Map<String, dynamic> json) =>
+      ActiveSession(
+        mode: json['mode'] as String,
+        roomId: json['roomId'] as String,
+      );
+}
+
 /// Mode selector for [MatchmakingClient.join].
+///
+/// `solo` is intentionally absent: solo matches are now driven entirely
+/// client-side (no server room). The shell sends [StartLocalMatchMessage]
+/// over the bridge instead of calling /matchmaking/join.
 enum MatchmakingMode {
   turnBased('turn_based'),
-  pve('pve'),
-  solo('solo');
+  pve('pve');
 
   const MatchmakingMode(this.wire);
 
@@ -38,16 +58,25 @@ typedef HttpPoster = Future<http.Response> Function(
   Object? body,
 });
 
+/// Inject-for-tests signature matching `package:http`'s `Client.get`.
+typedef HttpGetter = Future<http.Response> Function(
+  Uri url, {
+  Map<String, String>? headers,
+});
+
 class MatchmakingClient {
   MatchmakingClient({
     required this.baseUrl,
     HttpPoster? postFn,
-  }) : _post = postFn ?? _defaultPost;
+    HttpGetter? getFn,
+  })  : _post = postFn ?? _defaultPost,
+        _get = getFn ?? _defaultGet;
 
   /// Backend origin, e.g. `http://localhost:3001` for local dev or
   /// `https://api.match3.app` in prod. No trailing slash.
   final String baseUrl;
   final HttpPoster _post;
+  final HttpGetter _get;
 
   static Future<http.Response> _defaultPost(
     Uri url, {
@@ -55,6 +84,12 @@ class MatchmakingClient {
     Object? body,
   }) =>
       http.post(url, headers: headers, body: body);
+
+  static Future<http.Response> _defaultGet(
+    Uri url, {
+    Map<String, String>? headers,
+  }) =>
+      http.get(url, headers: headers);
 
   /// Find a match. Resolves when the backend returns a room token (either
   /// paired with a human or fallen back to bot).
@@ -88,6 +123,63 @@ class MatchmakingClient {
       idToken: idToken,
       body: {'roomId': roomId},
     );
+  }
+
+  /// GET /matchmaking/status — query the backend for the user's currently
+  /// active server-side match (if any).
+  ///
+  /// Used by the shell before launching a solo (client-side) match: if the
+  /// user is mid-game in a turn_based or pve room, we block solo-launch and
+  /// surface a snackbar instead of silently abandoning the live match.
+  ///
+  /// Returns null when the user has no active room. Returns an
+  /// [ActiveSession] when the server reports `{ active: true, mode, roomId }`.
+  ///
+  /// Throws:
+  ///   - [MatchmakingAuthRejected] on 401.
+  ///   - [MatchmakingTransportError] on network failure or unexpected status.
+  ///
+  /// The caller's responsibility: on transport error, treat as "no active
+  /// session" and proceed with the local launch (be permissive when offline).
+  Future<ActiveSession?> getActiveSession({
+    required String idToken,
+  }) async {
+    final uri = Uri.parse('$baseUrl/matchmaking/status');
+    late http.Response response;
+    try {
+      response = await _get(uri, headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $idToken',
+      });
+    } on Exception catch (e) {
+      throw MatchmakingTransportError('Network error: $e');
+    }
+
+    Map<String, dynamic> decoded = const {};
+    if (response.body.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(response.body);
+        if (parsed is Map<String, dynamic>) decoded = parsed;
+      } catch (_) {
+        // Non-JSON body — fall through to status-based handling.
+      }
+    }
+
+    switch (response.statusCode) {
+      case 200:
+        if (decoded['active'] == true) {
+          return ActiveSession.fromJson(decoded);
+        }
+        return null;
+      case 401:
+        throw MatchmakingAuthRejected(
+          decoded['code']?.toString() ?? 'AUTH_REJECTED',
+        );
+      default:
+        throw MatchmakingTransportError(
+          'Unexpected status ${response.statusCode}: ${response.body}',
+        );
+    }
   }
 
   Future<MatchmakingResult> _send({

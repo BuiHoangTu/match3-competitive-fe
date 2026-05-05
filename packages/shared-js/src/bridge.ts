@@ -11,6 +11,7 @@
 export const BridgeMessageType = {
   // shell → game
   START_MATCH: "startMatch",
+  START_LOCAL_MATCH: "startLocalMatch",
   APP_LIFECYCLE: "appLifecycle",
   REQUEST_LEAVE_MATCH: "requestLeaveMatch",
   // game → shell
@@ -26,6 +27,8 @@ export type BridgeMessageTypeName =
 // Re-export all types from bridge-types
 export type {
   StartMatchMessage,
+  StartLocalMatchMessage,
+  SoloSnapshotPayload,
   AppLifecycleMessage,
   RequestLeaveMatchMessage,
   ReadyMessage,

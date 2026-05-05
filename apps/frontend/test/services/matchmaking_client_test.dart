@@ -49,17 +49,18 @@ void main() {
       expect(result.opponent?.isBot, false);
     });
 
-    test('200 with null opponent (solo)', () async {
+    test('200 with null opponent (e.g. solo legacy or single-player room)',
+        () async {
       final stub = _Stub(status: 200, body: {
-        'roomToken': 'room.jwt.solo',
+        'roomToken': 'room.jwt.alone',
         'expiresAt': 1234567890,
-        'mode': 'solo',
+        'mode': 'pve',
         'opponent': null,
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       final result = await client.join(
         idToken: 'id-alice',
-        mode: MatchmakingMode.solo,
+        mode: MatchmakingMode.pve,
       );
       expect(result.opponent, isNull);
     });
@@ -164,6 +165,85 @@ void main() {
     });
   });
 
+  group('MatchmakingClient.getActiveSession', () {
+    test('200 with active=true returns ActiveSession', () async {
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async => http.Response(
+          jsonEncode({
+            'active': true,
+            'mode': 'turn_based',
+            'roomId': 'room-123',
+          }),
+          200,
+        ),
+      );
+      final session = await client.getActiveSession(idToken: 'alice');
+      expect(session, isNotNull);
+      expect(session!.mode, 'turn_based');
+      expect(session.roomId, 'room-123');
+    });
+
+    test('200 with active=false returns null', () async {
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async =>
+            http.Response(jsonEncode({'active': false}), 200),
+      );
+      final session = await client.getActiveSession(idToken: 'alice');
+      expect(session, isNull);
+    });
+
+    test('401 throws MatchmakingAuthRejected', () async {
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async => http.Response(
+          jsonEncode({'code': 'AUTH_INVALID_TOKEN'}),
+          401,
+        ),
+      );
+      expect(
+        () => client.getActiveSession(idToken: 'bad'),
+        throwsA(isA<MatchmakingAuthRejected>()),
+      );
+    });
+
+    test('500 throws MatchmakingTransportError', () async {
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async => http.Response('boom', 500),
+      );
+      expect(
+        () => client.getActiveSession(idToken: 'alice'),
+        throwsA(isA<MatchmakingTransportError>()),
+      );
+    });
+
+    test('network exception throws MatchmakingTransportError', () async {
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) => throw const _FakeSocketException(),
+      );
+      expect(
+        () => client.getActiveSession(idToken: 'alice'),
+        throwsA(isA<MatchmakingTransportError>()),
+      );
+    });
+
+    test('sends Authorization: Bearer header on the GET', () async {
+      Map<String, String>? capturedHeaders;
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async {
+          capturedHeaders = headers;
+          return http.Response(jsonEncode({'active': false}), 200);
+        },
+      );
+      await client.getActiveSession(idToken: 'XYZ');
+      expect(capturedHeaders?['Authorization'], 'Bearer XYZ');
+    });
+  });
+
   group('header wiring', () {
     test('includes Authorization: Bearer <idToken> and JSON body', () async {
       Map<String, String>? capturedHeaders;
@@ -184,10 +264,10 @@ void main() {
           );
         },
       );
-      await client.join(idToken: 'XYZ', mode: MatchmakingMode.solo);
+      await client.join(idToken: 'XYZ', mode: MatchmakingMode.pve);
       expect(capturedHeaders?['Authorization'], 'Bearer XYZ');
       expect(capturedHeaders?['Content-Type'], 'application/json');
-      expect(capturedBody, jsonEncode({'mode': 'solo'}));
+      expect(capturedBody, jsonEncode({'mode': 'pve'}));
     });
   });
 }

@@ -57,6 +57,21 @@ export function createBoard(seed: number): Board {
 }
 
 /**
+ * Wraps an externally-supplied grid into a `Board` without seeding fresh tiles.
+ * Used by snapshot restore (e.g. GameLoopController.deserialize) to rehydrate a
+ * Board from previously-serialised state. The grid is deep-copied so callers
+ * may continue mutating their original without affecting the returned Board.
+ */
+export function boardFromGrid(grid: number[][]): Board {
+  if (!Array.isArray(grid) || grid.length === 0 || !Array.isArray(grid[0])) {
+    throw new Error("boardFromGrid: grid must be a non-empty 2D array");
+  }
+  const height = grid.length;
+  const width = grid[0].length;
+  return { grid: copyGrid(grid), width, height };
+}
+
+/**
  * Swaps two adjacent tiles and returns a new immutable Board.
  * Throws if the positions are not adjacent.
  */

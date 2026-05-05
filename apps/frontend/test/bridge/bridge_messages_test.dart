@@ -72,12 +72,16 @@ void main() {
       );
     });
 
-    test('has exactly six messages', () {
-      expect(BridgeMessageType.all.length, equals(6));
+    test('has exactly seven messages', () {
+      expect(BridgeMessageType.all.length, equals(7));
     });
 
     test('shell→game names are present', () {
       expect(BridgeMessageType.all, contains(BridgeMessageType.startMatch));
+      expect(
+        BridgeMessageType.all,
+        contains(BridgeMessageType.startLocalMatch),
+      );
       expect(BridgeMessageType.all, contains(BridgeMessageType.appLifecycle));
       expect(
         BridgeMessageType.all,
@@ -106,6 +110,49 @@ void main() {
       expect(decoded.roomToken, equals(msg.roomToken));
       expect(decoded.expiresAt, equals(msg.expiresAt));
       expect(decoded.version, equals('1'));
+    });
+  });
+
+  group('StartLocalMatchMessage', () {
+    test('round-trips with no saved state through JSON', () {
+      const msg = StartLocalMatchMessage(
+        seed: 1234567,
+        userId: 'user-alice',
+      );
+      final json = msg.toJson();
+      final decoded =
+          BridgeMessage.fromJson(json) as StartLocalMatchMessage;
+      expect(decoded.seed, equals(1234567));
+      expect(decoded.userId, equals('user-alice'));
+      expect(decoded.savedState, isNull);
+      expect(decoded.version, equals('1'));
+    });
+
+    test('round-trips with a saved state through JSON', () {
+      final saved = SoloSnapshot(
+        board: [
+          [0, 1, 2],
+          [3, 4, 0],
+        ],
+        rngState: 42,
+        score: 250,
+        nextTileId: 96,
+      );
+      final msg = StartLocalMatchMessage(
+        seed: 999,
+        userId: 'user-bob',
+        savedState: saved,
+      );
+      final decoded =
+          BridgeMessage.fromJson(msg.toJson()) as StartLocalMatchMessage;
+      expect(decoded.seed, equals(999));
+      expect(decoded.userId, equals('user-bob'));
+      expect(decoded.savedState, isNotNull);
+      expect(decoded.savedState!.board, equals(saved.board));
+      expect(decoded.savedState!.rngState, equals(42));
+      expect(decoded.savedState!.score, equals(250));
+      expect(decoded.savedState!.nextTileId, equals(96));
+      expect(decoded.savedState!.version, equals(1));
     });
   });
 
