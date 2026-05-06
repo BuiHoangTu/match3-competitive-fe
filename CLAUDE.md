@@ -57,7 +57,7 @@ npm run build   # TypeScript + Vite production build
 **Backend (`apps/backend/`)**
 ```bash
 npm run dev     # ts-node src/server.ts  →  port 3001
-npm test        # Vitest: 99 unit + 80 integration tests
+npm test        # Vitest: 122 unit + 89 integration tests
 npm run build   # tsc → dist/
 ```
 
@@ -101,7 +101,7 @@ Four strict layers — **never mix them**:
    - Scans all adjacent pairs, returns the swap that clears the most cells
    - Used client-side (PvE mode) and server-side (matchmaking fallback when no human opponent)
 
-5. **Network** (`apps/backend/`, `packages/game-view/src/net/`) — server is authoritative for `turn_based` (PvP) board state; `pve`/`solo` remain client-deterministic.
+5. **Network** (`apps/backend/`, `packages/game-view/src/net/`) — server is authoritative for `turn_based` (PvP) board state; `pve` is server-tracked but client-deterministic; `solo` is purely client-side (no server room).
    - `apps/backend/src/server.ts` — Socket.IO bootstrap; wires all services and handlers.
    - `apps/backend/src/services/MatchEngineService.ts` — **the judge** for `turn_based` rooms. Pure-ish service (no Socket.IO). Owns board state (`boardGrid`, `rngState`, `scores`), per-player stamina ticks (`setInterval(1000)`), move validation, and typed event emission (`move_resolved`, `move_rejected`, `turn_changed`, `match_ended`, `match_started`).
    - `apps/backend/src/services/SocketBridge.ts` — subscribes to judge events and rebroadcasts them as Socket.IO events; translates incoming socket moves/forfeits into judge method calls for `turn_based` rooms.
@@ -113,22 +113,29 @@ Four strict layers — **never mix them**:
    - **`turn_based` wire events**: `move_resolved { playerId, r1,c1,r2,c2, steps, finalGrid, rngState, pointsEarned, scores, playerStates }` broadcast to both sockets; `turn_changed { activePlayerId, playerStates }` after each turn; `game_over { loserTimeUp?, playerStates }`.
    - **`playerStates`** field replaces the old `times` field on all `turn_based` events. Shape: `{ [socketId]: { health: number, mana: number, stamina: number } }`. Defaults: `health=100`, `mana=100`, `stamina=5*60*1000`. Stamina is the live turn clock; health/mana are placeholders.
    - **Snapshot rejoin** (`turn_based`): `match_found` and reconnect both include `boardGrid + rngState + originalSeed`; client restores from snapshot instead of replaying moves.
+   - **`pve` reconnect**: `match_found` carries `room.moves[]`; client silently replays via `GameLoopController.attemptSwap` to reconstruct board state (same deterministic engine the server uses). Empty array on first connect, populated on resume.
+   - **`solo` is offline**: no server room is created. The shell calls `GET /matchmaking/status` first to ensure no other active server-side match would conflict; if clear, it generates a seed via `dart:math.Random.secure()` and dispatches `StartLocalMatch { seed, savedState?, userId }` over the bridge. The game persists state to `localStorage[match3:solo:${userId}]` after every settled cascade and wipes on game-end / requestLeaveMatch.
+   - **Reload-resume**: on shell boot, `HomeScreen` calls `/matchmaking/status`. If `active.mode` is `pve` or `turn_based`, it auto-fires the matching mode handler so the user lands back in their match instead of the lobby. Solo doesn't need this; localStorage handles it inside the game-view itself.
+   - **Crypto-seeded match RNG**: server seeds come from `RootSeedSource` (initialised from `crypto.randomBytes` at boot, advances via `createStatefulRng` per match). Math.random is no longer used for match seeds.
+   - **JWT session tokens**: `/auth/register` and `/auth/login` issue HS256 JWTs (4 h TTL) signed with `SESSION_TOKEN_SECRET`. Both endpoints are rate-limited (5/min/IP, shared bucket). See `apps/backend/src/LocalSessionSigner.ts`, `RateLimiter.ts`.
+   - **Status endpoint**: `GET /matchmaking/status` (Bearer JWT) returns `{ active: false }` or `{ active: true, mode, roomId }`. Used by the shell's auto-resume and by the solo launch guard.
 
 ## Key Constraints
 
 - **Server is authoritative for PvP.** The shared engine still runs deterministically, but client-side determinism is no longer load-bearing for `turn_based` rooms — clients render server-broadcast steps (`move_resolved.steps`) and sync to `move_resolved.finalGrid`. The engine remains deterministic: same `originalSeed` + same move sequence → same `boardGrid` and `rngState` at every step.
-- **`pve` and `solo` modes are unchanged**: client-side determinism still applies for those modes (no `move_resolved` event; board is reconstructed locally from seed + moves).
+- **`pve` is server-tracked, client-deterministic**: no `move_resolved`; board reconstructed locally from `seed + moves` (sent on `match_found`).
+- **`solo` is purely client-side**: no server room, no socket, persisted in `localStorage`.
 - Engine layer (`packages/game-view/src/engine/`) must have zero Phaser imports. Tests run in Node.
 - `GameLoopController` (`packages/game-view/src/game/`) must have zero Phaser imports.
 - Rendering layer reads engine state; it never mutates it.
-- For `turn_based`: server sends `boardGrid` snapshot + per-step animation data (`move_resolved`). For `pve`/`solo`: server sends seed + moves only.
+- For `turn_based`: server sends `boardGrid` snapshot + per-step animation data (`move_resolved`). For `pve`: server sends `seed + moves` only. For `solo`: nothing — game-view manages everything locally.
 
 ## Canvas & Layout
 
 - Canvas: **900 × 700 px**
 - Player board: `BOARD_ORIGIN_X = 28`, `BOARD_ORIGIN_Y = 80` (fixed, left side)
 - Info panel: `PANEL_X = 630` (score, opponent score, timer)
-- Opponent minimap: origin `(625, 220)`, 32 px tiles, 2 px gap
+- No opponent minimap — both players see the same single shared board.
 
 ## Animation Durations
 
@@ -151,9 +158,9 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 
 | Mode | Description |
 |---|---|
-| `solo` | Practice — no opponent, no timer |
-| `pve` | vs Bot — turn-based, 5 min per player, client drives bot locally (no server) |
-| `turn_based` | PvP online — server enforces turn order and 5-min per-player clocks; server falls back to bot opponent after 5 s of no human joining |
+| `solo` | Practice — no opponent, no timer. Pure client-side; persisted to `localStorage[match3:solo:${userId}]`. No server room. |
+| `pve` | vs Bot — server-side bot via `BotManager`, server relays moves; client replays the move log on reconnect. |
+| `turn_based` | PvP online — server-authoritative via the judge (`MatchEngineService`); 5-min per-player stamina; snapshot rejoin via `match_found`. |
 
 `GameScene` receives `mode` in its scene data and gates input on `myTurn`.
 
@@ -165,10 +172,10 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 ## Turn System
 
 - Server tracks `activePlayer` per room; rejects moves from the wrong socket
-- After a valid move: server switches `activePlayer`, emits `turn_changed { activePlayerId, times }` to the room
-- Per-player `setInterval(1000)` ticks down the active player's clock; emits `game_over { loserTimeUp, times }` at zero
+- After a valid move: server switches `activePlayer`, emits `turn_changed { activePlayerId, playerStates }` to the room
+- For `turn_based`, the judge owns a `setInterval(1000)` that ticks down `playerStates[activePlayer].stamina`; emits `game_over { loserTimeUp, playerStates }` at zero
+- For `pve`, the legacy `TimerManager` ticks the clock and emits the equivalent events
 - Client sets `myTurn = false` optimistically when sending a move; confirmed by `turn_changed`
-- In PvE mode, the client's own `setInterval(200)` drives both clocks locally
 
 ## Shared Board
 
@@ -181,11 +188,18 @@ Both players play on **the same board**. There is no separate opponent board or 
 - Snapshot rejoin: on reconnect, `match_found` carries the current `boardGrid + rngState + originalSeed`; no move-replay needed
 - Scores (`pointsEarned`, running `scores`) are tracked and broadcast by the server
 
-**`pve` / `solo` — unchanged client-deterministic path:**
-- Both clients receive the same `seed` and run one `GameLoopController(seed)` each
-- When player A makes a move, it is relayed to B via `opponent_move`; both sides apply it locally
+**`pve` — client-deterministic, server-relayed:**
+- Server creates a room with `gameMode: "pve"` and a bot opponent
+- Client receives `seed` (and on reconnect, `moves[]`) via `match_found`; runs one `GameLoopController(seed)` and silently replays any prior moves
+- New moves: client emits to server, server relays via `opponent_move`; both sides apply locally
 - Same seed + same moves in same order = identical board state (deterministic)
-- In bot rooms, the server applies human moves to its shared board state so the bot always plays on the current board
+- The server's BotManager keeps a parallel board so the bot always plays against the current state
+
+**`solo` — client-only:**
+- No server room, no socket. The game-view runs `GameLoopController(seed)` locally where `seed` is generated by the shell via `Random.secure()`.
+- After every settled cascade the controller is serialised (`{ board, rngState, score, nextTileId }`) and written to `localStorage[match3:solo:${userId}]`.
+- On a fresh launch, if the saved snapshot deserialises cleanly it's restored; otherwise a new game starts with the supplied seed.
+- Wipe triggers: game-end (W/L/D) and `requestLeaveMatch` from the bridge.
 
 ---
 
