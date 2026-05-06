@@ -19,7 +19,15 @@ import '../models/user_profile.dart';
 /// Accepts [profile] for display and three stub callbacks for the game modes.
 /// Each callback is expected to navigate to the game view screen; the actual
 /// navigation and bridge initialisation is wired by sub-tracks A08 + B.
-class HomeScreen extends StatelessWidget {
+///
+/// On first mount, optionally calls [onAutoResumeCheck] to detect an active
+/// server-side match (set by the router; calls /matchmaking/status). When
+/// the user has reloaded the page mid-match, the returned mode triggers the
+/// corresponding mode handler so the player is taken straight back into the
+/// match instead of seeing the lobby briefly. Solo matches resume via
+/// localStorage in the game view itself; the shell does not auto-launch
+/// solo because there's no server signal.
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.profile,
@@ -27,22 +35,56 @@ class HomeScreen extends StatelessWidget {
     required this.onVsBotPressed,
     required this.onVsHumanPressed,
     required this.onAccountPressed,
+    this.onAutoResumeCheck,
   });
 
   /// Currently signed-in user, used to display avatar + name.
   final UserProfile profile;
 
-  /// Stub: starts a practice (solo) match. Wired to game view in T-v0.6-A08.
+  /// Starts a practice (solo) match.
   final VoidCallback onPracticePressed;
 
-  /// Stub: starts a vs-Bot (PvE) match. Wired to game view in T-v0.6-A08.
+  /// Starts a vs-Bot (PvE) match.
   final VoidCallback onVsBotPressed;
 
-  /// Stub: starts PvP matchmaking. Wired to game view in T-v0.6-A08.
+  /// Starts PvP matchmaking.
   final VoidCallback onVsHumanPressed;
 
   /// Navigates to the account screen.
   final VoidCallback onAccountPressed;
+
+  /// Optional one-shot check for an active server-side match. Returns the
+  /// mode ("pve" or "turn_based") to auto-resume, or null if none.
+  /// Failures (network down, etc.) should resolve to null — auto-resume
+  /// is opportunistic, never blocking.
+  final Future<String?> Function()? onAutoResumeCheck;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    final check = widget.onAutoResumeCheck;
+    if (check != null) {
+      // Run after the first frame so any UI from build() is at least scheduled
+      // before we potentially navigate away.
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final mode = await check();
+        if (!mounted) return;
+        switch (mode) {
+          case 'pve':
+            widget.onVsBotPressed();
+            break;
+          case 'turn_based':
+            widget.onVsHumanPressed();
+            break;
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +108,7 @@ class HomeScreen extends StatelessWidget {
                   key: const Key('account_button'),
                   icon: const Icon(Icons.account_circle_outlined),
                   tooltip: 'Account',
-                  onPressed: onAccountPressed,
+                  onPressed: widget.onAccountPressed,
                 ),
               ),
             ),
@@ -79,7 +121,7 @@ class HomeScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // User profile header (not interactive)
-                _ProfileHeader(profile: profile),
+                _ProfileHeader(profile: widget.profile),
                 const SizedBox(height: 32),
 
                 Text(
@@ -98,7 +140,7 @@ class HomeScreen extends StatelessWidget {
                     title: 'Practice',
                     subtitle: 'Solo play — no timer, no opponent',
                     icon: Icons.self_improvement_rounded,
-                    onPressed: onPracticePressed,
+                    onPressed: widget.onPracticePressed,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -111,7 +153,7 @@ class HomeScreen extends StatelessWidget {
                     title: 'vs Bot',
                     subtitle: 'Turn-based match against the AI',
                     icon: Icons.smart_toy_outlined,
-                    onPressed: onVsBotPressed,
+                    onPressed: widget.onVsBotPressed,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -124,7 +166,7 @@ class HomeScreen extends StatelessWidget {
                     title: 'vs Human',
                     subtitle: 'Online PvP — find an opponent',
                     icon: Icons.people_alt_outlined,
-                    onPressed: onVsHumanPressed,
+                    onPressed: widget.onVsHumanPressed,
                   ),
                 ),
               ],

@@ -49,6 +49,16 @@ export class SyncClient {
    */
   initialMoves: Move[] = [];
 
+  /**
+   * Stored match_found callback. Set by onMatchFound() before connect() to
+   * avoid a race where the server emits match_found before the listener is
+   * registered. The internal data-capture handler is wired in _doConnect()
+   * regardless, so initialMoves / gameMode / etc. are always populated.
+   */
+  private _matchFoundCb:
+    | ((roomId: string, seed: number, opponentId: string) => void)
+    | null = null;
+
   constructor(serverUrl: string) {
     this.serverUrl = serverUrl;
   }
@@ -136,6 +146,26 @@ export class SyncClient {
       this.disconnect();
     });
 
+    // Always-on data capture for match_found. Registered here, before
+    // socket.connect(), so we never miss the event on a fast handshake.
+    // The user-facing callback (set via onMatchFound) is invoked at the
+    // end if it has been registered.
+    this.socket.on("match_found", (data: MatchFoundPayload) => {
+      this.roomId = data.roomId;
+      this.seed = data.seed;
+      this.myPlayerId = data.myPlayerId;
+      this.firstPlayerId = data.firstPlayerId;
+      this.gameMode = data.mode;
+      this.rejoinToken = data.rejoinToken;
+      this.initialMoves = data.moves ?? [];
+      try {
+        sessionStorage.setItem(REJOIN_STORAGE_KEY, data.rejoinToken);
+      } catch {
+        // ignore
+      }
+      this._matchFoundCb?.(data.roomId, data.seed, data.opponentId);
+    });
+
     this.socket.connect();
   }
 
@@ -176,25 +206,15 @@ export class SyncClient {
     this.socket?.emit("forfeit");
   }
 
+  /**
+   * Register a match_found callback. May be called before OR after connect();
+   * the internal data-capture is wired up at socket-creation time, so this
+   * is purely a callback registration with no socket dependency.
+   */
   onMatchFound(
     cb: (roomId: string, seed: number, opponentId: string) => void
   ): void {
-    if (!this.socket) throw new Error("Not connected");
-    this.socket.on("match_found", (data: MatchFoundPayload) => {
-      this.roomId = data.roomId;
-      this.seed = data.seed;
-      this.myPlayerId = data.myPlayerId;
-      this.firstPlayerId = data.firstPlayerId;
-      this.gameMode = data.mode;
-      this.rejoinToken = data.rejoinToken;
-      this.initialMoves = data.moves ?? [];
-      try {
-        sessionStorage.setItem(REJOIN_STORAGE_KEY, data.rejoinToken);
-      } catch {
-        // ignore
-      }
-      cb(data.roomId, data.seed, data.opponentId);
-    });
+    this._matchFoundCb = cb;
   }
 
   onRejoinOk(cb: (data: RejoinOkPayload) => void): void {

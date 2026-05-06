@@ -147,31 +147,30 @@ GameBridge.onStartMatch(({ roomToken }) => {
   const syncClient = new SyncClient(BACKEND_URL);
   _activeSyncClient = syncClient;
 
+  // Register the match_found callback BEFORE connecting. SyncClient stores
+  // it; the always-on internal handler attached in _doConnect captures the
+  // event the moment it arrives, so we don't miss a fast server emit.
+  syncClient.onMatchFound((roomId, seed, opponentId) => {
+    if (_activeSyncClient !== syncClient) return;
+
+    // syncClient stores myPlayerId, firstPlayerId, gameMode after the event.
+    game.scene.start("GameScene", {
+      seed,
+      roomId,
+      opponentId,
+      syncClient,
+      mode: syncClient.gameMode ?? "solo",
+      myPlayerId: syncClient.myPlayerId,
+      firstPlayerId: syncClient.firstPlayerId,
+    });
+  });
+
   // Seed the auth token so the Socket.IO handshake carries it.
   syncClient.startMatch(roomToken);
 
   // Open the socket. The connect() promise resolves on TCP connect; the
   // match_found event arrives shortly after as the server pairs players.
-  syncClient.connect().then(() => {
-    // Stale-guard: if another startMatch arrived while we were connecting,
-    // this SyncClient was already replaced — abandon silently.
-    if (_activeSyncClient !== syncClient) return;
-
-    syncClient.onMatchFound((roomId, seed, opponentId) => {
-      if (_activeSyncClient !== syncClient) return;
-
-      // syncClient stores myPlayerId, firstPlayerId, gameMode after the event.
-      game.scene.start("GameScene", {
-        seed,
-        roomId,
-        opponentId,
-        syncClient,
-        mode: syncClient.gameMode ?? "solo",
-        myPlayerId: syncClient.myPlayerId,
-        firstPlayerId: syncClient.firstPlayerId,
-      });
-    });
-  }).catch((err: Error) => {
+  syncClient.connect().catch((err: Error) => {
     if (_activeSyncClient !== syncClient) return;
     console.error("[main] SyncClient connect failed:", err.message);
     // auth_token_rejected path is handled inside SyncClient itself:

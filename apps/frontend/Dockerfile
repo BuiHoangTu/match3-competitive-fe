@@ -28,6 +28,7 @@ RUN flutter pub get
 # GAME_URL is omitted: the bundle defaults to the relative path `/game/`,
 # served by the same nginx alongside the shell.
 RUN flutter build web --base-href / \
+    --pwa-strategy=none \
     --dart-define=BACKEND_URL=${BACKEND_URL}
 
 # ─── Stage 3 — runtime: single nginx serving / and /game/ ───────────────────

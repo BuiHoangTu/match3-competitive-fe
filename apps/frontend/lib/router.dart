@@ -418,6 +418,22 @@ GoRouter createRouter({
             }
           }
 
+          // After a page reload, the user may have an active server-side
+          // match. Ask the backend; if so, HomeScreen auto-fires the matching
+          // mode handler so they land back in the match instead of the lobby.
+          // Solo doesn't show up here (no server tracking) — solo's resume
+          // happens entirely inside the game-view via localStorage.
+          Future<String?> autoResumeCheck() async {
+            final tok = auth.idToken;
+            if (tok == null) return null;
+            try {
+              final session = await mm.getActiveSession(idToken: tok);
+              return session?.mode;
+            } catch (_) {
+              return null;
+            }
+          }
+
           return _buildPage(
             context,
             state,
@@ -427,6 +443,7 @@ GoRouter createRouter({
               onVsBotPressed: () => launchGame(context, 'pve'),
               onVsHumanPressed: () => launchGame(context, 'turn_based'),
               onAccountPressed: () => context.goNamed(Routes.account),
+              onAutoResumeCheck: autoResumeCheck,
             ),
           );
         },
