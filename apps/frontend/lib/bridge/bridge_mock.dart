@@ -14,7 +14,7 @@ import '../services/game_view_bootstrap.dart';
 
 /// A [BridgeTransport] that records sent messages and allows tests to inject
 /// incoming ones via [inject].
-class BridgeMockTransport implements BridgeTransport {
+class BridgeMockTransport extends BridgeTransport {
   final StreamController<BridgeMessage> _streamController =
       StreamController<BridgeMessage>.broadcast();
 

@@ -99,33 +99,43 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 
   Future<void> _confirmLeave(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Leave match?'),
-        content: const Text(
-          'You will forfeit the current match. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            key: const Key('leave_cancel_button'),
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            key: const Key('leave_confirm_button'),
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(ctx).colorScheme.error,
+    // Disable pointer events on the embedded game view so the modal dialog
+    // can receive clicks. On Flutter Web the iframe otherwise captures events
+    // over its area, leaving the dialog visible but uninteractive.
+    widget.handle.transport.setGameInteractionEnabled(false);
+    final bool confirmed;
+    try {
+      confirmed = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Leave match?'),
+              content: const Text(
+                'You will forfeit the current match. This cannot be undone.',
+              ),
+              actions: [
+                TextButton(
+                  key: const Key('leave_cancel_button'),
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  key: const Key('leave_confirm_button'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(ctx).colorScheme.error,
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Leave'),
+                ),
+              ],
             ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Leave'),
-          ),
-        ],
-      ),
-    );
+          ) ==
+          true;
+    } finally {
+      widget.handle.transport.setGameInteractionEnabled(true);
+    }
 
-    if (confirmed == true) {
+    if (confirmed) {
       widget.handle.transport.send(const RequestLeaveMatchMessage());
       widget.onMatchLeft();
     }

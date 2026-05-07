@@ -23,7 +23,7 @@ import '../services/game_view_bootstrap.dart';
 const _kChannelName = 'Match3Bridge';
 
 /// iOS/Android bridge transport.
-class BridgeMobileTransport implements BridgeTransport {
+class BridgeMobileTransport extends BridgeTransport {
   BridgeMobileTransport._({
     required WebViewController controller,
     required StreamController<BridgeMessage> streamController,

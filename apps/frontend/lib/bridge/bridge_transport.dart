@@ -23,4 +23,13 @@ abstract class BridgeTransport {
 
   /// Release resources (close stream controller, cancel subscriptions).
   void dispose();
+
+  /// Toggle whether the embedded game view should receive pointer events.
+  ///
+  /// On Flutter Web the embedded iframe (HtmlElementView) sits above the
+  /// Flutter canvas in DOM stacking order, so modal dialogs drawn on the
+  /// canvas appear visually but do not receive pointer events over the iframe
+  /// region. Disabling pointer events on the iframe lets clicks fall through
+  /// to the Flutter dialog. No-op on platforms where this is unnecessary.
+  void setGameInteractionEnabled(bool enabled) {}
 }

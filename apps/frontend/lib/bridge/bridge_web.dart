@@ -27,10 +27,10 @@ import 'bridge_messages.dart';
 import 'bridge_transport.dart';
 import '../services/game_view_bootstrap.dart';
 
-const _kViewType = 'match3-game-iframe';
+const _kViewTypePrefix = 'match3-game-iframe';
 
 /// Flutter Web bridge transport using window.postMessage + iframe.
-class BridgeWebTransport implements BridgeTransport {
+class BridgeWebTransport extends BridgeTransport {
   BridgeWebTransport._({
     required StreamController<BridgeMessage> streamController,
     required StreamSubscription<html.MessageEvent> subscription,
@@ -58,6 +58,13 @@ class BridgeWebTransport implements BridgeTransport {
   }
 
   @override
+  void setGameInteractionEnabled(bool enabled) {
+    final iframe = html.document.getElementById(_iframeId) as html.IFrameElement?;
+    if (iframe == null) return;
+    iframe.style.pointerEvents = enabled ? 'auto' : 'none';
+  }
+
+  @override
   void dispose() {
     _subscription.cancel();
     _streamController.close();
@@ -69,13 +76,17 @@ class BridgeWebTransport implements BridgeTransport {
 /// Called by [loadGameView] via the conditional import in
 /// [game_view_bootstrap.dart].
 Future<GameViewHandle> createGameView({required String assetUrl}) async {
-  // Use a stable unique id so [BridgeWebTransport.send] can look up the iframe.
-  final iframeId = 'match3-game-${DateTime.now().millisecondsSinceEpoch}';
+  // Unique view type + iframe id per call. registerViewFactory is idempotent
+  // per type, so reusing a constant type would freeze the first match's
+  // iframe id into the factory closure and break send/setGameInteractionEnabled
+  // for every subsequent match (pve/turn_based after practice, etc.).
+  final unique = DateTime.now().microsecondsSinceEpoch;
+  final viewType = '$_kViewTypePrefix-$unique';
+  final iframeId = 'match3-game-$unique';
 
-  // Register the platform-view factory (idempotent if already registered).
   // ignore: undefined_prefixed_name
   ui_web.platformViewRegistry.registerViewFactory(
-    _kViewType,
+    viewType,
     (int viewId) {
       final iframe = html.IFrameElement()
         ..id = iframeId
@@ -111,7 +122,7 @@ Future<GameViewHandle> createGameView({required String assetUrl}) async {
     iframeId: iframeId,
   );
 
-  final widget = HtmlElementView(viewType: _kViewType);
+  final widget = HtmlElementView(viewType: viewType);
 
   return GameViewHandle(widget: widget, transport: transport);
 }
