@@ -102,15 +102,30 @@ export interface MatchFoundPayload {
 /**
  * Rich per-player state broadcast on every turn change and game-over event.
  *
- * - `stamina` — remaining turn time in ms (was `times[playerId]`). Ticks down
- *   while the player is active; match ends when it reaches 0.
- * - `health` / `mana` — placeholder fields, defaulted to 100. The server seeds
- *   them but does not mutate them; clients may display them for future use.
+ * Mirrors `PlayerStats` in `engine/PlayerStats.ts` (the canonical engine
+ * shape). All fields travel on the wire so clients can render full HP /
+ * stamina / mana / level / exp bars without inferring from deltas.
+ *
+ * - `stamina` — remaining turn time in ms. Ticks down while the player is
+ *   active; match ends when it reaches 0.
+ * - `health` — current HP. Match also ends when it reaches 0.
+ * - `mana` — current mana (gated abilities, future use).
+ * - `lv`, `exp`, `expToNext` — leveling progression. `expToNext = 100 * lv`.
+ * - `atk` — current per-attack-tile damage.
+ * - `maxHealth` / `maxMana` / `maxStamina` — current caps (maxHealth grows
+ *   on level-up; the others are static today but exposed for symmetry).
  */
 export interface PlayerState {
   stamina: number;
+  maxStamina: number;
   health: number;
+  maxHealth: number;
   mana: number;
+  maxMana: number;
+  lv: number;
+  exp: number;
+  expToNext: number;
+  atk: number;
 }
 
 /** Payload of the server → client "turn_changed" event. */
@@ -120,10 +135,30 @@ export interface TurnChangedPayload {
   playerStates: Record<string, PlayerState>;
 }
 
+/** Why the losing player lost the match. */
+export type LoseReason = "time" | "hp";
+
 /** Payload of the server → client "game_over" event. */
 export interface GameOverPayload {
-  /** Socket ID of the player whose clock ran out, if applicable. */
+  /**
+   * Socket ID of the player whose clock ran out, if applicable.
+   * @deprecated Use `loserId` + `loserReason` instead. Retained so the
+   *   backend / game-view continue to compile until they migrate. Will be
+   *   removed once both call-site batches land.
+   */
   loserTimeUp?: string;
+  /**
+   * Socket ID of the losing player (covers both stamina-out and HP-out
+   * cases). Pair with `loserReason` to know which condition triggered.
+   * Optional during the migration window — once all emitters set it, drop
+   * the `?`.
+   */
+  loserId?: string;
+  /**
+   * Why the loser lost. `"time"` ↔ stamina hit zero (was `loserTimeUp`),
+   * `"hp"` ↔ health hit zero (new in the player-stats system).
+   */
+  loserReason?: LoseReason;
   /** Per-player state at game end. Replaces the old `times` field. */
   playerStates?: Record<string, PlayerState>;
 }
