@@ -13,6 +13,7 @@ Thumbs.db
 # Claude Code
 .claude/worktrees/
 .claude/agent-memory/
+.claude/*.lock
 
 # Environment files
 .env
