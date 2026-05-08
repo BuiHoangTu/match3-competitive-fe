@@ -442,6 +442,8 @@ GoRouter createRouter({
               onPracticePressed: () => launchGame(context, 'solo'),
               onVsBotPressed: () => launchGame(context, 'pve'),
               onVsHumanPressed: () => launchGame(context, 'turn_based'),
+              // launchGame already returns Future<void>; HomeScreen expects
+              // Future<void> Function() and gates duplicate taps internally.
               onAccountPressed: () => context.goNamed(Routes.account),
               onAutoResumeCheck: autoResumeCheck,
             ),

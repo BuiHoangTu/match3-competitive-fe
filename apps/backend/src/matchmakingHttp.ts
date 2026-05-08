@@ -255,6 +255,17 @@ async function handleJoin(
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "ALREADY_QUEUED") {
+      // 425 Too Early — semantically: a prior /matchmaking/join is still in
+      // flight for this user. Distinct from 409 ACTIVE_ROOM (room already
+      // exists) so the client can decide whether to ignore vs. resume.
+      sendJson(res, 425, {
+        code: "ALREADY_QUEUED",
+        message:
+          "User already has a pending matchmaking request — wait for it to resolve.",
+      });
+      return;
+    }
     sendJson(res, 503, { code: "MATCHMAKING_FAILED", message: msg });
   }
 }

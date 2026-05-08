@@ -15,17 +15,17 @@ const _kProfile = UserProfile(userId: 'u1', displayName: 'Player');
 
 Widget _buildSubject({
   VoidCallback? onAccount,
-  VoidCallback? onPractice,
-  VoidCallback? onVsBot,
-  VoidCallback? onVsHuman,
+  Future<void> Function()? onPractice,
+  Future<void> Function()? onVsBot,
+  Future<void> Function()? onVsHuman,
 }) {
   return MaterialApp(
     home: HomeScreen(
       profile: _kProfile,
       onAccountPressed: onAccount ?? () {},
-      onPracticePressed: onPractice ?? () {},
-      onVsBotPressed: onVsBot ?? () {},
-      onVsHumanPressed: onVsHuman ?? () {},
+      onPracticePressed: onPractice ?? () async {},
+      onVsBotPressed: onVsBot ?? () async {},
+      onVsHumanPressed: onVsHuman ?? () async {},
     ),
   );
 }
@@ -64,7 +64,7 @@ void main() {
     testWidgets('Tab×2 → Enter activates Practice button (order 2)',
         (tester) async {
       var called = false;
-      await tester.pumpWidget(_buildSubject(onPractice: () => called = true));
+      await tester.pumpWidget(_buildSubject(onPractice: () async => called = true));
 
       await tabThenEnter(tester, 2);
 
@@ -75,7 +75,7 @@ void main() {
     testWidgets('Tab×3 → Enter activates vs Bot button (order 3)',
         (tester) async {
       var called = false;
-      await tester.pumpWidget(_buildSubject(onVsBot: () => called = true));
+      await tester.pumpWidget(_buildSubject(onVsBot: () async => called = true));
 
       await tabThenEnter(tester, 3);
 
@@ -86,7 +86,7 @@ void main() {
     testWidgets('Tab×4 → Enter activates vs Human button (order 4)',
         (tester) async {
       var called = false;
-      await tester.pumpWidget(_buildSubject(onVsHuman: () => called = true));
+      await tester.pumpWidget(_buildSubject(onVsHuman: () async => called = true));
 
       await tabThenEnter(tester, 4);
 
@@ -110,7 +110,7 @@ void main() {
       var practiceCalled = false;
       await tester.pumpWidget(_buildSubject(
         onAccount: () => accountCalled = true,
-        onPractice: () => practiceCalled = true,
+        onPractice: () async => practiceCalled = true,
       ));
 
       // Activate account only.

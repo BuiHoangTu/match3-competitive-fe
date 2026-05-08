@@ -41,14 +41,14 @@ class HomeScreen extends StatefulWidget {
   /// Currently signed-in user, used to display avatar + name.
   final UserProfile profile;
 
-  /// Starts a practice (solo) match.
-  final VoidCallback onPracticePressed;
+  /// Starts a practice (solo) match. Returns when launch completes.
+  final Future<void> Function() onPracticePressed;
 
-  /// Starts a vs-Bot (PvE) match.
-  final VoidCallback onVsBotPressed;
+  /// Starts a vs-Bot (PvE) match. Returns when launch completes.
+  final Future<void> Function() onVsBotPressed;
 
-  /// Starts PvP matchmaking.
-  final VoidCallback onVsHumanPressed;
+  /// Starts PvP matchmaking. Returns when launch completes.
+  final Future<void> Function() onVsHumanPressed;
 
   /// Navigates to the account screen.
   final VoidCallback onAccountPressed;
@@ -64,6 +64,10 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  /// True while a launch is in flight. Subsequent taps are ignored —
+  /// matchmaking is idempotent per home-screen session.
+  bool _launching = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,13 +80,66 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         switch (mode) {
           case 'pve':
-            widget.onVsBotPressed();
+            await _runLaunch(widget.onVsBotPressed, dialogLabel: 'Resuming match…');
             break;
           case 'turn_based':
-            widget.onVsHumanPressed();
+            await _runLaunch(
+              widget.onVsHumanPressed,
+              dialogLabel: 'Resuming match…',
+            );
             break;
         }
       });
+    }
+  }
+
+  /// Gate a launch behind [_launching] so duplicate taps no-op, and show a
+  /// modal "searching" dialog while the future is in flight when
+  /// [dialogLabel] is non-null. Solo skips the dialog (launch is instant).
+  Future<void> _runLaunch(
+    Future<void> Function() launch, {
+    String? dialogLabel,
+  }) async {
+    if (_launching) return;
+    setState(() => _launching = true);
+
+    bool dialogOpen = false;
+    if (dialogLabel != null && mounted) {
+      dialogOpen = true;
+      // ignore: unawaited_futures
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            key: const Key('matchmaking_dialog'),
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                const SizedBox(width: 16),
+                Flexible(child: Text(dialogLabel)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    try {
+      await launch();
+    } finally {
+      if (dialogOpen && mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (mounted) {
+        setState(() => _launching = false);
+      }
     }
   }
 
@@ -140,7 +197,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: 'Practice',
                     subtitle: 'Solo play — no timer, no opponent',
                     icon: Icons.self_improvement_rounded,
-                    onPressed: widget.onPracticePressed,
+                    enabled: !_launching,
+                    onPressed: () =>
+                        _runLaunch(widget.onPracticePressed),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -153,7 +212,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: 'vs Bot',
                     subtitle: 'Turn-based match against the AI',
                     icon: Icons.smart_toy_outlined,
-                    onPressed: widget.onVsBotPressed,
+                    enabled: !_launching,
+                    onPressed: () => _runLaunch(
+                      widget.onVsBotPressed,
+                      dialogLabel: 'Finding bot opponent…',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -166,7 +229,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     title: 'vs Human',
                     subtitle: 'Online PvP — find an opponent',
                     icon: Icons.people_alt_outlined,
-                    onPressed: widget.onVsHumanPressed,
+                    enabled: !_launching,
+                    onPressed: () => _runLaunch(
+                      widget.onVsHumanPressed,
+                      dialogLabel: 'Searching for match…',
+                    ),
                   ),
                 ),
               ],
@@ -239,12 +306,14 @@ class _ModeCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.onPressed,
+    this.enabled = true,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
   final VoidCallback onPressed;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -256,7 +325,7 @@ class _ModeCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.hardEdge,
         child: InkWell(
-          onTap: onPressed,
+          onTap: enabled ? onPressed : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
             child: Row(

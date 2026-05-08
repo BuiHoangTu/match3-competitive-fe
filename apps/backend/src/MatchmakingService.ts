@@ -36,10 +36,23 @@ export class MatchmakingService {
    * Enqueue a matchmaking request. Resolves when paired with a human (another
    * waiting request for the same mode) or when the bot fallback timer fires.
    *
+   * Idempotent per userId: if the user already has a pending request in any
+   * mode's queue, the call rejects with `ALREADY_QUEUED` so duplicate taps
+   * (or a buggy client) can't enqueue the same user twice and end up paired
+   * against themselves.
+   *
    * T-v0.6-D09.
    */
   join(userId: string, mode: MatchmakingMode): Promise<MatchmakingResult> {
     return new Promise<MatchmakingResult>((resolve, reject) => {
+      // Idempotency: refuse if this user is already pending in any queue.
+      for (const q of this.waiting.values()) {
+        if (q.some((p) => p.userId === userId)) {
+          reject(new Error("ALREADY_QUEUED"));
+          return;
+        }
+      }
+
       const queue = this.waiting.get(mode) ?? [];
 
       // Pair with the oldest waiter for the same mode, if any.
