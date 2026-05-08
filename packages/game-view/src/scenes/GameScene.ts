@@ -16,6 +16,11 @@ import type {
   RejoinOkPayload,
 } from "../net/SyncClient.js";
 import { BotPlayer } from "@match3/shared-js/bot/BotPlayer.js";
+import {
+  tickStamina,
+  isDead,
+  type PlayerStats,
+} from "@match3/shared-js/engine/PlayerStats.js";
 import { GameBridge } from "../bridge/GameBridge.js";
 import { cellToPixel } from "./parts/layout.js";
 import { Hud } from "./parts/Hud.js";
@@ -170,7 +175,14 @@ export class GameScene extends Phaser.Scene {
       // optional on RejoinOkPayload (turn_based rooms use boardGrid + rngState
       // snapshots instead) — guard with `?? []`.
       for (const m of rejoin.moves ?? []) {
-        const result = this.ctrl.attemptSwap(m.r1, m.c1, m.r2, m.c2);
+        const attacker = m.playerId === rejoin.myPlayerId ? "self" : "opponent";
+        const result = this.ctrl.attemptSwap(
+          m.r1,
+          m.c1,
+          m.r2,
+          m.c2,
+          attacker
+        );
         if (result.kind === "resolved") {
           if (m.playerId === rejoin.myPlayerId) {
             this.myScore += result.pointsEarned;
@@ -218,7 +230,14 @@ export class GameScene extends Phaser.Scene {
       this.syncClient.initialMoves.length > 0
     ) {
       for (const m of this.syncClient.initialMoves) {
-        const result = this.ctrl.attemptSwap(m.r1, m.c1, m.r2, m.c2);
+        const attacker = m.playerId === this.myPlayerId ? "self" : "opponent";
+        const result = this.ctrl.attemptSwap(
+          m.r1,
+          m.c1,
+          m.r2,
+          m.c2,
+          attacker
+        );
         if (result.kind === "resolved") {
           if (m.playerId === this.myPlayerId) {
             this.myScore += result.pointsEarned;
@@ -229,6 +248,29 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // For client-driven modes (solo / pve), the controller's stamina mirrors
+    // the legacy myTimeMs/opponentTimeMs. Seed the controller stats with any
+    // rejoin-restored values so HUD bars render the resumed state.
+    if (this.mode !== "turn_based") {
+      const seedSelf: PlayerStats = {
+        ...this.ctrl.getSelfStats(),
+        stamina: this.mode === "solo" ? this.ctrl.getSelfStats().stamina : this.myTimeMs,
+      };
+      const seedOpp: PlayerStats = {
+        ...this.ctrl.getOpponentStats(),
+        stamina:
+          this.mode === "solo"
+            ? this.ctrl.getOpponentStats().stamina
+            : this.opponentTimeMs,
+      };
+      this.ctrl.setSelfStats(seedSelf);
+      this.ctrl.setOpponentStats(seedOpp);
+      // Sync the legacy timer mirrors with the canonical controller stamina
+      // so the first tickTurnTimer doesn't snap them backwards.
+      this.myTimeMs = this.ctrl.getSelfStats().stamina;
+      this.opponentTimeMs = this.ctrl.getOpponentStats().stamina;
+    }
+
     this.initBoard();
     this.hud.build();
     if (this.mode !== "solo") {
@@ -236,6 +278,13 @@ export class GameScene extends Phaser.Scene {
       this.hud.updateScore(this.myScore);
       this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
       this.hud.updateTurnIndicator(this.myTurn);
+    }
+    // Render initial bars from controller-owned stats. For turn_based mode
+    // the server overwrites these when the first turn_changed / move_resolved
+    // arrives; for solo / pve the controller is the source of truth.
+    this.hud.setSelfStats(this.ctrl.getSelfStats());
+    if (this.mode !== "solo") {
+      this.hud.setOpponentStats(this.ctrl.getOpponentStats());
     }
 
     if (this.syncClient) this.wireMultiplayer();
@@ -384,32 +433,65 @@ export class GameScene extends Phaser.Scene {
         this.myTurn = data.activePlayerId === this.myPlayerId;
         // Phase 2.5: turn_changed now carries `playerStates` (PlayerState
         // per id) rather than a flat `times` map. Stamina is the remaining
-        // turn-time in ms.
+        // turn-time in ms; the rest of the fields populate the HUD bars.
         if (
           this.myPlayerId !== null &&
           data.playerStates[this.myPlayerId] !== undefined
         ) {
-          this.myTimeMs = data.playerStates[this.myPlayerId]!.stamina;
+          const s = data.playerStates[this.myPlayerId]!;
+          this.myTimeMs = s.stamina;
+          this.hud.setSelfStats(s as PlayerStats);
         }
         const opponentId = Object.keys(data.playerStates).find(
           (id) => id !== this.myPlayerId
         );
         if (opponentId && data.playerStates[opponentId] !== undefined) {
-          this.opponentTimeMs = data.playerStates[opponentId]!.stamina;
+          const s = data.playerStates[opponentId]!;
+          this.opponentTimeMs = s.stamina;
+          this.hud.setOpponentStats(s as PlayerStats);
         }
         this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
         this.hud.updateTurnIndicator(this.myTurn);
       },
       onGameOver: (gameOverData?: GameOverData) => {
-        if (gameOverData?.loserTimeUp) {
-          const won = gameOverData.loserTimeUp !== this.myPlayerId;
+        // Migrate to the new `loserReason` / `loserId` fields. Continue to
+        // honour the deprecated `loserTimeUp` socket-id as a fallback so
+        // older server builds keep working during the rollout.
+        const loserId =
+          gameOverData?.loserId ?? gameOverData?.loserTimeUp ?? null;
+        const reason = gameOverData?.loserReason
+          ?? (gameOverData?.loserTimeUp ? "time" : undefined);
+
+        // Push final stats to bars so the HUD reflects the end state.
+        if (gameOverData?.playerStates) {
+          if (
+            this.myPlayerId !== null &&
+            gameOverData.playerStates[this.myPlayerId] !== undefined
+          ) {
+            this.hud.setSelfStats(
+              gameOverData.playerStates[this.myPlayerId]! as PlayerStats
+            );
+          }
+          const oid = Object.keys(gameOverData.playerStates).find(
+            (id) => id !== this.myPlayerId
+          );
+          if (oid && gameOverData.playerStates[oid] !== undefined) {
+            this.hud.setOpponentStats(
+              gameOverData.playerStates[oid]! as PlayerStats
+            );
+          }
+        }
+
+        if (loserId !== null && reason === "time") {
+          const won = loserId !== this.myPlayerId;
           const myRemaining =
-            gameOverData.playerStates?.[this.myPlayerId ?? ""]?.stamina ?? 0;
+            gameOverData?.playerStates?.[this.myPlayerId ?? ""]?.stamina ?? 0;
           const timeBonus = won
             ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
             : 0;
           this.endGame(timeBonus);
         } else {
+          // "hp" loss or unspecified reason — no time bonus.
           this.endGame(0);
         }
       },
@@ -458,23 +540,50 @@ export class GameScene extends Phaser.Scene {
     const elapsed = now - this.lastTimerTick;
     this.lastTimerTick = now;
 
-    if (this.myTurn) {
-      this.myTimeMs = Math.max(0, this.myTimeMs - elapsed);
-      if (this.myTimeMs <= 0 && this.mode === "pve") {
-        this.endGame(0);
-        return;
+    // For turn_based, the server is authoritative; we only mirror the values
+    // that arrived via turn_changed and avoid local stat math.
+    if (this.mode === "turn_based") {
+      if (this.myTurn) {
+        this.myTimeMs = Math.max(0, this.myTimeMs - elapsed);
+      } else {
+        this.opponentTimeMs = Math.max(0, this.opponentTimeMs - elapsed);
       }
-    } else {
-      this.opponentTimeMs = Math.max(0, this.opponentTimeMs - elapsed);
-      if (this.opponentTimeMs <= 0 && this.mode === "pve") {
-        const bonus =
-          Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
-        this.endGame(bonus);
-        return;
-      }
+      this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
+      return;
     }
 
+    // solo / pve: drive PlayerStats.stamina via tickStamina() so HUD bars
+    // stay in lockstep with the timer strings.
+    if (this.myTurn) {
+      this.ctrl.setSelfStats(tickStamina(this.ctrl.getSelfStats(), elapsed));
+    } else if (this.mode === "pve") {
+      this.ctrl.setOpponentStats(
+        tickStamina(this.ctrl.getOpponentStats(), elapsed)
+      );
+    } else {
+      // solo, !myTurn shouldn't happen — guard against it by ticking self.
+      this.ctrl.setSelfStats(tickStamina(this.ctrl.getSelfStats(), elapsed));
+    }
+
+    this.myTimeMs = this.ctrl.getSelfStats().stamina;
+    this.opponentTimeMs = this.ctrl.getOpponentStats().stamina;
+    this.hud.setSelfStats(this.ctrl.getSelfStats());
+    if (this.mode !== "solo") {
+      this.hud.setOpponentStats(this.ctrl.getOpponentStats());
+    }
     this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
+
+    // End conditions: HP=0 or stamina=0. Self-death = loss; opponent-death
+    // (pve) = win with time bonus.
+    if (isDead(this.ctrl.getSelfStats())) {
+      this.endGame(0);
+      return;
+    }
+    if (this.mode === "pve" && isDead(this.ctrl.getOpponentStats())) {
+      const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
+      this.endGame(bonus);
+      return;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -578,7 +687,11 @@ export class GameScene extends Phaser.Scene {
       this.choreographer.tweenSpriteToCell(sprB, r1, c1, SWAP_MS),
     ]);
 
-    const result = this.ctrl.attemptSwap(r1, c1, r2, c2);
+    // For server-authoritative turn_based, the controller doesn't run local
+    // stat math (we'll get authoritative stats via turn_changed). For solo /
+    // pve, route damage based on whose move this is.
+    const attacker: "self" | "opponent" = isMyMove ? "self" : "opponent";
+    const result = this.ctrl.attemptSwap(r1, c1, r2, c2, attacker);
 
     if (result.kind === "no_match") {
       await Promise.all([
@@ -604,11 +717,41 @@ export class GameScene extends Phaser.Scene {
       this.hud.updateOpponentScore(this.opponentScore);
     }
 
+    // For client-driven modes (solo / pve), refresh HUD bars from the
+    // controller's now-mutated stats. attemptSwap already routed damage via
+    // the attacker hint we passed in doSwap / processOpponentQueue.
+    if (this.mode !== "turn_based") {
+      this.hud.setSelfStats(this.ctrl.getSelfStats());
+      if (this.mode !== "solo") {
+        this.hud.setOpponentStats(this.ctrl.getOpponentStats());
+      }
+    }
+
     // Solo-mode auto-resume: persist the controller's state after every
     // settled cascade. No-ops in non-solo modes.
     this.persistSoloSave();
 
     this.state = "idle";
+
+    // pve / solo: HP-zero on either side ends the match immediately so the
+    // scene doesn't keep accepting input after a fatal cascade.
+    if (this.mode === "pve") {
+      if (isDead(this.ctrl.getOpponentStats())) {
+        const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
+        this.endGame(bonus);
+        return true;
+      }
+      if (isDead(this.ctrl.getSelfStats())) {
+        this.endGame(0);
+        return true;
+      }
+    } else if (this.mode === "solo") {
+      if (isDead(this.ctrl.getSelfStats())) {
+        this.endGame(0);
+        return true;
+      }
+    }
+
     return true;
   }
 
