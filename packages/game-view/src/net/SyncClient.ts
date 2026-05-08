@@ -48,6 +48,12 @@ export class SyncClient {
    * mid-match state. Not used for turn_based (server is authoritative there).
    */
   initialMoves: Move[] = [];
+  /**
+   * Initial per-player stats from match_found, so GameScene can seed the HUD
+   * bars (HP / Stamina / Mana / Lv) for both sides before the first
+   * turn_changed arrives.
+   */
+  initialPlayerStates: Record<string, import("@match3/shared-js/protocol").PlayerState> | null = null;
 
   /**
    * Stored match_found callback. Set by onMatchFound() before connect() to
@@ -158,6 +164,7 @@ export class SyncClient {
       this.gameMode = data.mode;
       this.rejoinToken = data.rejoinToken;
       this.initialMoves = data.moves ?? [];
+      this.initialPlayerStates = data.playerStates ?? null;
       try {
         sessionStorage.setItem(REJOIN_STORAGE_KEY, data.rejoinToken);
       } catch {

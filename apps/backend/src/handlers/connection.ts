@@ -100,6 +100,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
             });
           }
 
+          const initialPlayerStates = ctx.socketBridge.getPlayerStates(room.id);
           for (const pid of room.players) {
             const opponentSocketId = room.players.find((p) => p !== pid) ?? BOT_ID;
             const isTurnBased = room.gameMode === "turn_based";
@@ -120,6 +121,8 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
               // reconnect. Empty on first connect; populated on resume after
               // the user has already played some moves.
               ...(!isTurnBased && { moves: room.moves }),
+              // Initial stats so the HUD can render full bars immediately.
+              ...(initialPlayerStates && { playerStates: initialPlayerStates }),
             });
           }
 

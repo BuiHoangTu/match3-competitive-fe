@@ -287,6 +287,21 @@ export class GameScene extends Phaser.Scene {
       this.hud.setOpponentStats(this.ctrl.getOpponentStats());
     }
 
+    // turn_based: seed HUD with initial stats from match_found so the bars
+    // render full HP/Mana/Stamina for both players before the first
+    // turn_changed event arrives.
+    if (this.mode === "turn_based" && this.syncClient?.initialPlayerStates) {
+      const ips = this.syncClient.initialPlayerStates;
+      const myId = this.myPlayerId;
+      const oppId = Object.keys(ips).find((id) => id !== myId);
+      if (myId && ips[myId]) {
+        this.hud.setSelfStats(ips[myId]! as PlayerStats);
+      }
+      if (oppId && ips[oppId]) {
+        this.hud.setOpponentStats(ips[oppId]! as PlayerStats);
+      }
+    }
+
     if (this.syncClient) this.wireMultiplayer();
     if (this.mode !== "solo") this.startTurnTimer();
 

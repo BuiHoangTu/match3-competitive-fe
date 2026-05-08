@@ -10,7 +10,7 @@
 
 import type { Socket } from "socket.io";
 import type { ServerContext } from "../context";
-import type { PlayerState } from "../services/MatchEngineService";
+import { defaultPlayerState, type PlayerState } from "../services/MatchEngineService";
 import { logEvent } from "../logger";
 
 export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void {
@@ -97,7 +97,6 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
       const rawPlayerStates = ctx.socketBridge.getPlayerStates(roomId);
       // Remap any stale socket-ID key to the current socket.id.
       const playerStates: Record<string, PlayerState> = {};
-      const defaultStamina = 5 * 60 * 1000;
       if (rawPlayerStates) {
         for (const [pid, ps] of Object.entries(rawPlayerStates)) {
           const newPid = oldPlayerId && pid === oldPlayerId ? socket.id : pid;
@@ -106,7 +105,7 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
       }
       // Ensure rejoining socket has an entry.
       if (!(socket.id in playerStates)) {
-        playerStates[socket.id] = { stamina: defaultStamina, health: 100, mana: 100 };
+        playerStates[socket.id] = defaultPlayerState();
       }
 
       socket.emit("rejoin_ok", {
@@ -133,11 +132,11 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
       const pvePlayerStates: Record<string, PlayerState> = {};
       if (times) {
         for (const [pid, stamina] of Object.entries(times)) {
-          pvePlayerStates[pid] = { stamina, health: 100, mana: 100 };
+          pvePlayerStates[pid] = { ...defaultPlayerState(), stamina };
         }
       }
       if (!(socket.id in pvePlayerStates)) {
-        pvePlayerStates[socket.id] = { stamina: 5 * 60 * 1000, health: 100, mana: 100 };
+        pvePlayerStates[socket.id] = defaultPlayerState();
       }
 
       socket.emit("rejoin_ok", {

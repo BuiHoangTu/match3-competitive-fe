@@ -95,6 +95,11 @@ export interface MatchFoundPayload {
    * authoritatively via move_resolved events).
    */
   moves?: Move[];
+  /**
+   * Initial per-player stats so the HUD can render full HP/Stamina/Mana/Lv
+   * bars at match start without waiting for the first turn_changed.
+   */
+  playerStates?: Record<string, PlayerState>;
 }
 
 // ─── Per-player state (replaces the flat `times` field) ─────────────────────
