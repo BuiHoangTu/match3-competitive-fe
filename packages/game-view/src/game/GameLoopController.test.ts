@@ -43,7 +43,7 @@ describe("GameLoopController serialize/deserialize", () => {
     expect(ctrl.score).toBeGreaterThan(0);
 
     const snapshot = ctrl.serialize();
-    expect(snapshot.version).toBe(1);
+    expect(snapshot.version).toBe(2);
     expect(snapshot.score).toBe(ctrl.score);
     expect(snapshot.board).toEqual(ctrl.board.grid);
     expect(typeof snapshot.rngState).toBe("number");

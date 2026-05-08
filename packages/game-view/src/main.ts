@@ -112,7 +112,12 @@ GameBridge.onStartLocalMatch(({ seed, savedState, userId }) => {
   // Decide whether to restore from snapshot or start fresh.
   let ctrl: GameLoopController | null = null;
   if (savedState) {
-    ctrl = GameLoopController.deserialize(savedState as SoloSnapshot);
+    // savedState is the wire-format SoloSnapshotPayload (bridge v1). The
+    // controller's internal SoloSnapshot is v2 (adds selfStats / opponentStats).
+    // deserialize() returns null on version mismatch — main.ts then falls
+    // through to start a fresh game. Cast through unknown so v1 wire payloads
+    // can flow into the v2 deserialize() without a structural type error.
+    ctrl = GameLoopController.deserialize(savedState as unknown as SoloSnapshot);
     if (ctrl === null) {
       // Snapshot version mismatch — wipe and start fresh.
       console.warn("[main] discarding solo snapshot: incompatible version");

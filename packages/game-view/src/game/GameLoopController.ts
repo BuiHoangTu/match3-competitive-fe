@@ -10,6 +10,12 @@ import {
   type AnimatedResolveStep,
 } from "@match3/shared-js/engine/MatchEngine.js";
 import { createStatefulRng } from "@match3/shared-js/engine/rng.js";
+import {
+  applyTileEffects,
+  countTilesByType,
+  createDefaultStats,
+  type PlayerStats,
+} from "@match3/shared-js/engine/PlayerStats.js";
 
 export interface ResolvedStep {
   engineStep: AnimatedResolveStep;
@@ -19,7 +25,20 @@ export interface ResolvedStep {
 
 export type SwapResult =
   | { kind: "no_match" }
-  | { kind: "resolved"; steps: ResolvedStep[]; pointsEarned: number };
+  | {
+      kind: "resolved";
+      steps: ResolvedStep[];
+      pointsEarned: number;
+      /**
+       * Stats of the player who made the swap, AFTER all cascades resolved.
+       * For "self" moves the caller mutates from `getSelfStats()` directly.
+       */
+      attackerStats: PlayerStats;
+      /** Stats of the opposing side, after damage applied. */
+      defenderStats: PlayerStats;
+      /** Total damage dealt to the defender across all cascades. */
+      damageDealt: number;
+    };
 
 /**
  * Wire-format snapshot of a GameLoopController, suitable for JSON.stringify
@@ -29,20 +48,32 @@ export type SwapResult =
  * expected to discard older snapshots and restart fresh on mismatch.
  */
 export interface SoloSnapshot {
-  version: 1;
+  /** v1 — board/rng/score only. v2 adds selfStats/opponentStats. */
+  version: 2;
   board: number[][];
   rngState: number;
   score: number;
   nextTileId: number;
+  selfStats: PlayerStats;
+  opponentStats: PlayerStats;
 }
 
 let nextTileId = 0;
+
+/**
+ * Identifies which side made the swap, so applyTileEffects routes damage to
+ * the correct opponent. "self" = local player; "opponent" = remote/bot
+ * playing against the local player.
+ */
+export type SwapAttacker = "self" | "opponent";
 
 export class GameLoopController {
   private _board: Board;
   private _rng: { next: () => number; state: () => number };
   private _tileIds: number[][];
   private _score = 0;
+  private _selfStats: PlayerStats = createDefaultStats();
+  private _opponentStats: PlayerStats = createDefaultStats();
 
   constructor(seed: number) {
     this._board = createBoard(seed);
@@ -60,11 +91,13 @@ export class GameLoopController {
    */
   serialize(): SoloSnapshot {
     return {
-      version: 1,
+      version: 2,
       board: this._board.grid.map((row) => [...row]),
       rngState: this._rng.state(),
       score: this._score,
       nextTileId,
+      selfStats: { ...this._selfStats },
+      opponentStats: { ...this._opponentStats },
     };
   }
 
@@ -79,7 +112,8 @@ export class GameLoopController {
    * previously-running session.
    */
   static deserialize(snapshot: SoloSnapshot): GameLoopController | null {
-    if (!snapshot || snapshot.version !== 1) return null;
+    if (!snapshot || snapshot.version !== 2) return null;
+    if (!snapshot.selfStats || !snapshot.opponentStats) return null;
 
     // Construct an empty controller cheaply, then overwrite its internals.
     // Static methods can read private fields on instances of the same class.
@@ -87,6 +121,8 @@ export class GameLoopController {
     ctrl._board = boardFromGrid(snapshot.board);
     ctrl._rng = createStatefulRng(snapshot.rngState);
     ctrl._score = snapshot.score;
+    ctrl._selfStats = { ...snapshot.selfStats };
+    ctrl._opponentStats = { ...snapshot.opponentStats };
 
     // Mint a fresh tile-ID grid; sprite identity is reset on restore (the
     // renderer rebuilds its sprite map from these IDs).
@@ -110,7 +146,40 @@ export class GameLoopController {
     return this._tileIds[row][col];
   }
 
-  attemptSwap(r1: number, c1: number, r2: number, c2: number): SwapResult {
+  getSelfStats(): PlayerStats {
+    return this._selfStats;
+  }
+
+  getOpponentStats(): PlayerStats {
+    return this._opponentStats;
+  }
+
+  /**
+   * Replace selfStats — used by external tickers (stamina) and by the
+   * MultiplayerSync layer when authoritative server state arrives.
+   */
+  setSelfStats(stats: PlayerStats): void {
+    this._selfStats = { ...stats };
+  }
+
+  setOpponentStats(stats: PlayerStats): void {
+    this._opponentStats = { ...stats };
+  }
+
+  /**
+   * Attempt a swap. When `attacker` is supplied, the resulting per-step
+   * matches are bucketed and `applyTileEffects` is run so this controller's
+   * internal `_selfStats` / `_opponentStats` reflect the post-cascade values.
+   * For server-authoritative modes (turn_based) callers can pass undefined to
+   * skip local stat math.
+   */
+  attemptSwap(
+    r1: number,
+    c1: number,
+    r2: number,
+    c2: number,
+    attacker: SwapAttacker = "self"
+  ): SwapResult {
     let swapped: Board;
     try {
       swapped = swapTiles(this._board, r1, c1, r2, c2);
@@ -134,12 +203,47 @@ export class GameLoopController {
     let pointsEarned = 0;
     const resolvedSteps: ResolvedStep[] = [];
 
+    // Track the grid that each step's matches were sampled from. For step 0
+    // this is the post-swap grid (this._board.grid). For step i>0 it is the
+    // previous step's afterRefill, since resolveBoardAnimated feeds each
+    // iteration from the prior cascade's refilled grid.
+    let preRemovalGrid: number[][] = this._board.grid;
+    let totalDamage = 0;
+
     for (let i = 0; i < engineSteps.length; i++) {
       const step = engineSteps[i];
       const cascadeMultiplier = i + 1;
 
       for (const match of step.matches) {
         pointsEarned += match.cells.length * 10 * cascadeMultiplier;
+      }
+
+      // Per-step removed-cell symbols: sample from the pre-removal grid at
+      // the matched coordinates BEFORE removeMatches blanks them. This is
+      // what countTilesByType expects (raw {row,col,symbol} list).
+      const removedCells: Array<{ row: number; col: number; symbol: number }> = [];
+      for (const match of step.matches) {
+        for (const [r, c] of match.cells) {
+          removedCells.push({
+            row: r,
+            col: c,
+            symbol: preRemovalGrid[r][c],
+          });
+        }
+      }
+      const counts = countTilesByType(removedCells);
+
+      // Route damage according to who swapped: attacker.atk damages defender.
+      if (attacker === "self") {
+        const r = applyTileEffects(this._selfStats, this._opponentStats, counts);
+        this._selfStats = r.self;
+        this._opponentStats = r.opponent;
+        totalDamage += r.damageDealt;
+      } else {
+        const r = applyTileEffects(this._opponentStats, this._selfStats, counts);
+        this._opponentStats = r.self;
+        this._selfStats = r.opponent;
+        totalDamage += r.damageDealt;
       }
 
       // 1. Clear matched IDs
@@ -169,11 +273,21 @@ export class GameLoopController {
       }
 
       resolvedSteps.push({ engineStep: step, refillIds });
+
+      // Next cascade samples from this step's afterRefill.
+      preRemovalGrid = step.afterRefill;
     }
 
     this._board = { ...this._board, grid: finalGrid };
     this._score += pointsEarned;
 
-    return { kind: "resolved", steps: resolvedSteps, pointsEarned };
+    return {
+      kind: "resolved",
+      steps: resolvedSteps,
+      pointsEarned,
+      attackerStats: attacker === "self" ? this._selfStats : this._opponentStats,
+      defenderStats: attacker === "self" ? this._opponentStats : this._selfStats,
+      damageDealt: totalDamage,
+    };
   }
 }
