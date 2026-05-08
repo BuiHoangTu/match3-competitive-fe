@@ -290,7 +290,14 @@ export async function runLatencyHarness(
     const roundtripsMs: number[] = [];
     let movesPlayed = 0;
 
+    // Track early game-over (can happen via HP death with the player-stats system)
+    let gameOver = false;
+    a.on("game_over", () => { gameOver = true; });
+    b.on("game_over", () => { gameOver = true; });
+
     for (let i = 0; i < moveCount; i++) {
+      if (gameOver) break;
+
       // The active client uses the current client's board view to pick a swap.
       const currentBoard = currentClient === a ? boardA : boardB;
       const swap = pickValidSwap(currentBoard);
@@ -299,7 +306,11 @@ export async function runLatencyHarness(
       const myId = currentClient === a ? mA.myPlayerId : mB.myPlayerId;
       const opponentId = currentClient === a ? mB.myPlayerId : mA.myPlayerId;
 
-      const senderTurnChanged = waitForTurn(currentClient, opponentId);
+      // Race turn_changed against game_over to avoid hanging on HP-death end.
+      const gameOverPromise = new Promise<"game_over">((resolve) => {
+        currentClient.onFilter("game_over", () => true).then(() => resolve("game_over")).catch(() => undefined);
+      });
+      const turnChangedPromise = waitForTurn(currentClient, opponentId).then(() => "turn_changed" as const);
 
       const t0 = Date.now();
       currentClient.emit("move", {
@@ -309,8 +320,18 @@ export async function runLatencyHarness(
         r2: swap.r2,
         c2: swap.c2,
       });
-      await senderTurnChanged;
+      const winner = await Promise.race([turnChangedPromise, gameOverPromise]);
       const t1 = Date.now();
+
+      if (winner === "game_over") {
+        gameOver = true;
+        movesPlayed++;
+        // Wait for any in-flight move_resolved events to settle before we
+        // capture the final boardA/boardB state at return time.
+        await new Promise((r) => setTimeout(r, rttMs + 50));
+        break;
+      }
+
       roundtripsMs.push(t1 - t0);
 
       // Give the move_resolved event time to traverse half-latency to both clients.

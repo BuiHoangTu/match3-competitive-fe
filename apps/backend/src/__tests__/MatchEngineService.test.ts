@@ -19,6 +19,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MatchEngineService, defaultPlayerState, type PlayerState } from "../services/MatchEngineService";
 import { createBoard } from "@match3/shared-js/engine/Board";
 import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import { DEFAULTS, createDefaultStats, countTilesByType, applyTileEffects } from "@match3/shared-js/engine/PlayerStats";
+import { TileType } from "@match3/shared-js/engine/TileType";
+
+// Re-export for type narrowing in assertions
+type MatchEndedPayload = {
+  roomId: string;
+  loserId: string | null;
+  loserReason: string | null;
+  outcome: string;
+  scores: Record<string, number>;
+  durationMs: number;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -114,14 +126,27 @@ describe("MatchEngineService", () => {
     expect(service.getSnapshot(ROOM_ID)).toBeNull();
   });
 
-  it("getSnapshot returns correct defaults: health=100, mana=100, stamina=PLAYER_TIME_MS", () => {
+  it("getSnapshot returns correct defaults with full PlayerStats shape", () => {
     service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
     const snap = service.getSnapshot(ROOM_ID)!;
 
     expect(snap).not.toBeNull();
     expect(snap.activePlayer).toBe(P1);
-    expect(snap.playerStates[P1]).toEqual({ health: 100, mana: 100, stamina: 5 * 60 * 1000 });
-    expect(snap.playerStates[P2]).toEqual({ health: 100, mana: 100, stamina: 5 * 60 * 1000 });
+    // Full PlayerStats shape from createDefaultStats()
+    const expectedPs: PlayerState = {
+      health: DEFAULTS.HEALTH,
+      maxHealth: DEFAULTS.HEALTH,
+      stamina: DEFAULTS.STAMINA_MS,
+      maxStamina: DEFAULTS.STAMINA_MS,
+      mana: DEFAULTS.STARTING_MANA,
+      maxMana: DEFAULTS.MANA,
+      lv: 1,
+      exp: 0,
+      expToNext: DEFAULTS.EXP_TO_NEXT_BASE,
+      atk: DEFAULTS.ATK,
+    };
+    expect(snap.playerStates[P1]).toEqual(expectedPs);
+    expect(snap.playerStates[P2]).toEqual(expectedPs);
     expect(snap.originalSeed).toBe(SEED);
     expect(Array.isArray(snap.boardGrid)).toBe(true);
     expect(snap.boardGrid.length).toBe(8);
@@ -153,8 +178,13 @@ describe("MatchEngineService", () => {
     expect(r.scores[P1]).toBe(r.pointsEarned);
     expect(r.finalGrid.length).toBe(8);
     expect(r.playerStates[P1]).toBeDefined();
-    expect(r.playerStates[P1]!.health).toBe(100);
-    expect(r.playerStates[P1]!.mana).toBe(100);
+    // health starts at DEFAULTS.HEALTH (100). ATTACK tiles reduce it; HEAL tiles
+    // restore it. On seed 42's first move we just check it's in valid range.
+    expect(r.playerStates[P1]!.health).toBeGreaterThan(0);
+    expect(r.playerStates[P1]!.health).toBeLessThanOrEqual(DEFAULTS.HEALTH);
+    // mana starts at DEFAULTS.STARTING_MANA (0) and grows via ENERGY tiles.
+    expect(r.playerStates[P1]!.mana).toBeGreaterThanOrEqual(0);
+    expect(r.playerStates[P1]!.mana).toBeLessThanOrEqual(DEFAULTS.MANA);
 
     expect(changed).toHaveLength(1);
     const c = changed[0] as { activePlayer: string; playerStates: Record<string, PlayerState> };
@@ -306,10 +336,187 @@ describe("MatchEngineService", () => {
 
   // ── defaultPlayerState ────────────────────────────────────────────────────
 
-  it("defaultPlayerState has expected values", () => {
+  it("defaultPlayerState returns full PlayerStats from createDefaultStats()", () => {
     const ps = defaultPlayerState();
-    expect(ps.health).toBe(100);
-    expect(ps.mana).toBe(100);
-    expect(ps.stamina).toBe(5 * 60 * 1000);
+    expect(ps.health).toBe(DEFAULTS.HEALTH);
+    expect(ps.maxHealth).toBe(DEFAULTS.HEALTH);
+    expect(ps.mana).toBe(DEFAULTS.STARTING_MANA);
+    expect(ps.maxMana).toBe(DEFAULTS.MANA);
+    expect(ps.stamina).toBe(DEFAULTS.STAMINA_MS);
+    expect(ps.maxStamina).toBe(DEFAULTS.STAMINA_MS);
+    expect(ps.lv).toBe(1);
+    expect(ps.exp).toBe(0);
+    expect(ps.expToNext).toBe(DEFAULTS.EXP_TO_NEXT_BASE);
+    expect(ps.atk).toBe(DEFAULTS.ATK);
+  });
+
+  // ── stamina tick uses tickStamina ─────────────────────────────────────────
+
+  it("stamina tick emits match_ended with loserReason='time' on timeout", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+
+    const ended: unknown[] = [];
+    service.on("match_ended", (p) => ended.push(p));
+
+    vi.advanceTimersByTime(DEFAULTS.STAMINA_MS + 1000);
+
+    expect(ended).toHaveLength(1);
+    const e = ended[0] as { loserId: string; loserReason: string; outcome: string };
+    expect(e.loserId).toBe(P1);
+    expect(e.loserReason).toBe("time");
+    expect(e.outcome).toBe("P2_WIN");
+  });
+
+  // ── tile effect unit tests (pure functions) ───────────────────────────────
+
+  it("applyTileEffects: ATTACK tiles reduce opponent HP by count*atk", () => {
+    const self = createDefaultStats();
+    const opp = createDefaultStats();
+    const counts = countTilesByType([
+      { row: 0, col: 0, symbol: TileType.ATTACK },
+      { row: 0, col: 1, symbol: TileType.ATTACK },
+      { row: 0, col: 2, symbol: TileType.ATTACK },
+    ]);
+    const { opponent, damageDealt } = applyTileEffects(self, opp, counts);
+    expect(damageDealt).toBe(3 * DEFAULTS.ATK);
+    expect(opponent.health).toBe(DEFAULTS.HEALTH - 3 * DEFAULTS.ATK);
+  });
+
+  it("applyTileEffects: HEAL tiles restore self HP, capped at maxHealth", () => {
+    // Start at half HP
+    const self = { ...createDefaultStats(), health: 50 };
+    const opp = createDefaultStats();
+    const counts = countTilesByType([
+      { row: 0, col: 0, symbol: TileType.HEAL },
+      { row: 0, col: 1, symbol: TileType.HEAL },
+    ]);
+    const { self: nextSelf } = applyTileEffects(self, opp, counts);
+    expect(nextSelf.health).toBe(Math.min(50 + 2 * DEFAULTS.HEAL_PER_TILE, DEFAULTS.HEALTH));
+  });
+
+  it("applyTileEffects: HEAL tiles do not exceed maxHealth", () => {
+    const self = createDefaultStats(); // full HP
+    const opp = createDefaultStats();
+    const counts = countTilesByType([
+      { row: 0, col: 0, symbol: TileType.HEAL },
+    ]);
+    const { self: nextSelf } = applyTileEffects(self, opp, counts);
+    expect(nextSelf.health).toBe(DEFAULTS.HEALTH); // already capped
+  });
+
+  it("applyTileEffects: ENERGY tiles increase self mana, capped at maxMana", () => {
+    const self = createDefaultStats(); // mana starts at 0
+    const opp = createDefaultStats();
+    const counts = countTilesByType([
+      { row: 0, col: 0, symbol: TileType.ENERGY },
+      { row: 0, col: 1, symbol: TileType.ENERGY },
+    ]);
+    const { self: nextSelf } = applyTileEffects(self, opp, counts);
+    expect(nextSelf.mana).toBe(Math.min(2 * DEFAULTS.MANA_PER_TILE, DEFAULTS.MANA));
+  });
+
+  it("applyTileEffects: FOOD tiles restore self stamina, capped at maxStamina", () => {
+    const self = { ...createDefaultStats(), stamina: DEFAULTS.STAMINA_MS - 30_000 };
+    const opp = createDefaultStats();
+    const counts = countTilesByType([
+      { row: 0, col: 0, symbol: TileType.FOOD },
+    ]);
+    const { self: nextSelf } = applyTileEffects(self, opp, counts);
+    expect(nextSelf.stamina).toBe(
+      Math.min(DEFAULTS.STAMINA_MS - 30_000 + DEFAULTS.FOOD_PER_TILE_MS, DEFAULTS.STAMINA_MS)
+    );
+  });
+
+  it("applyTileEffects: EXP tiles add exp and trigger level-up when threshold met", () => {
+    // Give self enough exp to level up: expToNext = EXP_TO_NEXT_BASE = 100
+    // Each EXP tile gives EXP_PER_TILE = 5. Need 20 tiles to level.
+    const self = createDefaultStats();
+    const cells = Array.from({ length: 20 }, (_, i) => ({
+      row: 0,
+      col: i,
+      symbol: TileType.EXP as number,
+    }));
+    const counts = countTilesByType(cells);
+    const { self: nextSelf, leveledUp } = applyTileEffects(self, createDefaultStats(), counts);
+    expect(leveledUp).toBe(true);
+    expect(nextSelf.lv).toBe(2);
+    expect(nextSelf.atk).toBe(DEFAULTS.ATK + DEFAULTS.LV_ATK_GAIN);
+    expect(nextSelf.maxHealth).toBe(DEFAULTS.HEALTH + DEFAULTS.LV_HP_GAIN);
+    // HP and mana should be refilled on level-up
+    expect(nextSelf.health).toBe(nextSelf.maxHealth);
+    expect(nextSelf.mana).toBe(nextSelf.maxMana);
+  });
+
+  // ── HP-zero ends match with loserReason='hp' ──────────────────────────────
+
+  it("endMatchByHpDeath emits match_ended with loserReason='hp'", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+
+    const ended: unknown[] = [];
+    service.on("match_ended", (p) => ended.push(p));
+
+    service.endMatchByHpDeath(ROOM_ID, P2);
+
+    expect(ended).toHaveLength(1);
+    const e = ended[0] as MatchEndedPayload;
+    expect(e.loserId).toBe(P2);
+    expect(e.loserReason).toBe("hp");
+    expect(e.outcome).toBe("P1_WIN");
+  });
+
+  it("endMatchByHpDeath clears room state", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+    service.endMatchByHpDeath(ROOM_ID, P1);
+    expect(service.getSnapshot(ROOM_ID)).toBeNull();
+    expect(service.hasRoom(ROOM_ID)).toBe(false);
+  });
+
+  it("endMatchByTimeout emits loserReason='time'", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+
+    const ended: unknown[] = [];
+    service.on("match_ended", (p) => ended.push(p));
+
+    service.endMatchByTimeout(ROOM_ID, P2);
+
+    expect(ended).toHaveLength(1);
+    const e = ended[0] as { loserId: string; loserReason: string; outcome: string };
+    expect(e.loserId).toBe(P2);
+    expect(e.loserReason).toBe("time");
+    expect(e.outcome).toBe("P1_WIN");
+  });
+
+  // ── playerStates updated on move (tile effects applied) ───────────────────
+
+  it("after a valid move, playerStates reflect potential stat changes", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+    const snap = service.getSnapshot(ROOM_ID)!;
+    const swap = findMatchingSwap(snap.boardGrid);
+    if (!swap) throw new Error("No matching swap on initial board");
+
+    const resolved: unknown[] = [];
+    service.on("move_resolved", (p) => resolved.push(p));
+
+    service.submitMove(ROOM_ID, P1, swap.r1, swap.c1, swap.r2, swap.c2);
+
+    const r = resolved[0] as { playerStates: Record<string, PlayerState> };
+    // Verify all fields of full PlayerStats shape are present
+    for (const [, ps] of Object.entries(r.playerStates)) {
+      expect(typeof ps.health).toBe("number");
+      expect(typeof ps.maxHealth).toBe("number");
+      expect(typeof ps.mana).toBe("number");
+      expect(typeof ps.maxMana).toBe("number");
+      expect(typeof ps.stamina).toBe("number");
+      expect(typeof ps.maxStamina).toBe("number");
+      expect(typeof ps.lv).toBe("number");
+      expect(typeof ps.exp).toBe("number");
+      expect(typeof ps.expToNext).toBe("number");
+      expect(typeof ps.atk).toBe("number");
+      // Bounds
+      expect(ps.health).toBeGreaterThan(0);
+      expect(ps.health).toBeLessThanOrEqual(ps.maxHealth);
+      expect(ps.mana).toBeGreaterThanOrEqual(0);
+      expect(ps.mana).toBeLessThanOrEqual(ps.maxMana);
+    }
   });
 });

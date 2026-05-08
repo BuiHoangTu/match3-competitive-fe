@@ -35,6 +35,14 @@ export default defineConfig({
         __dirname,
         "../../packages/shared-js/src/protocol.ts"
       ),
+      "@match3/shared-js/engine/PlayerStats": path.resolve(
+        __dirname,
+        "../../packages/shared-js/src/engine/PlayerStats.ts"
+      ),
+      "@match3/shared-js/engine/TileType": path.resolve(
+        __dirname,
+        "../../packages/shared-js/src/engine/TileType.ts"
+      ),
     },
   },
   test: {

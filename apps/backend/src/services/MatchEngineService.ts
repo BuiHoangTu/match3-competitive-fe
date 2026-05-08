@@ -22,27 +22,24 @@ import {
   resolveBoardAnimated,
   type AnimatedResolveStep,
 } from "@match3/shared-js/engine/MatchEngine";
+import {
+  createDefaultStats,
+  applyTileEffects,
+  countTilesByType,
+  tickStamina,
+  isDead,
+  type PlayerStats,
+} from "@match3/shared-js/engine/PlayerStats";
 import { isValidMove, validateProducesMatch } from "../validator";
-import { PLAYER_TIME_MS } from "../constants";
-import type { ResolvedStepWire } from "@match3/shared-js/protocol";
+import type { ResolvedStepWire, LoseReason } from "@match3/shared-js/protocol";
 
-// ─── PlayerState ─────────────────────────────────────────────────────────────
+// ─── PlayerState (re-exported for SocketBridge / test imports) ───────────────
 
-export interface PlayerState {
-  /** Stamina = remaining turn time in ms. Ticks down while player is active. */
-  stamina: number;
-  /** Health placeholder — seeded at 100, not mutated by the judge. */
-  health: number;
-  /** Mana placeholder — seeded at 100, not mutated by the judge. */
-  mana: number;
-}
+/** Wire-compatible alias for PlayerStats. Same shape — all fields shared. */
+export type PlayerState = PlayerStats;
 
 export function defaultPlayerState(): PlayerState {
-  return {
-    stamina: PLAYER_TIME_MS, // 5 * 60 * 1000
-    health: 100,
-    mana: 100,
-  };
+  return createDefaultStats();
 }
 
 // ─── Event map ───────────────────────────────────────────────────────────────
@@ -81,6 +78,8 @@ export interface MatchEngineEvents extends Record<string, unknown> {
   match_ended: {
     roomId: string;
     loserId: string | null;
+    /** Why the loser lost. "time" = stamina zero, "hp" = health zero. */
+    loserReason: LoseReason | null;
     outcome: "P1_WIN" | "P2_WIN" | "DRAW";
     scores: { [playerId: string]: number };
     durationMs: number;
@@ -253,11 +252,58 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     const rng = createStatefulRng(state.rngState);
     const { grid: finalGrid, steps } = resolveBoardAnimated(swapped.grid, rng.next);
 
-    // Advance state
+    // Advance board state
     state.boardGrid = finalGrid;
     state.rngState = rng.state();
     const pointsEarned = computePoints(steps);
     state.scores[playerId] = (state.scores[playerId] ?? 0) + pointsEarned;
+
+    // ── Apply per-step tile effects ──────────────────────────────────────────
+    // For each cascade step, sample the symbols that were matched BEFORE removal.
+    // The pre-step grid for step 0 is the post-swap grid; for step N it is
+    // steps[N-1].afterRefill. We use these grids to read the symbol at each
+    // matched cell before the engine blanked them to -1.
+    const opponentId = state.playerIds.find((p) => p !== playerId) ?? playerId;
+    let selfStats = state.playerStates[playerId]!;
+    let oppStats = state.playerStates[opponentId]!;
+    let hpKillOpponentId: string | null = null;
+
+    // Build a list of pre-step grids indexed by cascade step.
+    const preStepGrids: number[][][] = [];
+    let prevGrid = swapped.grid;
+    for (const step of steps) {
+      preStepGrids.push(prevGrid);
+      prevGrid = step.afterRefill;
+    }
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      const preGrid = preStepGrids[i]!;
+      // Flatten all matched cells from this step with their pre-removal symbols.
+      const removedCells = step.matches.flatMap((m) =>
+        m.cells.map(([row, col]) => ({ row, col, symbol: preGrid[row]![col] ?? -1 }))
+      );
+      // Filter out any -1 symbols (shouldn't happen on a valid board).
+      const validCells = removedCells.filter((c) => c.symbol >= 0);
+      const counts = countTilesByType(validCells);
+      const result = applyTileEffects(selfStats, oppStats, counts);
+      selfStats = result.self;
+      oppStats = result.opponent;
+
+      if (isDead(oppStats)) {
+        hpKillOpponentId = opponentId;
+        break;
+      }
+      if (isDead(selfStats)) {
+        // Self can't die from their own move in current design, but guard anyway.
+        hpKillOpponentId = playerId;
+        break;
+      }
+    }
+
+    // Persist updated stats back into the room.
+    state.playerStates[playerId] = selfStats;
+    state.playerStates[opponentId] = oppStats;
 
     const wireSteps: ResolvedStepWire[] = steps.map(toWireStep);
 
@@ -275,6 +321,12 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       scores: { ...state.scores },
       playerStates: this._copyPlayerStates(state),
     });
+
+    // If HP hit zero, end the match before switching turns.
+    if (hpKillOpponentId !== null) {
+      this._endMatchByHp(roomId, hpKillOpponentId);
+      return;
+    }
 
     // Switch active player
     const nextPlayer = state.playerIds.find((p) => p !== playerId) ?? playerId;
@@ -300,6 +352,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     this.emit("match_ended", {
       roomId,
       loserId: playerId,
+      loserReason: "time",
       outcome,
       scores: { ...state.scores },
       durationMs,
@@ -308,6 +361,15 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
 
     this._clearTick(state);
     this.rooms.delete(roomId);
+  }
+
+  /**
+   * Exposed for testing and future GM use: forcibly end a match because a
+   * player's HP hit zero. Emits `match_ended` with `loserReason: "hp"`.
+   * No-op if the room doesn't exist or is already ended.
+   */
+  endMatchByHpDeath(roomId: string, loserId: string): void {
+    this._endMatchByHp(roomId, loserId);
   }
 
   /**
@@ -334,6 +396,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     this.emit("match_ended", {
       roomId,
       loserId,
+      loserReason: "time",
       outcome,
       scores: { ...state.scores },
       durationMs,
@@ -364,6 +427,29 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     return this.rooms.has(roomId);
   }
 
+  // ── HP-death end ───────────────────────────────────────────────────────────
+
+  private _endMatchByHp(roomId: string, loserId: string): void {
+    const state = this.rooms.get(roomId);
+    if (!state) return;
+
+    const durationMs = Date.now() - state.startedAt;
+    const outcome = computeOutcome(state.playerIds, state.scores, loserId);
+
+    this.emit("match_ended", {
+      roomId,
+      loserId,
+      loserReason: "hp",
+      outcome,
+      scores: { ...state.scores },
+      durationMs,
+      playerStates: this._copyPlayerStates(state),
+    });
+
+    this._clearTick(state);
+    this.rooms.delete(roomId);
+  }
+
   // ── Tick ───────────────────────────────────────────────────────────────────
 
   private _onTick(roomId: string): void {
@@ -373,10 +459,11 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     const activeState = state.playerStates[state.activePlayer];
     if (!activeState) return;
 
-    activeState.stamina -= 1000;
+    // Pure update — tickStamina returns a new object; reassign into the map.
+    const updated = tickStamina(activeState, 1000);
+    state.playerStates[state.activePlayer] = updated;
 
-    if (activeState.stamina <= 0) {
-      activeState.stamina = 0;
+    if (updated.stamina <= 0) {
       const loserId = state.activePlayer;
       this.endMatchByTimeout(roomId, loserId);
     }

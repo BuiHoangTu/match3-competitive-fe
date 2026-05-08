@@ -29,10 +29,11 @@ export function registerForfeitHandler(socket: Socket, ctx: ServerContext): void
     const times = ctx.timerManager.getTimes(room.id) ?? {};
     room.status = "over";
 
-    // Treat forfeiter as the timed-out player so the opponent's existing
+    // Treat forfeiter as the loser so the opponent's existing
     // game_over handler awards them the win + their remaining-time bonus.
     ctx.io.to(room.id).emit("game_over", {
-      loserTimeUp: socket.id,
+      loserId: socket.id,
+      loserReason: "time" as const,
       times,
     });
 

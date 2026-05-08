@@ -2,12 +2,12 @@
  * Integration test: playerStates field on move_resolved and rejoin_ok.
  *
  * Two real Socket.IO clients, one player makes a move; both should receive
- * move_resolved with a well-formed playerStates map (health=100, mana=100,
- * stamina <= PLAYER_TIME_MS and > 0).
+ * move_resolved with a well-formed playerStates map using the full PlayerStats
+ * shape (health <= maxHealth, mana >= 0, stamina <= PLAYER_TIME_MS and > 0).
  *
  * Also confirms:
- * - rejoin_ok.playerStates has health=100, mana=100 defaults.
  * - game_over emitted by forfeit includes playerStates.
+ * - boardGrid snapshot on rejoin is present.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -16,6 +16,7 @@ import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
 import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import { DEFAULTS } from "@match3/shared-js/engine/PlayerStats";
 import type { MatchFoundPayload } from "@match3/shared-js/protocol";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -120,45 +121,66 @@ describe("playerStates integration", () => {
     return { srv, sockA, sockB, mA, mB };
   }
 
-  it("move_resolved includes playerStates with health=100 and mana=100 for both players", async () => {
+  it("move_resolved includes full PlayerStats for both players with valid ranges", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const swap = findMatchingSwap(mA.boardGrid!);
     if (!swap) throw new Error("No matching swap");
 
+    type FullPlayerState = {
+      health: number;
+      maxHealth: number;
+      mana: number;
+      maxMana: number;
+      stamina: number;
+      maxStamina: number;
+      lv: number;
+      exp: number;
+      expToNext: number;
+      atk: number;
+    };
+
     const [resolvedA, resolvedB] = await Promise.all([
-      waitForEvent<{
-        playerStates: Record<string, { health: number; mana: number; stamina: number }>;
-      }>(sockA, "move_resolved"),
-      waitForEvent<{
-        playerStates: Record<string, { health: number; mana: number; stamina: number }>;
-      }>(sockB, "move_resolved"),
+      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockA, "move_resolved"),
+      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockB, "move_resolved"),
       (async () => { firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap }); })(),
     ]);
 
     // Both clients see the same playerStates shape
     expect(JSON.stringify(resolvedA.playerStates)).toBe(JSON.stringify(resolvedB.playerStates));
 
-    // All players have health=100 and mana=100
+    // Full shape validation: health/mana/stamina within bounds, level/exp present
     for (const ps of Object.values(resolvedA.playerStates)) {
-      expect(ps.health).toBe(100);
-      expect(ps.mana).toBe(100);
+      expect(ps.health).toBeGreaterThan(0);
+      expect(ps.health).toBeLessThanOrEqual(ps.maxHealth);
+      expect(ps.maxHealth).toBe(DEFAULTS.HEALTH);
+      expect(ps.mana).toBeGreaterThanOrEqual(0);
+      expect(ps.mana).toBeLessThanOrEqual(ps.maxMana);
+      expect(ps.maxMana).toBe(DEFAULTS.MANA);
       expect(ps.stamina).toBeGreaterThan(0);
-      expect(ps.stamina).toBeLessThanOrEqual(5 * 60 * 1000);
+      expect(ps.stamina).toBeLessThanOrEqual(DEFAULTS.STAMINA_MS);
+      expect(ps.lv).toBeGreaterThanOrEqual(1);
+      expect(ps.exp).toBeGreaterThanOrEqual(0);
+      expect(ps.atk).toBeGreaterThanOrEqual(DEFAULTS.ATK);
     }
   });
 
-  it("game_over from forfeit includes playerStates", async () => {
+  it("game_over from forfeit includes loserId, loserReason, and playerStates", async () => {
     const { sockA, sockB, mA } = await setup();
+    const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
 
     const gameOverPromise = waitForEvent<{
-      loserTimeUp?: string;
-      playerStates?: Record<string, { health: number; mana: number; stamina: number }>;
+      loserId?: string;
+      loserReason?: string;
+      playerStates?: Record<string, unknown>;
     }>(sockB, "game_over");
 
-    sockA.emit("forfeit");
+    firstPlayerSocket.emit("forfeit");
 
     const gameOver = await gameOverPromise;
+    expect(gameOver.loserId).toBeDefined();
+    expect(typeof gameOver.loserId).toBe("string");
+    expect(gameOver.loserReason).toBe("time");
     expect(gameOver.playerStates).toBeDefined();
     expect(typeof gameOver.playerStates).toBe("object");
   });

@@ -38,7 +38,8 @@ export class TimerManager {
         this.stopTimer(roomId);
         room.status = "over";
         this.io.to(roomId).emit("game_over", {
-          loserTimeUp: loserId,
+          loserId,
+          loserReason: "time" as const,
           times: { ...timerState.times },
         });
         logEvent("match_ended", { matchId: roomId, reason: "time_up", loserId });

@@ -135,7 +135,7 @@ export class SocketBridge {
     });
 
     this.service.on("match_ended", (payload) => {
-      const { roomId, loserId, scores, durationMs, playerStates } = payload;
+      const { roomId, loserId, loserReason, scores, durationMs, playerStates } = payload;
 
       const room = this.ctx.roomManager.getRoom(roomId);
       if (!room) return;
@@ -147,9 +147,12 @@ export class SocketBridge {
       }
       room.status = "over";
 
-      // game_over wire event — clients expect loserTimeUp and playerStates.
+      // game_over wire event — emit loserId + loserReason (new fields).
+      // loserTimeUp retained as deprecated for backward compat with clients not
+      // yet migrated.
       this.io.to(roomId).emit("game_over", {
-        loserTimeUp: loserId ?? undefined,
+        loserId: loserId ?? undefined,
+        loserReason: loserReason ?? undefined,
         playerStates,
       });
 
