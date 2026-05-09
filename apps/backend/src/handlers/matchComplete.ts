@@ -15,7 +15,7 @@
 import type { Socket } from "socket.io";
 import type { ServerContext } from "../context";
 import { logEvent } from "../logger";
-import { roomCleanup } from "../matchEnd";
+import { computeOutcome, recordMatchEnd, roomCleanup } from "../matchEnd";
 
 interface MatchCompletePayload {
   loserId?: string;
@@ -41,6 +41,20 @@ export function registerMatchCompleteHandler(
       loserReason: data?.loserReason,
       scores: data?.scores,
     });
+
+    // Record match history — use client-supplied scores as the authoritative
+    // source for pve rooms (server doesn't track HP independently).
+    const p1Score = data?.scores?.[room.players[0] ?? ""] ?? 0;
+    const p2Score = data?.scores?.[room.players[1] ?? ""] ?? 0;
+    const outcome = computeOutcome(room, p1Score, p2Score, data?.loserId);
+    void recordMatchEnd(
+      ctx,
+      room.id,
+      { ...room, scores: data?.scores ?? {} },
+      p1Score,
+      p2Score,
+      outcome,
+    );
 
     roomCleanup(ctx, room.id);
     ctx.roomManager.closeRoom(room.id);
