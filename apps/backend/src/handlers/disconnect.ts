@@ -6,6 +6,11 @@
  * don't reconnect via /matchmaking/resume before stamina runs out, they lose
  * normally via match_ended. No artificial grace window, no DRAW outcome —
  * stamina expiry is the natural end-of-match path.
+ *
+ * For PvP non-bot rooms we also notify the OTHER player so they can show a
+ * "your opponent disconnected, hold tight" banner. The effective rejoin
+ * window is the disconnected player's remaining stamina, sent as
+ * `timeoutMs`.
  */
 
 import type { Socket } from "socket.io";
@@ -20,7 +25,19 @@ export function registerDisconnectHandler(socket: Socket, ctx: ServerContext): v
     const activeRoom = ctx.roomManager.getRoomByPlayer(socket.id);
     if (!activeRoom) {
       ctx.roomManager.removePlayer(socket.id);
+      return;
     }
-    // Active room: do nothing. Stamina is the de-facto rejoin window.
+
+    // Notify the opponent (PvP non-bot rooms only) so their HUD can show a
+    // reconnecting banner. The disconnected player's remaining stamina is
+    // their effective rejoin window.
+    if (!ctx.botManager.isBotRoom(activeRoom.id)) {
+      const playerStates = ctx.socketBridge.getPlayerStates(activeRoom.id);
+      const remainingMs = playerStates?.[socket.id]?.stamina ?? 0;
+      socket.to(activeRoom.id).emit("opponent_reconnecting", {
+        timeoutMs: remainingMs,
+      });
+    }
+    // Otherwise: do nothing. Stamina is the de-facto rejoin window.
   });
 }
