@@ -446,24 +446,35 @@ export class GameScene extends Phaser.Scene {
       },
       onTurnChanged: (data: TurnChangedData) => {
         this.myTurn = data.activePlayerId === this.myPlayerId;
-        // Phase 2.5: turn_changed now carries `playerStates` (PlayerState
-        // per id) rather than a flat `times` map. Stamina is the remaining
-        // turn-time in ms; the rest of the fields populate the HUD bars.
-        if (
-          this.myPlayerId !== null &&
-          data.playerStates[this.myPlayerId] !== undefined
-        ) {
-          const s = data.playerStates[this.myPlayerId]!;
+        // Two payload shapes coexist on the wire:
+        //   - turn_based (judge):   carries the full `playerStates` map
+        //   - pve relay (legacy):    carries only `times` (stamina-only)
+        // For the pve case we leave HUD bars to the local controller's
+        // per-step animation — the server doesn't track HP/Mana there.
+        const ps = data.playerStates;
+        if (ps && this.myPlayerId !== null && ps[this.myPlayerId]) {
+          const s = ps[this.myPlayerId]!;
           this.myTimeMs = s.stamina;
           this.hud.setSelfStats(s as PlayerStats);
+        } else if (data.times && this.myPlayerId && data.times[this.myPlayerId] !== undefined) {
+          this.myTimeMs = data.times[this.myPlayerId]!;
         }
-        const opponentId = Object.keys(data.playerStates).find(
-          (id) => id !== this.myPlayerId
-        );
-        if (opponentId && data.playerStates[opponentId] !== undefined) {
-          const s = data.playerStates[opponentId]!;
-          this.opponentTimeMs = s.stamina;
-          this.hud.setOpponentStats(s as PlayerStats);
+        if (ps) {
+          const opponentId = Object.keys(ps).find(
+            (id) => id !== this.myPlayerId
+          );
+          if (opponentId && ps[opponentId]) {
+            const s = ps[opponentId]!;
+            this.opponentTimeMs = s.stamina;
+            this.hud.setOpponentStats(s as PlayerStats);
+          }
+        } else if (data.times) {
+          const opponentId = Object.keys(data.times).find(
+            (id) => id !== this.myPlayerId
+          );
+          if (opponentId && data.times[opponentId] !== undefined) {
+            this.opponentTimeMs = data.times[opponentId]!;
+          }
         }
         this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
         this.hud.updateTurnIndicator(this.myTurn);

@@ -143,8 +143,17 @@ export interface PlayerState {
 /** Payload of the server → client "turn_changed" event. */
 export interface TurnChangedPayload {
   activePlayerId: string;
-  /** Per-player state after this turn change. Replaces the old `times` field. */
-  playerStates: Record<string, PlayerState>;
+  /**
+   * Per-player state after this turn change. The judge (turn_based) emits the
+   * full shape; the legacy pve relay path emits only the stamina-bearing
+   * `times` field below — clients must guard for undefined.
+   */
+  playerStates?: Record<string, PlayerState>;
+  /**
+   * Legacy stamina-only map used by the pve relay path (`{ [socketId]: ms }`).
+   * Kept for backward compatibility; new code should prefer `playerStates`.
+   */
+  times?: Record<string, number>;
 }
 
 /** Why the losing player lost the match. */
