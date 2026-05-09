@@ -14,8 +14,12 @@ export interface MultiplayerCallbacks {
   onGameOver: (data?: GameOverData) => void;
   /** Called when the opponent disconnects (concedes). */
   onOpponentDisconnect: () => void;
-  /** Called when the opponent is reconnecting (banner shown). */
-  onOpponentReconnecting: () => void;
+  /**
+   * Called when the opponent's socket drops mid-match. `timeoutMs` is the
+   * disconnected opponent's remaining stamina — i.e. how long they have to
+   * reconnect before they lose by time-out.
+   */
+  onOpponentReconnecting: (data: { timeoutMs: number }) => void;
   /** Called when the opponent has reconnected (banner hidden). */
   onOpponentReconnected: () => void;
 }
@@ -58,8 +62,8 @@ export class MultiplayerSync {
       callbacks.onOpponentDisconnect();
     });
 
-    client.onOpponentReconnecting(() => {
-      callbacks.onOpponentReconnecting();
+    client.onOpponentReconnecting((data) => {
+      callbacks.onOpponentReconnecting(data);
     });
 
     client.onOpponentReconnected(() => {

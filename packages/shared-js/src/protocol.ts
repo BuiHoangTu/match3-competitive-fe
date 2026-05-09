@@ -174,13 +174,6 @@ export type LoseReason = "time" | "hp";
 /** Payload of the server → client "game_over" event. */
 export interface GameOverPayload {
   /**
-   * Socket ID of the player whose clock ran out, if applicable.
-   * @deprecated Use `loserId` + `loserReason` instead. Retained so the
-   *   backend / game-view continue to compile until they migrate. Will be
-   *   removed once both call-site batches land.
-   */
-  loserTimeUp?: string;
-  /**
    * Socket ID of the losing player (covers both stamina-out and HP-out
    * cases). Pair with `loserReason` to know which condition triggered.
    * Optional during the migration window — once all emitters set it, drop
@@ -188,8 +181,8 @@ export interface GameOverPayload {
    */
   loserId?: string;
   /**
-   * Why the loser lost. `"time"` ↔ stamina hit zero (was `loserTimeUp`),
-   * `"hp"` ↔ health hit zero (new in the player-stats system).
+   * Why the loser lost. `"time"` ↔ stamina hit zero, `"hp"` ↔ health hit
+   * zero (player-stats system).
    */
   loserReason?: LoseReason;
   /** Per-player state at game end. Replaces the old `times` field. */

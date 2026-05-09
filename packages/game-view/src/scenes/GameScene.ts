@@ -205,6 +205,38 @@ export class GameScene extends Phaser.Scene {
           ? (rejoin.playerStates[opponentId]?.stamina ?? TURN_TIME_MS)
           : TURN_TIME_MS;
       this.myTurn = rejoin.activePlayerId === rejoin.myPlayerId;
+
+      // Restore full PlayerStats into the controller when the rejoin payload
+      // carries the rich shape (turn_based). For pve, `playerStates` only
+      // carries stamina, so the move-replay loop above is the source of
+      // truth for HP/Mana/Lv — skip the setter when fields are missing.
+      const isFullPlayerStats = (
+        ps: unknown
+      ): ps is PlayerStats => {
+        if (!ps || typeof ps !== "object") return false;
+        const p = ps as Record<string, unknown>;
+        return (
+          typeof p.health === "number"
+          && typeof p.maxHealth === "number"
+          && typeof p.mana === "number"
+          && typeof p.maxMana === "number"
+          && typeof p.stamina === "number"
+          && typeof p.maxStamina === "number"
+          && typeof p.lv === "number"
+          && typeof p.exp === "number"
+          && typeof p.atk === "number"
+        );
+      };
+      const mineFull = rejoin.playerStates[rejoin.myPlayerId];
+      if (isFullPlayerStats(mineFull)) {
+        this.ctrl.setSelfStats(mineFull);
+      }
+      if (opponentId !== undefined) {
+        const oppFull = rejoin.playerStates[opponentId];
+        if (isFullPlayerStats(oppFull)) {
+          this.ctrl.setOpponentStats(oppFull);
+        }
+      }
     } else if (this.mode !== "solo") {
       this.myTimeMs = TURN_TIME_MS;
       this.opponentTimeMs = TURN_TIME_MS;
@@ -304,25 +336,6 @@ export class GameScene extends Phaser.Scene {
       }
       if (oppId && ips[oppId]) {
         const stats = ips[oppId]! as PlayerStats;
-        this.ctrl.setOpponentStats(stats);
-        this.opponentTimeMs = stats.stamina;
-        this.hud.setOpponentStats(stats);
-      }
-      this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
-    }
-
-    if (this.mode === "turn_based" && rejoin?.playerStates) {
-      const ps = rejoin.playerStates;
-      const myId = rejoin.myPlayerId;
-      const oppId = Object.keys(ps).find((id) => id !== myId);
-      if (ps[myId]) {
-        const stats = ps[myId]! as PlayerStats;
-        this.ctrl.setSelfStats(stats);
-        this.myTimeMs = stats.stamina;
-        this.hud.setSelfStats(stats);
-      }
-      if (oppId && ps[oppId]) {
-        const stats = ps[oppId]! as PlayerStats;
         this.ctrl.setOpponentStats(stats);
         this.opponentTimeMs = stats.stamina;
         this.hud.setOpponentStats(stats);
@@ -544,13 +557,8 @@ export class GameScene extends Phaser.Scene {
         this.hud.updateTurnIndicator(this.myTurn);
       },
       onGameOver: (gameOverData?: GameOverData) => {
-        // Migrate to the new `loserReason` / `loserId` fields. Continue to
-        // honour the deprecated `loserTimeUp` socket-id as a fallback so
-        // older server builds keep working during the rollout.
-        const loserId =
-          gameOverData?.loserId ?? gameOverData?.loserTimeUp ?? null;
-        const reason = gameOverData?.loserReason
-          ?? (gameOverData?.loserTimeUp ? "time" : undefined);
+        const loserId = gameOverData?.loserId ?? null;
+        const reason = gameOverData?.loserReason;
 
         // Push final stats to bars so the HUD reflects the end state.
         if (gameOverData?.playerStates) {

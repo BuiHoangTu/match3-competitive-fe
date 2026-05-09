@@ -5,7 +5,6 @@ import type {
   TurnChangedPayload,
   GameOverPayload,
   RejoinOkPayload,
-  OpponentReconnectingPayload,
 } from "@match3/shared-js/protocol.js";
 import { GameBridge } from "../bridge/GameBridge.js";
 
@@ -295,7 +294,12 @@ export class SyncClient {
     this.socket.on("opponent_disconnected", cb);
   }
 
-  onOpponentReconnecting(cb: (data: OpponentReconnectingPayload) => void): void {
+  /**
+   * Fired on the still-connected client when the opponent's socket drops.
+   * `timeoutMs` is the disconnected player's remaining stamina — i.e. how
+   * long they have to reconnect before they lose by time-out.
+   */
+  onOpponentReconnecting(cb: (data: { timeoutMs: number }) => void): void {
     if (!this.socket) throw new Error("Not connected");
     this.socket.on("opponent_reconnecting", cb);
   }
