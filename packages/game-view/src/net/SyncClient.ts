@@ -215,12 +215,17 @@ export class SyncClient {
 
   /**
    * Tell the server the local engine has finished the match (HP-zero etc.)
-   * so it can mark the room over and clear the user's active-match slot.
-   * Used in pve where the server doesn't track HP itself. No-op when not
-   * connected.
+   * so it can mark the room over and emit `game_over` back. Used in pve
+   * where the server doesn't track HP itself; the client supplies the
+   * outcome and the server propagates it as the canonical match-end signal.
+   * No-op when not connected.
    */
-  emitMatchComplete(): void {
-    this.socket?.emit("match_complete");
+  emitMatchComplete(payload?: {
+    loserId?: string;
+    loserReason?: "hp" | "time";
+    scores?: { [playerId: string]: number };
+  }): void {
+    this.socket?.emit("match_complete", payload ?? {});
   }
 
   /**

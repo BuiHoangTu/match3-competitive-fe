@@ -88,6 +88,7 @@ export class GameScene extends Phaser.Scene {
   // Mode & turn state
   private mode: GameMode = "solo";
   private myPlayerId: string | null = null;
+  private opponentId: string | null = null;
   private myTurn = true;
 
   // Separate score counters (ctrl.score accumulates total from both players)
@@ -138,6 +139,7 @@ export class GameScene extends Phaser.Scene {
     this.syncClient = data?.syncClient ?? null;
     this.mode = (data?.mode as GameMode) ?? "solo";
     this.myPlayerId = data?.myPlayerId ?? null;
+    this.opponentId = data?.opponentId ?? null;
     this.soloUserId = this.mode === "solo" ? data?.soloUserId ?? null : null;
 
     this.myScore = 0;
@@ -508,22 +510,23 @@ export class GameScene extends Phaser.Scene {
           }
         }
 
-        if (loserId !== null && reason === "time") {
-          const won = loserId !== this.myPlayerId;
-          const myRemaining =
-            gameOverData?.playerStates?.[this.myPlayerId ?? ""]?.stamina ?? 0;
-          const timeBonus = won
-            ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
-            : 0;
-          this.endGame(timeBonus);
-        } else {
-          // "hp" loss or unspecified reason — no time bonus.
-          this.endGame(0);
-        }
+        const won = loserId !== null && loserId !== this.myPlayerId;
+        // Time bonus = remaining stamina × BONUS_PER_SECOND, awarded when
+        // you win. pve doesn't track stamina server-side for HP-loss paths,
+        // so fall back to the local mirror (this.myTimeMs).
+        const myRemaining =
+          gameOverData?.playerStates?.[this.myPlayerId ?? ""]?.stamina
+          ?? this.myTimeMs;
+        const eligibleForBonus =
+          won && (reason === "time" || this.mode === "pve");
+        const timeBonus = eligibleForBonus
+          ? Math.floor(myRemaining / 1000) * BONUS_PER_SECOND
+          : 0;
+        this.endGame(timeBonus, /* fromServer */ true);
       },
       onOpponentDisconnect: () => {
         const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
-        this.endGame(bonus);
+        this.endGame(bonus, /* fromServer */ true);
       },
       onOpponentReconnecting: () => {
         this.hud.showReconnectingBanner();
@@ -599,15 +602,19 @@ export class GameScene extends Phaser.Scene {
     }
     this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
 
-    // End conditions: HP=0 or stamina=0. Self-death = loss; opponent-death
-    // (pve) = win with time bonus.
+    // End conditions: HP=0 or stamina=0. solo ends locally; pve routes
+    // through the server via match_complete → game_over so the client
+    // exits only on a server-confirmed match-end.
     if (isDead(this.ctrl.getSelfStats())) {
-      this.endGame(0);
+      if (this.mode === "pve") {
+        this.signalPveMatchComplete("self");
+      } else {
+        this.endGame(0);
+      }
       return;
     }
     if (this.mode === "pve" && isDead(this.ctrl.getOpponentStats())) {
-      const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
-      this.endGame(bonus);
+      this.signalPveMatchComplete("opponent");
       return;
     }
   }
@@ -616,8 +623,24 @@ export class GameScene extends Phaser.Scene {
   // Game over
   // -------------------------------------------------------------------------
 
-  private endGame(timeBonus = 0): void {
+  /**
+   * End the match locally and emit `matchEnded` to the shell.
+   *
+   * @param timeBonus  bonus points awarded to the winner (used for time-up wins)
+   * @param fromServer pass `true` only when called from the server's
+   *   `game_over` event handler. In `turn_based` and `pve` modes the server
+   *   is authoritative — local triggers (HP-zero in the local controller,
+   *   etc.) signal the server via `match_complete` and wait for `game_over`
+   *   to come back. Only `solo` ends locally.
+   */
+  private endGame(timeBonus = 0, fromServer = false): void {
     if (this.state === "game_over") return;
+    if (this.mode !== "solo" && !fromServer) {
+      // pve / turn_based are server-authoritative. The local engine's stat
+      // math is for animation only; the match-end decision comes back via
+      // game_over.
+      return;
+    }
     this.state = "game_over";
     this.stopTurnTimer();
 
@@ -652,14 +675,9 @@ export class GameScene extends Phaser.Scene {
       opponent: finalOpponentScore,
     });
 
-    // pve: tell the server the match is done so it cleans up the room
-    // immediately. Without this, /matchmaking/status would keep reporting
-    // the room active until the disconnect grace timer fires, and the next
-    // "Play Again" tap auto-resumes the dead room. turn_based ends through
-    // the judge already; solo has no socket to notify.
-    if (this.mode === "pve" && this.syncClient) {
-      this.syncClient.emitMatchComplete();
-    }
+    // pve / turn_based: server already signalled `game_over` (we got here
+    // via onGameOver / signalPveMatchComplete → game_over → onGameOver), so
+    // no extra notification is needed. solo has no server.
 
     // A09: ResultScene is retired. The shell handles the result screen natively
     // after receiving the matchEnded bridge message above.
@@ -762,15 +780,16 @@ export class GameScene extends Phaser.Scene {
     this.state = "idle";
 
     // pve / solo: HP-zero on either side ends the match immediately so the
-    // scene doesn't keep accepting input after a fatal cascade.
+    // scene doesn't keep accepting input after a fatal cascade. pve routes
+    // through the server (match_complete → game_over) so the client only
+    // navigates on the server-driven onGameOver event. solo has no server.
     if (this.mode === "pve") {
       if (isDead(this.ctrl.getOpponentStats())) {
-        const bonus = Math.floor(this.myTimeMs / 1000) * BONUS_PER_SECOND;
-        this.endGame(bonus);
+        this.signalPveMatchComplete("opponent");
         return true;
       }
       if (isDead(this.ctrl.getSelfStats())) {
-        this.endGame(0);
+        this.signalPveMatchComplete("self");
         return true;
       }
     } else if (this.mode === "solo") {
@@ -781,6 +800,30 @@ export class GameScene extends Phaser.Scene {
     }
 
     return true;
+  }
+
+  /**
+   * pve only: tell the server the local engine has decided the match ended
+   * by HP-zero. The server emits `game_over` back to the room, which the
+   * onGameOver handler converts into a normal `endGame(_, true)` call.
+   * Disables further input immediately so the user doesn't get to make a
+   * move in the brief gap before game_over arrives.
+   */
+  private signalPveMatchComplete(loser: "self" | "opponent"): void {
+    if (this.state === "game_over") return;
+    if (!this.syncClient || !this.myPlayerId) return;
+    const loserId =
+      loser === "self" ? this.myPlayerId : (this.opponentId ?? "BOT");
+    // Stop accepting moves while we wait for game_over.
+    this.inputController.detachPointer();
+    this.syncClient.emitMatchComplete({
+      loserId,
+      loserReason: "hp",
+      scores: {
+        [this.myPlayerId]: this.myScore,
+        [this.opponentId ?? "BOT"]: this.opponentScore,
+      },
+    });
   }
 
   private async playResolveSteps(steps: ResolvedStep[]): Promise<void> {
