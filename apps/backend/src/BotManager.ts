@@ -54,17 +54,13 @@ export class BotManager {
 
   scheduleBotTurn(roomId: string, humanSocketId: string): void {
     setTimeout(() => {
-      const humanSocket = this.io.sockets.sockets.get(humanSocketId);
-      if (!humanSocket || !humanSocket.connected) {
-        this.timerManager.stopTimer(roomId);
-        this.cleanup(roomId);
-        this.timerManager.scheduleRoomClose(roomId);
-        return;
-      }
-
+      // Don't bail when humanSocket is offline — the bot keeps playing while
+      // the human is disconnected, and on rejoin the client replays the move
+      // log. If the human never reconnects, stamina ticks down naturally and
+      // ends the match via TimerManager.
       const botState = this.states.get(roomId);
       const room = this.roomManager.getRoom(roomId);
-      if (!botState || !room || room.activePlayer !== BOT_ID) return;
+      if (!botState || !room || room.status === "over" || room.activePlayer !== BOT_ID) return;
 
       const move = this.botPlayer.findBestMove(botState.board.grid);
       if (!move) return;
@@ -78,7 +74,8 @@ export class BotManager {
       const botMove = { playerId: BOT_ID, r1, c1, r2, c2, timestamp: Date.now() };
       this.roomManager.addMove(roomId, botMove);
 
-      humanSocket.emit("opponent_move", botMove);
+      // Emit through io.to() so it's a no-op when the human socket is gone.
+      this.io.to(humanSocketId).emit("opponent_move", botMove);
 
       room.activePlayer = humanSocketId;
       const times = this.timerManager.getTimes(roomId);

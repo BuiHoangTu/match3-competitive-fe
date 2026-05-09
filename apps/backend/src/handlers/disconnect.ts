@@ -1,14 +1,16 @@
 /**
  * socket.on("disconnect", ...) handler.
- * Handles graceful disconnect with rejoin window for PvP rooms,
- * and immediate teardown for bot rooms.
+ *
+ * Both bot rooms and PvP rooms: leave the room intact and the disconnected
+ * player's slot in place. The active player's stamina keeps ticking; if they
+ * don't reconnect via /matchmaking/resume before stamina runs out, they lose
+ * normally via match_ended. No artificial grace window, no DRAW outcome —
+ * stamina expiry is the natural end-of-match path.
  */
 
 import type { Socket } from "socket.io";
 import type { ServerContext } from "../context";
-import { REJOIN_WINDOW_MS } from "../constants";
 import { logEvent } from "../logger";
-import { recordMatchEnd, roomCleanup } from "../matchEnd";
 
 export function registerDisconnectHandler(socket: Socket, ctx: ServerContext): void {
   socket.on("disconnect", () => {
@@ -16,38 +18,9 @@ export function registerDisconnectHandler(socket: Socket, ctx: ServerContext): v
     logEvent("disconnect", { playerId: socket.id });
 
     const activeRoom = ctx.roomManager.getRoomByPlayer(socket.id);
-    if (activeRoom) {
-      if (ctx.botManager.isBotRoom(activeRoom.id)) {
-        ctx.timerManager.stopTimer(activeRoom.id);
-        roomCleanup(ctx, activeRoom.id);
-        ctx.timerManager.scheduleRoomClose(activeRoom.id);
-        ctx.roomManager.removePlayer(socket.id);
-        logEvent("match_ended", { matchId: activeRoom.id, reason: "human_left_bot_room" });
-      } else {
-        socket.to(activeRoom.id).emit("opponent_reconnecting", {
-          timeoutMs: REJOIN_WINDOW_MS,
-        });
-
-        const gracePending = setTimeout(() => {
-          ctx.disconnectedPlayers.delete(socket.id);
-          const room = ctx.roomManager.getRoom(activeRoom.id);
-          if (room && room.players.includes(socket.id)) {
-            ctx.timerManager.stopTimer(activeRoom.id);
-            room.status = "over";
-            ctx.io.to(activeRoom.id).emit("game_over", {});
-            void recordMatchEnd(ctx, activeRoom.id, room, 0, 0, "DRAW");
-            ctx.timerManager.scheduleRoomClose(activeRoom.id, (id) =>
-              ctx.rejoinManager.cleanupRoom(id)
-            );
-            ctx.roomManager.removePlayer(socket.id);
-            logEvent("match_ended", { matchId: activeRoom.id, reason: "rejoin_window_expired" });
-          }
-        }, REJOIN_WINDOW_MS);
-
-        ctx.disconnectedPlayers.set(socket.id, gracePending);
-      }
-    } else {
+    if (!activeRoom) {
       ctx.roomManager.removePlayer(socket.id);
     }
+    // Active room: do nothing. Stamina is the de-facto rejoin window.
   });
 }

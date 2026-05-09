@@ -652,6 +652,15 @@ export class GameScene extends Phaser.Scene {
       opponent: finalOpponentScore,
     });
 
+    // pve: tell the server the match is done so it cleans up the room
+    // immediately. Without this, /matchmaking/status would keep reporting
+    // the room active until the disconnect grace timer fires, and the next
+    // "Play Again" tap auto-resumes the dead room. turn_based ends through
+    // the judge already; solo has no socket to notify.
+    if (this.mode === "pve" && this.syncClient) {
+      this.syncClient.emitMatchComplete();
+    }
+
     // A09: ResultScene is retired. The shell handles the result screen natively
     // after receiving the matchEnded bridge message above.
     // GameScene stays in game_over state (input already disabled above).

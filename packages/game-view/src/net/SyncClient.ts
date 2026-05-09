@@ -214,6 +214,16 @@ export class SyncClient {
   }
 
   /**
+   * Tell the server the local engine has finished the match (HP-zero etc.)
+   * so it can mark the room over and clear the user's active-match slot.
+   * Used in pve where the server doesn't track HP itself. No-op when not
+   * connected.
+   */
+  emitMatchComplete(): void {
+    this.socket?.emit("match_complete");
+  }
+
+  /**
    * Register a match_found callback. May be called before OR after connect();
    * the internal data-capture is wired up at socket-creation time, so this
    * is purely a callback registration with no socket dependency.
