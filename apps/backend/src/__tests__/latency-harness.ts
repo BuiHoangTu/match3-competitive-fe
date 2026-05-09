@@ -7,11 +7,10 @@
  * board state from both clients so determinism and reconnection tests can
  * run against it.
  *
- * After the server-authoritative PvP refactor (turn_based rooms), the server
- * now emits `move_resolved { finalGrid, ... }` instead of relying on clients
- * to locally reconstruct the board via `opponent_move`. Both clients track
- * the server-broadcast finalGrid — desync is structurally impossible since
- * both receive the exact same payload. The test validates this contract.
+ * The server validates and resolves each turn privately, then relays only the
+ * accepted move. The harness mirrors the game-view contract by resolving the
+ * cascades locally on both clients and asserting their board views remain
+ * byte-identical under simulated latency.
  *
  * Tuning: set the env var `SIM_RTT_MS` (0 / 100 / 300 / 500). When imported
  * programmatically the same value can be passed via the `rttMs` option.
@@ -20,12 +19,12 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
-import { createBoard } from "@match3/shared-js/engine/Board";
-import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
+import { createStatefulRng } from "@match3/shared-js/engine/rng";
+import { findMatches, resolveBoardAnimated } from "@match3/shared-js/engine/MatchEngine";
 import type {
   MatchFoundPayload,
   TurnChangedPayload,
-  MoveResolvedPayload,
 } from "@match3/shared-js/protocol";
 
 export interface LatencyHarnessOptions {
@@ -39,9 +38,8 @@ export interface LatencyHarnessOptions {
 
 export interface LatencyHarnessResult {
   /**
-   * Final board grid as seen by each client (the server-broadcast finalGrid
-   * from the last move_resolved event). Both should be identical — the server
-   * emits the same authoritative payload to both sockets.
+   * Final board grid as seen by each client after locally resolving every
+   * server-accepted move.
    */
   boardA: number[][];
   boardB: number[][];
@@ -129,9 +127,9 @@ function wrapWithLatency(socket: ClientSocket, rttMs: number): DelayedClient {
 
 /**
  * Drives a deterministic scripted match: for each turn, finds a swap whose
- * resulting board produces a match, sends it to the server, and waits for
- * the server-broadcast `move_resolved` echo. Both clients track the
- * server-authoritative `finalGrid` from `move_resolved` — no local replay.
+ * resulting board produces a match, sends it to the server, waits for the
+ * accepted turn change, and resolves the same move locally on both client
+ * board views.
  */
 export async function runLatencyHarness(
   opts: LatencyHarnessOptions = {}
@@ -224,16 +222,7 @@ export async function runLatencyHarness(
       ? mB.boardGrid.map((r) => [...r])
       : createBoard(seed).grid.map((r) => [...r]);
 
-    // Wire move_resolved — both clients update their grid from the server payload.
-    // This is the new authoritative-state contract: no local board computation.
-    a.on("move_resolved", (...args: unknown[]) => {
-      const p = args[0] as MoveResolvedPayload;
-      boardA = p.finalGrid.map((r) => [...r]);
-    });
-    b.on("move_resolved", (...args: unknown[]) => {
-      const p = args[0] as MoveResolvedPayload;
-      boardB = p.finalGrid.map((r) => [...r]);
-    });
+    let rngState = mA.rngState ?? seed;
 
     // Helper: returns a promise resolving when `turn_changed` fires with
     // `activePlayerId === expected` on the given client.
@@ -323,18 +312,25 @@ export async function runLatencyHarness(
       const winner = await Promise.race([turnChangedPromise, gameOverPromise]);
       const t1 = Date.now();
 
+      const boardObj = { grid: currentBoard, width: 8, height: 8 };
+      const swapped = swapTiles(boardObj, swap.r1, swap.c1, swap.r2, swap.c2);
+      const rng = createStatefulRng(rngState);
+      const { grid: finalGrid } = resolveBoardAnimated(swapped.grid, rng.next);
+      rngState = rng.state();
+      boardA = finalGrid.map((r) => [...r]);
+      boardB = finalGrid.map((r) => [...r]);
+
       if (winner === "game_over") {
         gameOver = true;
         movesPlayed++;
-        // Wait for any in-flight move_resolved events to settle before we
-        // capture the final boardA/boardB state at return time.
+        // Wait for any in-flight relayed move to settle before returning.
         await new Promise((r) => setTimeout(r, rttMs + 50));
         break;
       }
 
       roundtripsMs.push(t1 - t0);
 
-      // Give the move_resolved event time to traverse half-latency to both clients.
+      // Give the relayed move event time to traverse half-latency to both clients.
       await new Promise((r) => setTimeout(r, rttMs + 20));
 
       movesPlayed++;

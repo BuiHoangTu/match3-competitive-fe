@@ -1,8 +1,8 @@
 /**
- * Integration test: playerStates field on move_resolved and rejoin_ok.
+ * Integration test: playerStates field on turn_changed and rejoin_ok.
  *
  * Two real Socket.IO clients, one player makes a move; both should receive
- * move_resolved with a well-formed playerStates map using the full PlayerStats
+ * turn_changed with a well-formed playerStates map using the full PlayerStats
  * shape (health <= maxHealth, mana >= 0, stamina <= PLAYER_TIME_MS and > 0).
  *
  * Also confirms:
@@ -121,7 +121,7 @@ describe("playerStates integration", () => {
     return { srv, sockA, sockB, mA, mB };
   }
 
-  it("move_resolved includes full PlayerStats for both players with valid ranges", async () => {
+  it("turn_changed includes full PlayerStats for both players with valid ranges", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const swap = findMatchingSwap(mA.boardGrid!);
@@ -140,17 +140,17 @@ describe("playerStates integration", () => {
       atk: number;
     };
 
-    const [resolvedA, resolvedB] = await Promise.all([
-      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockA, "move_resolved"),
-      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockB, "move_resolved"),
+    const [changedA, changedB] = await Promise.all([
+      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockA, "turn_changed"),
+      waitForEvent<{ playerStates: Record<string, FullPlayerState> }>(sockB, "turn_changed"),
       (async () => { firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap }); })(),
     ]);
 
     // Both clients see the same playerStates shape
-    expect(JSON.stringify(resolvedA.playerStates)).toBe(JSON.stringify(resolvedB.playerStates));
+    expect(JSON.stringify(changedA.playerStates)).toBe(JSON.stringify(changedB.playerStates));
 
     // Full shape validation: health/mana/stamina within bounds, level/exp present
-    for (const ps of Object.values(resolvedA.playerStates)) {
+    for (const ps of Object.values(changedA.playerStates)) {
       expect(ps.health).toBeGreaterThan(0);
       expect(ps.health).toBeLessThanOrEqual(ps.maxHealth);
       expect(ps.maxHealth).toBe(DEFAULTS.HEALTH);

@@ -4,7 +4,14 @@
  * wire format stays in sync across both packages.
  */
 
-/** A player's swap move — sent by client and relayed by server. */
+/**
+ * A player's swap move.
+ *
+ * Client → server submissions use client-local timestamp values only for
+ * diagnostics. Server → client relays set `timestamp` to the server receipt
+ * time, so clients can reconcile the chess clock against when the move
+ * actually reached the authoritative process.
+ */
 export interface Move {
   playerId: string;
   r1: number;
@@ -41,8 +48,9 @@ export interface ResolvedStepWire {
 }
 
 /**
- * Emitted to BOTH sockets in a turn_based room after a valid move resolves.
- * Clients use `steps` to drive animations and `finalGrid` to sync board truth.
+ * Internal/server-authoritative resolve payload. This is kept for backend
+ * service tests and snapshot bookkeeping; normal hot-path clients animate
+ * locally from the accepted `Move` relay and do not receive cascade steps.
  */
 export interface MoveResolvedPayload {
   /** The player who made the move. */
@@ -51,6 +59,8 @@ export interface MoveResolvedPayload {
   c1: number;
   r2: number;
   c2: number;
+  /** Server wall-clock ms when the move event reached the backend. */
+  serverReceivedAt?: number;
   /** Cascade-by-cascade animation data. Non-empty — 0-match swaps are rejected. */
   steps: ResolvedStepWire[];
   /** Final board after all cascades have settled. Authoritative truth. */
@@ -82,8 +92,8 @@ export interface MatchFoundPayload {
   rejoinToken: string;
   /**
    * turn_based only: authoritative initial board grid.
-   * Clients should initialise GameLoopController from this snapshot rather than
-   * seeding locally, for symmetry with the rejoin path.
+   * Clients initialise GameLoopController from this snapshot when present,
+   * then animate hot-path moves locally from server-accepted move relays.
    */
   boardGrid?: number[][];
   /**
@@ -98,8 +108,8 @@ export interface MatchFoundPayload {
   originalSeed?: number;
   /**
    * pve only: the move log so the client can replay on reconnect. Empty on
-   * first connect. Not present for turn_based (server drives resolution
-   * authoritatively via move_resolved events).
+   * first connect. Not present for turn_based (server validates privately;
+   * clients animate accepted moves locally).
    */
   moves?: Move[];
   /**
@@ -143,6 +153,8 @@ export interface PlayerState {
 /** Payload of the server → client "turn_changed" event. */
 export interface TurnChangedPayload {
   activePlayerId: string;
+  /** Server wall-clock ms for the move that caused this turn change. */
+  serverReceivedAt?: number;
   /**
    * Per-player state after this turn change. The judge (turn_based) emits the
    * full shape; the legacy pve relay path emits only the stamina-bearing

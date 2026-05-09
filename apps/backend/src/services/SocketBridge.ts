@@ -37,6 +37,7 @@ export class SocketBridge {
     data: { roomId: string; r1: number; c1: number; r2: number; c2: number }
   ): boolean {
     if (!this.service.hasRoom(data.roomId)) return false;
+    const serverReceivedAt = Date.now();
     logEvent("move_submitted", {
       matchId: data.roomId,
       playerId: socket.id,
@@ -45,7 +46,15 @@ export class SocketBridge {
       r2: data.r2,
       c2: data.c2,
     });
-    this.service.submitMove(data.roomId, socket.id, data.r1, data.c1, data.r2, data.c2);
+    this.service.submitMove(
+      data.roomId,
+      socket.id,
+      data.r1,
+      data.c1,
+      data.r2,
+      data.c2,
+      serverReceivedAt
+    );
     return true;
   }
 
@@ -95,25 +104,36 @@ export class SocketBridge {
     });
 
     this.service.on("move_resolved", (payload) => {
-      const { roomId, ...wirePayload } = payload;
       // Keep the room's board state in sync so snapshot-rejoin (D02 path) and
       // existing handler code that reads from room.boardGrid still works.
-      const room = this.ctx.roomManager.getRoom(roomId);
+      const room = this.ctx.roomManager.getRoom(payload.roomId);
       if (room) {
         room.boardGrid = payload.finalGrid;
         room.rngState = payload.rngState;
         room.scores = { ...payload.scores };
       }
-      this.io.to(roomId).emit("move_resolved", wirePayload);
-      // Also keep move list for debug/idle tracking.
-      this.ctx.roomManager.addMove(roomId, {
+
+      const move = {
         playerId: payload.playerId,
         r1: payload.r1,
         c1: payload.c1,
         r2: payload.r2,
         c2: payload.c2,
-        timestamp: Date.now(),
-      });
+        timestamp: payload.serverReceivedAt,
+      };
+
+      // Hot path: clients animate cascades locally from the accepted move.
+      // The judge still computes cascades privately for validation, scoring,
+      // HP death, and snapshot rejoin, but cascade steps/finalGrid stay off
+      // the socket during normal play.
+      if (room) {
+        for (const pid of room.players) {
+          if (pid !== payload.playerId) this.io.to(pid).emit("opponent_move", move);
+        }
+      }
+
+      // Also keep move list for debug/idle tracking.
+      this.ctx.roomManager.addMove(payload.roomId, move);
     });
 
     this.service.on("move_rejected", (payload) => {
@@ -126,12 +146,16 @@ export class SocketBridge {
     });
 
     this.service.on("turn_changed", (payload) => {
-      const { roomId, activePlayer, playerStates } = payload;
+      const { roomId, activePlayer, playerStates, serverReceivedAt } = payload;
       // Keep Room.activePlayer in sync.
       const room = this.ctx.roomManager.getRoom(roomId);
       if (room) room.activePlayer = activePlayer;
       // Emit wire event with playerStates replacing old `times` field.
-      this.io.to(roomId).emit("turn_changed", { activePlayerId: activePlayer, playerStates });
+      this.io.to(roomId).emit("turn_changed", {
+        activePlayerId: activePlayer,
+        playerStates,
+        serverReceivedAt,
+      });
     });
 
     this.service.on("match_ended", (payload) => {

@@ -1,13 +1,12 @@
 /**
- * T-v0.5-12 — Server-authoritative board-state contract.
+ * T-v0.5-12 — Accepted-move determinism contract.
  *
- * After the server-authoritative PvP refactor, the server holds the
- * canonical board for turn_based rooms and broadcasts `move_resolved`
- * with `finalGrid` to both sockets. Desync is structurally impossible —
- * both clients receive the identical server payload.
+ * The server holds the canonical board for turn_based rooms and validates each
+ * move privately. Clients receive only accepted moves on the hot path and
+ * resolve cascades locally from the same seed/RNG state.
  *
  * These tests validate:
- *  1. Both clients' last-seen boardGrid (from move_resolved) are byte-identical.
+ *  1. Both clients' locally-resolved boardGrid values are byte-identical.
  *  2. Same originalSeed + same move sequence → byte-identical boardGrid and
  *     rngState at every step (determinism lives in the server engine, not in
  *     clients separately running the RNG).
@@ -25,9 +24,9 @@ const ITERATIONS = 100;
 const QUICK_MOVES = 5;
 const QUICK_RTT_MS = 50;
 
-describe("T-v0.5-12 server-authoritative board-state contract", () => {
+describe("T-v0.5-12 accepted-move determinism contract", () => {
   it(
-    "one representative 300 ms RTT / 10-move match: both clients see identical finalGrid",
+    "one representative 300 ms RTT / 10-move match: both clients see identical final board",
     async () => {
       const res = await runLatencyHarness({ rttMs: 300, moveCount: 10 });
       expect(res.boardA).toEqual(res.boardB);
@@ -36,7 +35,7 @@ describe("T-v0.5-12 server-authoritative board-state contract", () => {
   );
 
   it(
-    `${ITERATIONS} back-to-back matches: server-broadcast move_resolved.finalGrid is identical for both clients`,
+    `${ITERATIONS} back-to-back matches: locally-resolved accepted moves are identical for both clients`,
     async () => {
       for (let i = 0; i < ITERATIONS; i++) {
         const res = await runLatencyHarness({
@@ -45,7 +44,7 @@ describe("T-v0.5-12 server-authoritative board-state contract", () => {
         });
         if (JSON.stringify(res.boardA) !== JSON.stringify(res.boardB)) {
           throw new Error(
-            `finalGrid mismatch at iteration ${i} (seed=${res.seed}):\n` +
+            `final board mismatch at iteration ${i} (seed=${res.seed}):\n` +
               `A=${JSON.stringify(res.boardA)}\n` +
               `B=${JSON.stringify(res.boardB)}`
           );

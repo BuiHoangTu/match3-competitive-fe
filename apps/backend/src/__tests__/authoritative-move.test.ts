@@ -3,9 +3,8 @@
  *
  * Validates:
  * - Invalid swap (no match) is rejected with move_rejected { no_match }
- * - Valid swap broadcasts move_resolved to BOTH sockets
- * - move_resolved.finalGrid matches what resolveBoardAnimated would produce
- * - Cascade scoring is correct
+ * - Valid swap relays the accepted move to the opponent only
+ * - Cascades remain server-private on the hot socket path
  * - Snapshot rejoin: boardGrid + rngState in rejoin_ok match live room state
  * - Server determinism: two independent simulations from the same seed + moves
  *   produce byte-identical boardGrid and rngState at every step
@@ -16,12 +15,12 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
-import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
+import { swapTiles } from "@match3/shared-js/engine/Board";
 import { createStatefulRng } from "@match3/shared-js/engine/rng";
 import { findMatches, resolveBoardAnimated } from "@match3/shared-js/engine/MatchEngine";
 import type {
   MatchFoundPayload,
-  MoveResolvedPayload,
+  Move,
 } from "@match3/shared-js/protocol";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -183,61 +182,57 @@ describe("server-authoritative PvP move handler", () => {
     expect(JSON.stringify(mA.boardGrid)).toBe(JSON.stringify(mB.boardGrid));
   });
 
-  it("valid move broadcasts move_resolved to BOTH sockets", async () => {
+  it("valid move relays opponent_move to the opposing socket only", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
+    const otherSocket = firstPlayerSocket === sockA ? sockB : sockA;
     const firstPlayerBoard = mA.boardGrid!;
     const swap = findMatchingSwap(firstPlayerBoard);
     if (!swap) throw new Error("No matching swap found");
 
-    // Both sockets should receive move_resolved
-    const [resolvedA, resolvedB] = await Promise.all([
-      waitForEvent<MoveResolvedPayload>(sockA, "move_resolved"),
-      waitForEvent<MoveResolvedPayload>(sockB, "move_resolved"),
+    let senderGotOpponentMove = false;
+    firstPlayerSocket.once("opponent_move", () => {
+      senderGotOpponentMove = true;
+    });
+
+    const [relayed] = await Promise.all([
+      waitForEvent<Move>(otherSocket, "opponent_move"),
       (async () => {
         firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap });
       })(),
     ]);
 
-    expect(resolvedA.playerId).toBeDefined();
-    expect(resolvedB.playerId).toBeDefined();
-    // Both clients received the SAME finalGrid
-    expect(JSON.stringify(resolvedA.finalGrid)).toBe(JSON.stringify(resolvedB.finalGrid));
-    expect(resolvedA.finalGrid.length).toBe(8);
+    expect(relayed.playerId).toBe(firstPlayerSocket.id);
+    expect(relayed.r1).toBe(swap.r1);
+    expect(relayed.c1).toBe(swap.c1);
+    expect(relayed.r2).toBe(swap.r2);
+    expect(relayed.c2).toBe(swap.c2);
+    expect(typeof relayed.timestamp).toBe("number");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(senderGotOpponentMove).toBe(false);
   });
 
-  it("move_resolved.finalGrid matches server-computed resolveBoardAnimated", async () => {
+  it("does not broadcast server cascade payloads on the hot path", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const grid = mA.boardGrid!;
     const swap = findMatchingSwap(grid);
     if (!swap) throw new Error("No matching swap found");
 
-    const resolvedPromise = waitForEvent<MoveResolvedPayload>(sockA, "move_resolved");
+    let sawMoveResolved = false;
+    sockA.once("move_resolved", () => {
+      sawMoveResolved = true;
+    });
+    sockB.once("move_resolved", () => {
+      sawMoveResolved = true;
+    });
+
+    const opponentSocket = firstPlayerSocket === sockA ? sockB : sockA;
+    const relayedPromise = waitForEvent<Move>(opponentSocket, "opponent_move");
     firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap });
-    const resolved = await resolvedPromise;
-
-    // Independently compute the expected result
-    const boardObj = { grid, width: 8, height: 8 };
-    const swapped = swapTiles(boardObj, swap.r1, swap.c1, swap.r2, swap.c2);
-    const rng = createStatefulRng(mA.originalSeed!);
-    const { grid: expectedGrid } = resolveBoardAnimated(swapped.grid, rng.next);
-
-    expect(resolved.finalGrid).toEqual(expectedGrid);
-  });
-
-  it("move_resolved.steps is non-empty (at least one cascade step)", async () => {
-    const { sockA, sockB, mA } = await setup();
-    const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
-    const swap = findMatchingSwap(mA.boardGrid!);
-    if (!swap) throw new Error("No matching swap found");
-
-    const resolvedPromise = waitForEvent<MoveResolvedPayload>(sockA, "move_resolved");
-    firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap });
-    const resolved = await resolvedPromise;
-
-    expect(resolved.steps.length).toBeGreaterThan(0);
-    expect(resolved.pointsEarned).toBeGreaterThan(0);
+    await relayedPromise;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sawMoveResolved).toBe(false);
   });
 
   it("invalid swap (no_match) emits move_rejected only to the offending socket", async () => {
@@ -280,7 +275,7 @@ describe("server-authoritative PvP move handler", () => {
     expect(rejected.reason).toBe("not_your_turn");
   });
 
-  it("scores accumulate correctly across two moves", async () => {
+  it("turn changes after each accepted move", async () => {
     const { sockA, sockB, mA } = await setup();
     const p1Socket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const p2Socket = p1Socket === sockA ? sockB : sockA;
@@ -290,26 +285,33 @@ describe("server-authoritative PvP move handler", () => {
     const swap1 = findMatchingSwap(currentGrid);
     if (!swap1) throw new Error("No swap1 found");
 
-    const resolved1Promise = waitForEvent<MoveResolvedPayload>(sockA, "move_resolved");
+    const turn1Promise = waitForEvent<{ activePlayerId: string; serverReceivedAt?: number }>(
+      sockA,
+      "turn_changed"
+    );
     p1Socket.emit("move", { roomId: mA.roomId, ...swap1 });
-    const resolved1 = await resolved1Promise;
+    const turn1 = await turn1Promise;
 
-    expect(resolved1.pointsEarned).toBeGreaterThan(0);
-    currentGrid = resolved1.finalGrid;
+    expect(turn1.activePlayerId).toBe(p2Socket.id);
+    expect(typeof turn1.serverReceivedAt).toBe("number");
+    const boardObj1 = { grid: currentGrid, width: 8, height: 8 };
+    const swapped1 = swapTiles(boardObj1, swap1.r1, swap1.c1, swap1.r2, swap1.c2);
+    const rng1 = createStatefulRng(mA.originalSeed!);
+    currentGrid = resolveBoardAnimated(swapped1.grid, rng1.next).grid;
 
     // Move 2 by p2
     const swap2 = findMatchingSwap(currentGrid);
     if (!swap2) return; // Board may be in a state with no valid swaps after cascade
 
-    const resolved2Promise = waitForEvent<MoveResolvedPayload>(sockA, "move_resolved");
+    const turn2Promise = waitForEvent<{ activePlayerId: string; serverReceivedAt?: number }>(
+      sockA,
+      "turn_changed"
+    );
     p2Socket.emit("move", { roomId: mA.roomId, ...swap2 });
-    const resolved2 = await resolved2Promise;
+    const turn2 = await turn2Promise;
 
-    // p1's score should be preserved; p2's should have accumulated
-    const p1Id = mA.firstPlayerId;
-    const p2Id = resolved2.playerId; // the player who just moved
-    expect(resolved2.scores[p1Id]).toBe(resolved1.pointsEarned);
-    expect(resolved2.scores[p2Id]).toBe(resolved2.pointsEarned);
+    expect(turn2.activePlayerId).toBe(p1Socket.id);
+    expect(typeof turn2.serverReceivedAt).toBe("number");
   });
 });
 
@@ -358,25 +360,32 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
 
     // Play 3 moves to advance board state
     let currentGrid = mA.boardGrid!;
-    let lastResolved: MoveResolvedPayload | null = null;
+    let playedAnyMove = false;
+    let rngState = mA.originalSeed!;
 
     for (let i = 0; i < 3; i++) {
       const activeSocket = i % 2 === 0 ? p1Socket : p2Socket;
       const swap = findMatchingSwap(currentGrid);
       if (!swap) break;
 
-      // Listen on the still-connected socket for move_resolved
-      const resolvedPromise = waitForEvent<MoveResolvedPayload>(
+      // Listen on the opposing socket for the accepted move relay.
+      const relayPromise = waitForEvent<Move>(
         activeSocket === sockA ? sockB : sockA,
-        "move_resolved"
+        "opponent_move"
       );
       activeSocket.emit("move", { roomId: mA.roomId, ...swap });
-      const resolved = await resolvedPromise;
-      currentGrid = resolved.finalGrid;
-      lastResolved = resolved;
+      await relayPromise;
+
+      const boardObj = { grid: currentGrid, width: 8, height: 8 };
+      const swapped = swapTiles(boardObj, swap.r1, swap.c1, swap.r2, swap.c2);
+      const rng = createStatefulRng(rngState);
+      const resolved = resolveBoardAnimated(swapped.grid, rng.next);
+      currentGrid = resolved.grid;
+      rngState = rng.state();
+      playedAnyMove = true;
     }
 
-    if (!lastResolved) {
+    if (!playedAnyMove) {
       console.warn("No moves played — snapshot rejoin test vacuous");
       return;
     }
@@ -417,12 +426,10 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
     expect(reconnectPayload.rngState).toBeDefined();
     expect(reconnectPayload.originalSeed).toBe(mA.seed);
 
-    // boardGrid must match the last server-broadcast finalGrid
-    expect(JSON.stringify(reconnectPayload.boardGrid)).toBe(
-      JSON.stringify(lastResolved.finalGrid)
-    );
+    // boardGrid must match the locally-computed result of the accepted moves.
+    expect(JSON.stringify(reconnectPayload.boardGrid)).toBe(JSON.stringify(currentGrid));
 
-    // rngState must match the last server-broadcast rngState
-    expect(reconnectPayload.rngState).toBe(lastResolved.rngState);
+    // rngState must match the locally-computed deterministic RNG state.
+    expect(reconnectPayload.rngState).toBe(rngState);
   });
 });

@@ -58,6 +58,7 @@ export interface MatchEngineEvents extends Record<string, unknown> {
     c1: number;
     r2: number;
     c2: number;
+    serverReceivedAt: number;
     steps: ResolvedStepWire[];
     finalGrid: number[][];
     rngState: number;
@@ -73,6 +74,7 @@ export interface MatchEngineEvents extends Record<string, unknown> {
   turn_changed: {
     roomId: string;
     activePlayer: string;
+    serverReceivedAt: number;
     playerStates: { [playerId: string]: PlayerState };
   };
   match_ended: {
@@ -213,7 +215,8 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     r1: number,
     c1: number,
     r2: number,
-    c2: number
+    c2: number,
+    serverReceivedAt: number = Date.now()
   ): void {
     const state = this.rooms.get(roomId);
     if (!state) return;
@@ -326,6 +329,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       c1,
       r2,
       c2,
+      serverReceivedAt,
       steps: wireSteps,
       finalGrid,
       rngState: state.rngState,
@@ -347,6 +351,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     this.emit("turn_changed", {
       roomId,
       activePlayer: nextPlayer,
+      serverReceivedAt,
       playerStates: this._copyPlayerStates(state),
     });
   }

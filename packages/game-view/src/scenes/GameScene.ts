@@ -282,8 +282,8 @@ export class GameScene extends Phaser.Scene {
       this.hud.updateTurnIndicator(this.myTurn);
     }
     // Render initial bars from controller-owned stats. For turn_based mode
-    // the server overwrites these when the first turn_changed / move_resolved
-    // arrives; for solo / pve the controller is the source of truth.
+    // match_found/rejoin seed these stats; later turn_changed events reconcile
+    // stamina only while HP/Mana animation stays local per cascade.
     this.hud.setSelfStats(this.ctrl.getSelfStats());
     if (this.mode !== "solo") {
       this.hud.setOpponentStats(this.ctrl.getOpponentStats());
@@ -297,11 +297,37 @@ export class GameScene extends Phaser.Scene {
       const myId = this.myPlayerId;
       const oppId = Object.keys(ips).find((id) => id !== myId);
       if (myId && ips[myId]) {
-        this.hud.setSelfStats(ips[myId]! as PlayerStats);
+        const stats = ips[myId]! as PlayerStats;
+        this.ctrl.setSelfStats(stats);
+        this.myTimeMs = stats.stamina;
+        this.hud.setSelfStats(stats);
       }
       if (oppId && ips[oppId]) {
-        this.hud.setOpponentStats(ips[oppId]! as PlayerStats);
+        const stats = ips[oppId]! as PlayerStats;
+        this.ctrl.setOpponentStats(stats);
+        this.opponentTimeMs = stats.stamina;
+        this.hud.setOpponentStats(stats);
       }
+      this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
+    }
+
+    if (this.mode === "turn_based" && rejoin?.playerStates) {
+      const ps = rejoin.playerStates;
+      const myId = rejoin.myPlayerId;
+      const oppId = Object.keys(ps).find((id) => id !== myId);
+      if (ps[myId]) {
+        const stats = ps[myId]! as PlayerStats;
+        this.ctrl.setSelfStats(stats);
+        this.myTimeMs = stats.stamina;
+        this.hud.setSelfStats(stats);
+      }
+      if (oppId && ps[oppId]) {
+        const stats = ps[oppId]! as PlayerStats;
+        this.ctrl.setOpponentStats(stats);
+        this.opponentTimeMs = stats.stamina;
+        this.hud.setOpponentStats(stats);
+      }
+      this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
     }
 
     if (this.syncClient) this.wireMultiplayer();
@@ -456,10 +482,28 @@ export class GameScene extends Phaser.Scene {
         const ps = data.playerStates;
         if (ps && this.myPlayerId !== null && ps[this.myPlayerId]) {
           const s = ps[this.myPlayerId]!;
-          this.myTimeMs = s.stamina;
-          this.hud.setSelfStats(s as PlayerStats);
+          if (this.mode === "turn_based") {
+            const local = {
+              ...this.ctrl.getSelfStats(),
+              stamina: s.stamina,
+              maxStamina: s.maxStamina,
+            };
+            this.ctrl.setSelfStats(local);
+            this.myTimeMs = local.stamina;
+            this.hud.setSelfStats(local);
+          } else {
+            this.ctrl.setSelfStats(s as PlayerStats);
+            this.myTimeMs = s.stamina;
+            this.hud.setSelfStats(s as PlayerStats);
+          }
         } else if (data.times && this.myPlayerId && data.times[this.myPlayerId] !== undefined) {
           this.myTimeMs = data.times[this.myPlayerId]!;
+          const local = {
+            ...this.ctrl.getSelfStats(),
+            stamina: this.myTimeMs,
+          };
+          this.ctrl.setSelfStats(local);
+          this.hud.setSelfStats(local);
         }
         if (ps) {
           const opponentId = Object.keys(ps).find(
@@ -467,8 +511,20 @@ export class GameScene extends Phaser.Scene {
           );
           if (opponentId && ps[opponentId]) {
             const s = ps[opponentId]!;
-            this.opponentTimeMs = s.stamina;
-            this.hud.setOpponentStats(s as PlayerStats);
+            if (this.mode === "turn_based") {
+              const local = {
+                ...this.ctrl.getOpponentStats(),
+                stamina: s.stamina,
+                maxStamina: s.maxStamina,
+              };
+              this.ctrl.setOpponentStats(local);
+              this.opponentTimeMs = local.stamina;
+              this.hud.setOpponentStats(local);
+            } else {
+              this.ctrl.setOpponentStats(s as PlayerStats);
+              this.opponentTimeMs = s.stamina;
+              this.hud.setOpponentStats(s as PlayerStats);
+            }
           }
         } else if (data.times) {
           const opponentId = Object.keys(data.times).find(
@@ -476,6 +532,12 @@ export class GameScene extends Phaser.Scene {
           );
           if (opponentId && data.times[opponentId] !== undefined) {
             this.opponentTimeMs = data.times[opponentId]!;
+            const local = {
+              ...this.ctrl.getOpponentStats(),
+              stamina: this.opponentTimeMs,
+            };
+            this.ctrl.setOpponentStats(local);
+            this.hud.setOpponentStats(local);
           }
         }
         this.hud.updateTimers(this.myTimeMs, this.opponentTimeMs);
@@ -496,6 +558,9 @@ export class GameScene extends Phaser.Scene {
             this.myPlayerId !== null &&
             gameOverData.playerStates[this.myPlayerId] !== undefined
           ) {
+            this.ctrl.setSelfStats(
+              gameOverData.playerStates[this.myPlayerId]! as PlayerStats
+            );
             this.hud.setSelfStats(
               gameOverData.playerStates[this.myPlayerId]! as PlayerStats
             );
@@ -504,6 +569,9 @@ export class GameScene extends Phaser.Scene {
             (id) => id !== this.myPlayerId
           );
           if (oid && gameOverData.playerStates[oid] !== undefined) {
+            this.ctrl.setOpponentStats(
+              gameOverData.playerStates[oid]! as PlayerStats
+            );
             this.hud.setOpponentStats(
               gameOverData.playerStates[oid]! as PlayerStats
             );
