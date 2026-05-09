@@ -50,14 +50,14 @@ npx tsc --project packages/shared-js/tsconfig.json --noEmit   # type-check only
 **Frontend (`packages/game-view/`)**
 ```bash
 npm run dev     # Vite dev server  →  http://localhost:5173
-npm test        # Vitest unit tests (68 tests)
+npm test        # Vitest
 npm run build   # TypeScript + Vite production build
 ```
 
 **Backend (`apps/backend/`)**
 ```bash
 npm run dev     # ts-node src/server.ts  →  port 3001
-npm test        # Vitest: 122 unit + 89 integration tests
+npm test        # Vitest
 npm run build   # tsc → dist/
 ```
 
@@ -73,13 +73,16 @@ flutter build web              # Build for production
 
 Four strict layers — **never mix them**:
 
-0. **Shared** (`packages/shared-js/src/`) — pure TypeScript, no framework/Phaser/Node imports.
+0. **Shared** (`packages/shared-js/src/`) — pure TypeScript, no framework/Phaser imports.
    - `engine/rng.ts`, `engine/Board.ts`, `engine/MatchEngine.ts` — canonical engine source
+   - `engine/TileType.ts` — `TileType` enum (`ATTACK=0, ENERGY=1, EXP=2, FOOD=3, HEAL=4`); ordering MUST match `TILE_TEXTURE_KEYS` in `packages/game-view/src/rendering/TileSpritePool.ts` and the SVG filenames in `packages/game-view/public/sprites/`
+   - `engine/PlayerStats.ts` — pure stat engine: `PlayerStats` shape, `createDefaultStats`, `applyTileEffects` (returns immutable new {self, opponent, damageDealt, leveledUp}), `tickStamina`, `levelUpIfReady`, `isDead`, `countTilesByType`. All ops immutable.
    - `bot/BotPlayer.ts` — bot AI shared by frontend (PvE client-side) and backend (matchmaking fallback)
-   - `protocol.d.ts` — Socket.IO wire-format types shared by fe and be
+   - `protocol.ts` — Socket.IO wire-format types shared by fe and be (used to be `protocol.d.ts`)
    - All packages import shared code via the `@match3/shared-js` npm workspace alias (e.g. `@match3/shared-js/engine/Board.js`)
    - `packages/game-view/src/engine/*.ts` and `packages/game-view/src/bot/BotPlayer.ts` are **re-export shims** so existing imports and tests continue to work unchanged
    - `apps/backend/tsconfig.json` uses `rootDir: ".."` (monorepo root) to allow importing shared `.ts` source files; build output is `dist/apps/backend/src/server.js`
+   - `packages/shared-js/package.json` `exports` map must include every subpath imported (e.g. `./engine/PlayerStats`); otherwise docker runtime fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` even when tests pass.
 
 1. **Engine** (`packages/game-view/src/engine/`) — re-export shims only; real source lives in `packages/shared-js/`.
    - `rng.ts` — mulberry32 seeded PRNG: `createRng` (closure, existing callers unchanged), `createStatefulRng` (returns `{ next, state }` so the server can snapshot RNG position between moves), `randInt`
@@ -110,8 +113,10 @@ Four strict layers — **never mix them**:
    - `apps/backend/src/validator.ts` — adjacency + bounds validation; `validateProducesMatch` for engine-level 0-match rejection (used by MatchEngineService).
    - `apps/backend/src/TimerManager.ts` — `setInterval`-based turn clock for `pve`/bot rooms only. `turn_based` rooms use the judge's internal stamina tick instead.
    - `packages/game-view/src/net/SyncClient.ts` — client Socket.IO wrapper; exposes `myPlayerId`, `firstPlayerId`, `gameMode` after match.
-   - **`turn_based` wire events**: `move_resolved { playerId, r1,c1,r2,c2, steps, finalGrid, rngState, pointsEarned, scores, playerStates }` broadcast to both sockets; `turn_changed { activePlayerId, playerStates }` after each turn; `game_over { loserTimeUp?, playerStates }`.
-   - **`playerStates`** field replaces the old `times` field on all `turn_based` events. Shape: `{ [socketId]: { health: number, mana: number, stamina: number } }`. Defaults: `health=100`, `mana=100`, `stamina=5*60*1000`. Stamina is the live turn clock; health/mana are placeholders.
+   - **`turn_based` wire events**: `move_resolved { playerId, r1,c1,r2,c2, steps, finalGrid, rngState, pointsEarned, scores, playerStates }` broadcast to both sockets; `turn_changed { activePlayerId, playerStates }` after each turn; `game_over { loserId?, loserReason?: "time"|"hp", playerStates? }` (deprecated `loserTimeUp` retained for back-compat).
+   - **`pve` wire events**: legacy relay path. Server emits `opponent_move` for the bot's swaps and `turn_changed { activePlayerId, times }` (legacy stamina-only `times` field, no `playerStates`). HP-zero is detected client-side; the client emits `match_complete { loserId, loserReason, scores }` and the server echoes `game_over` back to drive the same end-of-match path as turn_based.
+   - **`playerStates`** is the rich per-player shape mirrors `PlayerStats`: `{ stamina, maxStamina, health, maxHealth, mana, maxMana, lv, exp, expToNext, atk }`. Defaults: HP=100/100, Mana=0/100, Stamina=300_000ms, LV=1, EXP=0/100, ATK=10. `match_found` carries the initial snapshot so HUD bars render full from the first frame.
+   - **`ResolvedStepWire.playerStatesAfter`** (optional) — per-cascade-step stat snapshot the server emits so clients can animate HUD bars in lockstep with each flash. Currently the client uses local-controller snapshots for animation; the server-side field is reserved for future spectator/reconciliation paths.
    - **Snapshot rejoin** (`turn_based`): `match_found` and reconnect both include `boardGrid + rngState + originalSeed`; client restores from snapshot instead of replaying moves.
    - **`pve` reconnect**: `match_found` carries `room.moves[]`; client silently replays via `GameLoopController.attemptSwap` to reconstruct board state (same deterministic engine the server uses). Empty array on first connect, populated on resume.
    - **`solo` is offline**: no server room is created. The shell calls `GET /matchmaking/status` first to ensure no other active server-side match would conflict; if clear, it generates a seed via `dart:math.Random.secure()` and dispatches `StartLocalMatch { seed, savedState?, userId }` over the bridge. The game persists state to `localStorage[match3:solo:${userId}]` after every settled cascade and wipes on game-end / requestLeaveMatch.
@@ -167,15 +172,53 @@ When gravity moves a tile, its ID moves with it. When a tile is matched, its ID 
 ## Scoring
 
 - Match points: `matchedCells × 10 × cascadeLevel` (cascade level starts at 1)
-- Time bonus (winner only): `Math.floor(remainingSeconds) × 10` — awarded when opponent's clock hits zero
+- Time bonus (winner only): `Math.floor(remainingSeconds) × 10` — awarded for time wins (turn_based) and any pve win
+
+## Player Stats System
+
+Each player carries a `PlayerStats` object (defined in `packages/shared-js/src/engine/PlayerStats.ts`):
+
+- **Visible bars** (rendered by `Hud.ts` at `PANEL_X = 630`): HP, Stamina, Mana. Lv label sits above. Opponent bars at `y=230` in multiplayer modes; solo hides them.
+- **Hidden stats**: EXP (with `expToNext`) and ATK. Sent on the wire, not rendered.
+- **Defaults** (`createDefaultStats`): HP=100/100, Mana=0/100, Stamina=300_000ms/300_000ms, LV=1, EXP=0/100, ATK=10.
+
+### Tile types and effects (`applyTileEffects`)
+
+Each tile type, when matched, applies an immediate effect to the swap-maker (or their opponent for ATTACK). Counts come from `countTilesByType(removedCells)` per cascade step.
+
+| TileType | Symbol | Effect (per tile in match) |
+|---|---|---|
+| `ATTACK` | 0 | `opponent.health -= attacker.atk` (clamped at 0) |
+| `ENERGY` | 1 | `self.mana += 5` (capped at maxMana) |
+| `EXP`    | 2 | `self.exp += 5` → `levelUpIfReady` (LV+1: maxHP+10, atk+2, refill HP/Mana, expToNext = 100×lv) |
+| `FOOD`   | 3 | `self.stamina += 5_000ms` (capped at maxStamina) |
+| `HEAL`   | 4 | `self.health += 5` (capped at maxHealth) |
+
+The TileType integer ordering MUST match `TILE_TEXTURE_KEYS` in `TileSpritePool.ts` (which mirrors the SVG filenames in `public/sprites/`). Reorder one → reorder the other.
+
+### Per-step HUD updates
+
+`GameLoopController.attemptSwap` applies effects per cascade step and stores `selfStatsAfter` / `opponentStatsAfter` on each `ResolvedStep`. `GameScene.playResolveSteps` calls `hud.setSelfStats / setOpponentStats` immediately after each step's flash animation, so heal/exp/attack effects appear in lockstep with each cascade flash rather than all at once at the end.
 
 ## Turn System
 
 - Server tracks `activePlayer` per room; rejects moves from the wrong socket
 - After a valid move: server switches `activePlayer`, emits `turn_changed { activePlayerId, playerStates }` to the room
-- For `turn_based`, the judge owns a `setInterval(1000)` that ticks down `playerStates[activePlayer].stamina`; emits `game_over { loserTimeUp, playerStates }` at zero
-- For `pve`, the legacy `TimerManager` ticks the clock and emits the equivalent events
+- For `turn_based`, the judge owns a `setInterval(1000)` that ticks down `playerStates[activePlayer].stamina`; emits `game_over { loserId, loserReason }` at zero
+- For `pve`, the legacy `TimerManager` ticks stamina and emits the equivalent events for time-out. HP loss is detected client-side and routed through `match_complete` (server replies with `game_over`).
 - Client sets `myTurn = false` optimistically when sending a move; confirmed by `turn_changed`
+
+## Match-end flow (server-authoritative for both PvP and PvE)
+
+`GameScene.endGame(timeBonus, fromServer)` requires `fromServer === true` for any non-`solo` mode. Local engine HP/stamina detection is for animation only; the match-end decision comes from the server's `game_over` event.
+
+- **`turn_based`**: judge emits `game_over` directly when stamina or HP hits zero (and on forfeit).
+- **`pve`**: client detects HP-zero locally → emits `match_complete { loserId, loserReason: "hp", scores }` → server marks `room.status = "over"`, calls `closeRoom`, echoes `game_over` back. Stamina-zero in pve is still detected by `TimerManager` and emits its own `game_over`.
+- **`solo`**: pure client-side. `endGame` runs locally; no socket involved.
+
+## Disconnect / rejoin
+
+There is no artificial grace timer. Both bot rooms and PvP rooms leave the disconnected player's slot in place; the active player's stamina keeps ticking. If they don't `/matchmaking/resume` before stamina runs out, they lose by time normally. The bot in `BotManager.scheduleBotTurn` keeps playing through its turns even when the human socket is offline (`io.to(humanSocketId).emit(...)` is a safe no-op); on rejoin the client gets the move log via `rejoin_ok` and replays locally.
 
 ## Shared Board
 
@@ -189,11 +232,13 @@ Both players play on **the same board**. There is no separate opponent board or 
 - Scores (`pointsEarned`, running `scores`) are tracked and broadcast by the server
 
 **`pve` — client-deterministic, server-relayed:**
-- Server creates a room with `gameMode: "pve"` and a bot opponent
+- Server creates a room with `gameMode: "pve"` and a bot opponent. Note: when matchmaking can't find a human partner within `BOT_WAIT_MS` (5 s), `turn_based` requests fall through to a pve bot match — the client may have asked for vs-Human but be in a pve room.
 - Client receives `seed` (and on reconnect, `moves[]`) via `match_found`; runs one `GameLoopController(seed)` and silently replays any prior moves
 - New moves: client emits to server, server relays via `opponent_move`; both sides apply locally
 - Same seed + same moves in same order = identical board state (deterministic)
 - The server's BotManager keeps a parallel board so the bot always plays against the current state
+- Stats (HP/Mana/EXP/Lv/atk) are computed client-side per `applyTileEffects`. Server only tracks stamina (via `TimerManager`). HP-loss → client emits `match_complete` to bridge the cleanup gap (see Match-end flow above).
+- An archived branch `pve-judge-archive` holds an alternative implementation where the judge tracks pve stats too (the bot shares the judge's board). It was reverted on master; cherry-pick if revisiting server-side pve stats.
 
 **`solo` — client-only:**
 - No server room, no socket. The game-view runs `GameLoopController(seed)` locally where `seed` is generated by the shell via `Random.secure()`.
