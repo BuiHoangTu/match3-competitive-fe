@@ -51,14 +51,6 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
     // for userId-keyed rooms the old socket may already be gone.
     const oldPlayerId = room.players.find((_, i) => i === slotIndex) ?? null;
 
-    if (oldPlayerId) {
-      const gracePending = ctx.disconnectedPlayers.get(oldPlayerId);
-      if (gracePending) {
-        clearTimeout(gracePending);
-        ctx.disconnectedPlayers.delete(oldPlayerId);
-      }
-    }
-
     // Attach the new socket to the slot (replaces old socket ID in room).
     let updatedRoom = room;
     if (oldPlayerId) {

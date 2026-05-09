@@ -34,12 +34,6 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
       if (existingRoom && tokenSlot !== undefined) {
         const oldSocketId = existingRoom.players[tokenSlot];
         if (oldSocketId && oldSocketId !== socket.id) {
-          // Clear any pending disconnect grace timer for the old socket.
-          const grace = ctx.disconnectedPlayers.get(oldSocketId);
-          if (grace) {
-            clearTimeout(grace);
-            ctx.disconnectedPlayers.delete(oldSocketId);
-          }
           ctx.roomManager.replacePlayer(oldSocketId, socket.id);
         }
       }

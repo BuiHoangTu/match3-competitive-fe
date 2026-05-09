@@ -324,7 +324,7 @@ export async function runLatencyHarness(
         gameOver = true;
         movesPlayed++;
         // Wait for any in-flight relayed move to settle before returning.
-        await new Promise((r) => setTimeout(r, rttMs + 50));
+        await new Promise((r) => setTimeout(r, rttMs + 200));
         break;
       }
 

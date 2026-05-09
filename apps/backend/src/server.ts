@@ -47,6 +47,12 @@ export interface ServerOptions {
    * When omitted, those endpoints respond 503 LOCAL_AUTH_DISABLED.
    */
   localAccounts?: import("./persistence/LocalAccountStore").LocalAccountStore;
+
+  /**
+   * Override the bot-fallback wait (ms). Defaults to BOT_WAIT_MS (5 s).
+   * Pass a small value (e.g. 50) in integration tests to avoid slow bots.
+   */
+  botWaitMs?: number;
 }
 
 /**
@@ -87,7 +93,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   const rejoinManager = new RejoinManager();
   const timerManager = new TimerManager(io, roomManager);
   const botManager = new BotManager(io, roomManager, timerManager);
-  const matchmaking = new MatchmakingService(roomManager, botManager);
+  const matchmaking = new MatchmakingService(roomManager, botManager, opts.botWaitMs);
   const matchEngineService = new MatchEngineService();
   const idleSweeper = new IdleSweeper(io, roomManager, timerManager, (id) => {
     botManager.cleanup(id);
@@ -117,7 +123,6 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   });
 
   const matchStartTimes = new Map<string, number>();
-  const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // socketBridge needs ctx, but ctx needs socketBridge — break the cycle by
   // creating a partial context first and then injecting the bridge.
@@ -130,7 +135,6 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     persistence,
     rootSeedSource,
     matchStartTimes,
-    disconnectedPlayers,
   };
   const socketBridge = new SocketBridge(io, ctxPartial as ServerContext, matchEngineService);
   (ctxPartial as ServerContext).socketBridge = socketBridge;
@@ -159,8 +163,6 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     async close(): Promise<void> {
       idleSweeper.stop();
       matchmaking.shutdown();
-      for (const handle of disconnectedPlayers.values()) clearTimeout(handle);
-      disconnectedPlayers.clear();
       await new Promise<void>((resolve) => {
         io.close(() => resolve());
       });

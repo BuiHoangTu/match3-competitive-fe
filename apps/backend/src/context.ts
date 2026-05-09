@@ -26,6 +26,4 @@ export interface ServerContext {
   rootSeedSource: RootSeedSource;
   /** Wall-clock start times for active matches (roomId → epoch ms). */
   matchStartTimes: Map<string, number>;
-  /** Grace-period timers keyed by socket ID (cleared on rejoin). */
-  disconnectedPlayers: Map<string, ReturnType<typeof setTimeout>>;
 }
