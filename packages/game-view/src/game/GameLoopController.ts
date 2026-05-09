@@ -21,6 +21,15 @@ export interface ResolvedStep {
   engineStep: AnimatedResolveStep;
   /** Maps "row,col" → new tile ID assigned during refill for this step. */
   refillIds: Map<string, number>;
+  /**
+   * Snapshot of the swap-maker's stats AFTER this cascade step's effects
+   * (heal/exp/attack/...) have been applied. Lets the renderer push the bars
+   * forward in lockstep with each cascade's flash, so a 3-heal first match
+   * visibly heals before the cascade's exp/attack tiles flash.
+   */
+  selfStatsAfter: PlayerStats;
+  /** Same, for the opposing side. */
+  opponentStatsAfter: PlayerStats;
 }
 
 export type SwapResult =
@@ -272,7 +281,12 @@ export class GameLoopController {
         refillIds.set(`${pos.row},${pos.col}`, id);
       }
 
-      resolvedSteps.push({ engineStep: step, refillIds });
+      resolvedSteps.push({
+        engineStep: step,
+        refillIds,
+        selfStatsAfter: { ...this._selfStats },
+        opponentStatsAfter: { ...this._opponentStats },
+      });
 
       // Next cascade samples from this step's afterRefill.
       preRemovalGrid = step.afterRefill;

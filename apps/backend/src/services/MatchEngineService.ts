@@ -276,6 +276,10 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       prevGrid = step.afterRefill;
     }
 
+    // Per-step stats AFTER each cascade's effects, for the wire payload so
+    // clients can animate HUD bars in lockstep with each cascade flash.
+    const perStepStates: Array<Record<string, PlayerState>> = [];
+
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i]!;
       const preGrid = preStepGrids[i]!;
@@ -289,6 +293,11 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       const result = applyTileEffects(selfStats, oppStats, counts);
       selfStats = result.self;
       oppStats = result.opponent;
+
+      perStepStates.push({
+        [playerId]: { ...selfStats },
+        [opponentId]: { ...oppStats },
+      });
 
       if (isDead(oppStats)) {
         hpKillOpponentId = opponentId;
@@ -305,7 +314,10 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     state.playerStates[playerId] = selfStats;
     state.playerStates[opponentId] = oppStats;
 
-    const wireSteps: ResolvedStepWire[] = steps.map(toWireStep);
+    const wireSteps: ResolvedStepWire[] = steps.map((step, i) => ({
+      ...toWireStep(step),
+      ...(perStepStates[i] && { playerStatesAfter: perStepStates[i] }),
+    }));
 
     this.emit("move_resolved", {
       roomId,

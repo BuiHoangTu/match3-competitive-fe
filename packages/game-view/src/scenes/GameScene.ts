@@ -732,15 +732,8 @@ export class GameScene extends Phaser.Scene {
       this.hud.updateOpponentScore(this.opponentScore);
     }
 
-    // For client-driven modes (solo / pve), refresh HUD bars from the
-    // controller's now-mutated stats. attemptSwap already routed damage via
-    // the attacker hint we passed in doSwap / processOpponentQueue.
-    if (this.mode !== "turn_based") {
-      this.hud.setSelfStats(this.ctrl.getSelfStats());
-      if (this.mode !== "solo") {
-        this.hud.setOpponentStats(this.ctrl.getOpponentStats());
-      }
-    }
+    // HUD bars were already pushed forward in lockstep with each cascade
+    // flash inside playResolveSteps — no bulk update needed here.
 
     // Solo-mode auto-resume: persist the controller's state after every
     // settled cascade. No-ops in non-solo modes.
@@ -771,12 +764,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   private async playResolveSteps(steps: ResolvedStep[]): Promise<void> {
-    for (const { engineStep, refillIds } of steps) {
+    for (const step of steps) {
+      const { engineStep, refillIds, selfStatsAfter, opponentStatsAfter } = step;
       // 1. Flash out matched sprites
       const matchedIds = engineStep.matches.flatMap((m) =>
         m.cells.map(([r, c]) => this.idAt[r][c])
       );
       await this.choreographer.flashAndRemoveSprites(matchedIds, this.spriteAt);
+
+      // 2. As the matched tiles visually "activate", push this step's stat
+      // snapshot into the HUD so heal/mana/exp/attack effects appear in
+      // lockstep with each cascade flash — not all at once at the end.
+      // For turn_based the server's turn_changed will reconcile any drift.
+      this.hud.setSelfStats(selfStatsAfter);
+      if (this.mode !== "solo") {
+        this.hud.setOpponentStats(opponentStatsAfter);
+      }
 
       for (const match of engineStep.matches) {
         for (const [r, c] of match.cells) {

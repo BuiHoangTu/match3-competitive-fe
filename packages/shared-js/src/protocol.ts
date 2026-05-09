@@ -31,6 +31,13 @@ export interface ResolvedStepWire {
   afterGravity: number[][];
   /** Grid state after refill — the authoritative snapshot for this cascade. */
   afterRefill: number[][];
+  /**
+   * Per-player stats AFTER this cascade step's effects (heal/exp/attack/...)
+   * have been applied. Lets the client animate HUD bars in lockstep with each
+   * cascade flash rather than waiting for the whole chain to settle. Optional
+   * during the migration window — older servers / clients don't emit this.
+   */
+  playerStatesAfter?: Record<string, PlayerState>;
 }
 
 /**
