@@ -132,6 +132,43 @@ export function findMatches(grid: number[][]): Match[] {
 }
 
 // ---------------------------------------------------------------------------
+// CR-9 — "Match-4 again" extra turn rule
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the number of extra turns earned from one cascade step's
+ * matches. Per CR-9: each independent line of 4+ cells in the same row
+ * or column contributes one extra turn. An L-shape (a Match whose
+ * cells span both a row leg and a column leg) contributes only when at
+ * least one of its legs is 4+ on its own.
+ *
+ * Implementation: for each Match, count cells per row and per column.
+ * Each row whose count is ≥ 4 contributes +1; each column whose count
+ * is ≥ 4 contributes +1. A pure 5-in-a-row therefore yields +1 (one
+ * row leg). An L of two 3-legs yields 0. An L with a 4-row leg + a
+ * 3-column leg yields +1. Two separate Match objects each with a 4-row
+ * leg yield +2 in total.
+ */
+export function extraTurnsFromMatches(matches: Match[]): number {
+  let extra = 0;
+  for (const m of matches) {
+    const byRow = new Map<number, number>();
+    const byCol = new Map<number, number>();
+    for (const [r, c] of m.cells) {
+      byRow.set(r, (byRow.get(r) ?? 0) + 1);
+      byCol.set(c, (byCol.get(c) ?? 0) + 1);
+    }
+    for (const count of byRow.values()) {
+      if (count >= 4) extra += 1;
+    }
+    for (const count of byCol.values()) {
+      if (count >= 4) extra += 1;
+    }
+  }
+  return extra;
+}
+
+// ---------------------------------------------------------------------------
 // A5 — Gravity + refill
 // ---------------------------------------------------------------------------
 
