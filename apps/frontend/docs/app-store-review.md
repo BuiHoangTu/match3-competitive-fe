@@ -22,7 +22,7 @@ Covers v0.6 / v1.0 submissions. Items marked **required** must be green before s
 - [ ] **required** In-app account deletion reachable in ≤ 3 taps from home (home → account → delete).
 - [ ] **required** Deletion flow: two-step confirmation; destructive-colour cue; copy states "this is permanent".
 - [ ] **required** Deletion actually deletes users row and anonymises match history (see [T-v0.6-F02](../../specification/implementation-plan.md)).
-- [ ] **required** Deleted user cannot sign in again with the same credentials without re-creating an account (Firebase user revoked).
+- [ ] **required** Deleted user cannot sign in again with the same credentials without re-creating an account.
 
 ### Privacy
 
@@ -46,7 +46,7 @@ Covers v0.6 / v1.0 submissions. Items marked **required** must be green before s
 ### Data safety form
 
 - [ ] **required** Declares: display name (collected, required, account function), email (if collected), avatar URL.
-- [ ] **required** Declares data NOT shared with third parties (Firebase is the processor, not a third-party sharer).
+- [ ] **required** Declares data NOT shared with third parties beyond configured infrastructure processors.
 
 ### Closed-track submission
 

@@ -91,9 +91,8 @@ npm run migrate:down # rolls back one migration
 When `POST /account/delete` is called:
 1. All `match_history` rows where the user appears as `p1_user_id` or `p2_user_id` are anonymised: the column is replaced with `TOMBSTONE_<8-hex-chars>` (a SHA-256 prefix of the userId, irreversible).
 2. The `users` row is hard-deleted (`DELETE FROM users WHERE user_id = $1`).
-3. Firebase Auth revokes the user's account (best-effort; DB changes are already committed).
 
-Both steps 1 and 2 run inside a single Postgres transaction — all-or-nothing.
+Both steps run inside a single Postgres transaction — all-or-nothing.
 
 **What survives deletion:** Aggregate match statistics remain in `match_history` (outcome, scores, duration) but carry an opaque tombstone in place of the userId. This is permissible under GDPR legitimate interest (game integrity and anti-cheat audit trail). No PII survives.
 

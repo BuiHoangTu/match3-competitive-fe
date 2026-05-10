@@ -1,26 +1,35 @@
 # v1.0 Launch Checklist
 
-State as of 2026-05-02. The codebase is **code-complete** for everything that can be implemented inside the repo. What remains are external actions: dev accounts, infra provisioning, store submissions, paid reviews, and physical-device validation. Each item below points back to its task ID in [specification/implementation-plan.md](../specification/implementation-plan.md).
+State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the product is pivoting from the Flutter-shell-plus-Phaser runtime to a full Flutter game client with a pure Dart game library and server-authored board-delta protocol. Complete [T-v0.9-A01..F03](../specification/implementation-plan.md#v09--flutter-native-game-client--board-delta-protocol-todo) before treating the launch checklist as code-complete again.
 
-## What's done in code
+## What's done in code before the v0.9 pivot
 
 - **403 tests** green via Docker: shared-js 39, game-view 35, backend 148
   (81 unit + 67 integration + 4 DATABASE_URL-skipped), frontend 181.
-- Bridge contract + transports + integration test (TS + Dart parity guards).
+- Legacy bridge contract + transports + integration test (TS + Dart parity guards). This runtime path is retired in v0.9.
 - Identity flow: handshake room-token verification, HTTP `/matchmaking/{join,resume}`, `/account/delete`, `/user/history`.
 - Local-account auth (username + password) — coexists with future SSO.
 - Persistence: `users`, `match_history`, deletion + tombstone, DB-outage buffering.
 - v0.7 accessibility: keyboard focus, prefers-reduced-motion (shell + game), AA contrast.
 - v1.0 code: structured logger, metrics counters, runbook draft.
 
+## v0.9 launch gate
+
+| Task group | What must be true before v1.0 resumes |
+|---|---|
+| Protocol | Online vs Human payloads use flat board/dimensions/version, generated tile arrays with deterministic refill order, and `board_replaced`; no client-visible seed replay or competitive score fields. |
+| Flutter local modes | Practice is Flutter-native, score-only, endless until leave; vs Bot is local with Dart judge/generator and no point score. |
+| Flutter online mode | Flutter Socket.IO client consumes room tokens directly and renders only server-authored board state. |
+| Legacy removal | No runtime route loads Phaser through WebView/iframe; Docker/CI no longer require the game-view bundle for product builds. |
+| Regression | Practice, vs Bot, online two-client match, no-legal-move replacement, rejoin, reduced motion, keyboard, Docker build, and platform smoke tests recorded. |
+
 ## Gating actions remaining
 
-### 1. Identity & Apple/Google sign-in (v0.6 sub-tracks C, H)
+### 1. Identity and store account setup
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v0.6-C01 | Create Firebase project (one for dev, one to follow for prod) | `flutterfire configure` to populate `apps/frontend/firebase_options.dart`; enable Apple + Google providers; disable email/password |
-| T-v0.6-C02 | Add Sign-in-with-Apple capability + bundle id in Xcode project | Requires paid Apple Developer Program enrolment (T-v0.6-H01) |
+| Google OAuth (optional) | Configure Google OAuth without Firebase | Create Google OAuth client IDs and add a backend exchange endpoint that returns the normal app session token |
 | T-v0.6-H01 | Apple Developer enrolment ($99/yr) | Pay + verify with org docs |
 | T-v0.6-H02 | Google Play Console enrolment ($25) | Pay |
 | T-v0.6-H03 | Apple bundle id + provisioning profile | Through Apple developer portal once H01 done |
@@ -28,7 +37,7 @@ State as of 2026-05-02. The codebase is **code-complete** for everything that ca
 | T-v0.6-H05 | Icons + launch screens at all required sizes | Design pass |
 | T-v0.6-H06 | Publish privacy policy + ToS URLs publicly | Host the markdown content under a stable URL; reference from app listing |
 
-The shell already has the auth code paths — once `firebase_options.dart` has real values and the OAuth client IDs are configured for each platform, sign-in works.
+The shell already has local-account auth. Optional Google OAuth should exchange provider tokens with the backend for the same session-token shape; do not reintroduce Firebase.
 
 ### 2. Production infrastructure (v1.0 sub-tracks 01..05)
 
@@ -38,7 +47,7 @@ The shell already has the auth code paths — once `firebase_options.dart` has r
 | T-v1.0-02 | Production Socket.IO server | VM or container; systemd or PM2; TLS reverse-proxy; runbook entry |
 | T-v1.0-03 | Managed Postgres + daily backup + 7-day PITR | Cloud SQL / RDS / similar; run `npm run migrate:up` against it |
 | T-v1.0-04 | Backup restore drill | Restore latest backup to a staging instance; verify row counts; archive log |
-| T-v1.0-05 | Production Firebase Auth config | Separate from dev project; enable both providers; OAuth client IDs for all targets |
+| T-v1.0-05 | Production auth config | Configure backend session secrets and optional Google OAuth exchange credentials |
 
 Server config: see [ops/runbook.md § Environment variables](runbook.md#environment-variables-server).
 
@@ -57,7 +66,7 @@ Server config: see [ops/runbook.md § Environment variables](runbook.md#environm
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v0.6-I01 | Three-target determinism assertion | Run a fixed move sequence on iOS + Android + Flutter Web; SHA-256 of canonicalised final board hashes match |
+| T-v0.6-I01 / T-v0.9-F03 | Three-target board-authority assertion | Run fixed local and online sequences on iOS + Android + Flutter Web; final flat board table/version matches the authoritative source |
 | T-v0.6-I03 | Flutter Web cold-load measurement | Lighthouse + manual timing; record in [apps/frontend/docs/cold-load.md](../apps/frontend/docs/cold-load.md) |
 | T-v0.6-I04 | Cross-device rejoin E2E | Start match on phone → resume on laptop; record in apps/frontend/docs/ |
 | T-v0.7-08 | Browser matrix (Chrome / FF / Safari / mobile) | Fill [apps/frontend/docs/platform-matrix.md](../apps/frontend/docs/platform-matrix.md) |
@@ -70,7 +79,7 @@ Server config: see [ops/runbook.md § Environment variables](runbook.md#environm
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v0.7-07 | Tile-art colour-blindness audit | Run [packages/game-view/docs/tile-palette.md](../packages/game-view/docs/tile-palette.md) through deuteranopia / protanopia / tritanopia / achromatopsia simulators; fix any confusion pairs |
+| T-v0.7-07 / T-v0.9-F03 | Tile-art colour-blindness audit | Re-run the audit against the Flutter-native tile renderer; archive the updated evidence under `apps/frontend/docs/` |
 | T-v0.7-13 | External reviewer signoff on NFR-7/8/9/10 | Engage an a11y reviewer; archive their report in `apps/frontend/docs/a11y-review/` |
 
 ### 6. Load & soak (v1.0-10..12)
@@ -85,19 +94,19 @@ Server config: see [ops/runbook.md § Environment variables](runbook.md#environm
 
 These don't gate the launch but are quick wins worth considering before/after v1.0:
 
-- **T-v0.6-G04** — Cross-device rejoin E2E test in CI. The runtime path is wired (G01/G02); a CI test would just exercise it.
+- **T-v0.6-G04 / T-v0.9-F03** — Cross-device rejoin E2E test in CI. v0.9 should assert flat board table/version restore, not seed/move replay.
 - **T-v0.6-I02** — Token-refresh-while-connected integration test. The protocol is in place (D06 + B10 + C06); just needs a scripted run with short TTL.
 - **T-v0.6-I05** — Account-deletion CI integration test exists in `apps/backend/src/__tests__/account_deletion.test.ts`; it only runs when `DATABASE_URL` is set. Add a CI job that brings up postgres and runs it.
 - Wire `metrics.emitJsonLine` to a periodic interval or `/metrics` endpoint so an exporter can scrape it.
-- Wire `metrics.increment("bridge_error_count")` at the right places in `GameBridge` and the shell-side transports.
+- Replace `bridge_error_count` with a v0.9-relevant online-client/socket metric once the bridge is gone.
 
 ## Estimated wall-clock to v1.0 from here
 
-- Identity unblock: ~1 day (Firebase + dev account paperwork dependent on Apple/Google review SLAs).
+- Identity unblock: ~1 day for local production secrets; optional Google OAuth depends on Google OAuth setup.
 - Production infra: ~2 days (provisioning + deploy automation).
 - Devices + browsers: ~2 days for the first pass.
 - Store review: variable, typically 1–7 days per platform.
 - Accessibility reviewer: usually a 1–2 week engagement.
 - Load + soak: ~3 days including remediation.
 
-Sum: roughly 2–3 weeks elapsed assuming reviews don't bounce back and the team isn't blocked on capability/ProvisioningProfile issues.
+Sum before the v0.9 pivot was roughly 2–3 weeks elapsed assuming reviews did not bounce back. Add the v0.9 implementation and regression window before using this estimate for launch planning.

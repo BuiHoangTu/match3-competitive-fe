@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Companion to [planning.md](planning.md), [requirement.md](requirement.md), and [system-design.md](system-design.md). This document turns the milestone plan into concrete, dependency-aware, **agent-executable** tasks — each small enough to implement, test, and review in isolation.
+Companion to [planning.md](planning.md), [requirement.md](requirement.md), [system-design.md](system-design.md), and [flutter-native-migration.md](flutter-native-migration.md). This document turns the milestone plan into concrete, dependency-aware, **agent-executable** tasks — each small enough to implement, test, and review in isolation.
 
 ---
 
@@ -28,16 +28,16 @@ Companion to [planning.md](planning.md), [requirement.md](requirement.md), and [
 
 - Implement the **minimum code** required to satisfy every line in `Acceptance`.
 - Only create or modify files listed in `Outputs`. If another file clearly needs a small edit (e.g. a re-export index), add it to `Outputs` in the completion report and justify it.
-- Respect existing layer boundaries in [CLAUDE.md § Architecture](../CLAUDE.md): engine has no Phaser imports, `GameLoopController` has no Phaser imports, rendering never mutates engine state, server sends seed + moves only.
-- Route all randomness through the seeded RNG. `Math.random()`, `Date.now()`-as-entropy, and `crypto.randomUUID()` in board-affecting code are forbidden ([NFR-5](requirement.md#determinism)).
-- Use the `@match3/shared-js` workspace alias for shared imports.
+- Respect existing layer boundaries in [CLAUDE.md § Architecture](../CLAUDE.md). For legacy Phaser tasks, engine/game-loop code remains render-framework-free. For v0.9+ tasks, Flutter rendering must depend on pure Dart `game_core`, and `game_core` must not import Flutter widgets, Socket.IO, or backend-specific code.
+- Route all board-affecting randomness through the current authoritative judge. For vs Human, that judge is the backend and clients consume flat board tables / generated tile arrays. For Practice and vs Bot, that judge is the local Dart `game_core`. `Math.random()`, `Date.now()`-as-entropy, `Random()` without an injected generator, and `crypto.randomUUID()` in board-affecting code are forbidden ([NFR-5](requirement.md#5-non-functional-requirements)).
+- Use `@match3/shared-js` for legacy/backend TypeScript shared imports. Use local Dart packages/modules under `apps/frontend/lib/game_core/` for Flutter-native gameplay.
 - Write or update unit tests alongside the code. Task is not complete until tests pass.
 - Run the full test suite for the affected package(s) before reporting done (`fe`, `be`, or both).
 
 ### What the agent MUST NOT do
 
 - Do not change task IDs, dependencies, or requirement IDs.
-- Do not alter architecture described in [system-design.md](system-design.md). No new layers, no new event types on the shell/game bridge, no new wire events without an explicit task.
+- Do not alter architecture described in [system-design.md](system-design.md). No new layers, no new shell/game bridge events, and no new wire events without an explicit task. v0.9 tasks are the explicit authority to remove the shell/game bridge and introduce board-delta events.
 - Do not refactor code outside the task's `Outputs`. Leave drive-by cleanups to a separate task.
 - Do not add features beyond `Acceptance`. "Nice to have" is scope creep.
 - Do not introduce new runtime dependencies without an explicit task that sanctions them.
@@ -68,7 +68,7 @@ STOP and hand back to a human reviewer if any of these occur:
 
 ---
 
-## Status snapshot (as of 2026-04-25)
+## Status snapshot (as of 2026-05-11)
 
 | Milestone | Status | Notes |
 |---|---|---|
@@ -77,10 +77,11 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.3 vs Bot | DONE | LobbyScene, ResultScene, BotPlayer, local TimerManager — scenes since retired in A09 |
 | v0.4 vs Human online | DONE | `apps/backend/` server with WaitingQueue, RoomManager, Validator, TimerManager, BotManager; SyncClient |
 | v0.5 Robustness | DONE | All T-v0.5-01..04 + T-v0.5-10..15 shipped; NFR-4 ≤2s, NFR-3/6 100-iter desync=0 |
-| v0.6 Flutter shell + Accounts | CODE-COMPLETE | All A–G code-level tasks shipped. Remaining: C01/C02 (Firebase + Apple capability), H-track (store enrolment), I01/I03/I04 (device verification). 124 be + 74 fe + 126 shell tests green. |
+| v0.6 Flutter shell + Accounts | CODE-COMPLETE | Local-account flow is the target auth path. Firebase-era SSO tasks are legacy and should be removed or rewritten as optional Google OAuth without Firebase. H-track/store and device verification remain external gates. |
 | v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
 | v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
 | v0.8 Characters | PARTIAL | Foundations shipped: F01 character registry, F02 extra-turn/scaling helpers, F03 user_progress store/migration. S01 shell picker is partially wired. Pending: backend character start, skills, fizzle, XP/level-up, HUD skill UI. |
+| v0.9 Flutter-native gameplay | TODO | Architecture pivot documented. Implement after human review of [flutter-native-migration.md](flutter-native-migration.md). No gameplay code migration has started in this branch. |
 
 ---
 
@@ -703,7 +704,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Req:** AR-3, MR-7(v) · **Size:** S · **Deps:** —
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** Node's built-in `crypto` module; existing `RejoinManager` (same HMAC pattern).
-- **Outputs:** `apps/backend/src/RoomTokenSigner.ts` exporting `sign({ roomId, userId, slot, seed, ttlMs }) → string` and `verify(token) → { roomId, userId, slot, seed, exp } | null`. JWT-like format: `base64url(payload) + "." + base64url(hmac)`. Secret loaded from `ROOM_TOKEN_SECRET` env var (fail fast if missing in prod mode).
+- **Outputs:** `apps/backend/src/RoomTokenSigner.ts` exporting `sign({ roomId, userId, slot, ttlMs }) → string` and `verify(token) → { roomId, userId, slot, exp } | null`. JWT-like format: `base64url(payload) + "." + base64url(hmac)`. Secret loaded from `ROOM_TOKEN_SECRET` env var (fail fast if missing in prod mode). v0.9 requires no board seed in this token.
 - **Implementation Notes:** Not a full JWT library — fixed algorithm (HS256), fixed claim set, no `alg` header confusion. Short payload (few hundred bytes base64-encoded). TTL default: `ROOM_TOKEN_TTL_MS = 5 * 60 * 1000`. `verify` rejects on: bad format, bad signature, `exp` in the past, unknown fields.
 - **Acceptance:**
   - Unit test: round-trip sign→verify yields the input payload.
@@ -951,10 +952,10 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Req:** MR-6 · **Size:** M · **Deps:** T-v0.6-G02
 - **Context:** [system-design § 4.3 cross-device branch](system-design.md#43-reconnection-v05-mr-6).
 - **Inputs:** Test harness + auth fixtures.
-- **Outputs:** Automated test: start match on client A (userId U); open client B with a fresh token for U; assert B receives `match_resume` with seed + moves + clocks.
+- **Outputs:** Automated test: start match on client A (userId U); open client B with a fresh token for U; assert B receives a resume snapshot. Legacy builds may expose seed + moves + clocks; v0.9 must expose board table + board version + clocks/player states.
 - **Implementation Notes:** Use two in-process Socket.IO clients with different socket ids but the same userId.
 - **Acceptance:**
-  - Test passes; B's engine replays moves and reaches the same board state.
+  - Test passes; B reaches the same board state as A. In v0.9 this must happen without move replay from a shared seed.
 
 ---
 
@@ -1431,9 +1432,214 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 
 **T-v0.8-S01** (PARTIAL) · Character-select screen
 - **Req:** CR-1 · **Size:** M · **Deps:** F01
-- **Outputs:** New Flutter screen `lib/screens/character_select_screen.dart`; reachable from HomeScreen before each match. Lists characters with display name + base stats + skill summary. Selection writes to local `shared_preferences` and is passed to `/matchmaking/join` (or `StartLocalMatch`) as `characterId`. Default loaded from `user_progress.default_character_id` on sign-in.
+- **Outputs:** New Flutter screen `lib/screens/character_select_screen.dart`; reachable from HomeScreen before each match. Lists characters with display name + base stats + skill summary. Selection writes to local `shared_preferences` and is passed to `/matchmaking/join` for online matches or into the local Dart session for Practice / vs Bot as `characterId`. Default loaded from `user_progress.default_character_id` on sign-in.
 - **Current state:** Shell screen, local preference service, route, and `characterId` plumbing are present. Pending: load/sync default from server-side `user_progress.default_character_id` and consume selected character authoritatively in backend B01.
 - **Acceptance:** widget tests for selection persistence and the "remember selection" affordance.
+
+---
+
+## v0.9 — Flutter-native game client + board-delta protocol  *(TODO)*
+
+This milestone replaces the embedded Phaser runtime with Flutter-native gameplay and changes online board sync from seed replay to server-authored flat board tables / generated-tile deltas. Competitive modes have no point score. Read [flutter-native-migration.md](flutter-native-migration.md) before starting any task in this section.
+
+### Sub-track A — Protocol contract and fixtures
+
+**T-v0.9-A01** (TODO) · Board-delta protocol fixtures
+- **Req:** MR-2, MR-3, MR-6, MR-8, MR-9, NFR-6 · **Size:** M · **Deps:** —
+- **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol); [system-design § 4](system-design.md#4-runtime-flows).
+- **Inputs:** `packages/shared-js/src/protocol.ts`, current backend socket tests, current Flutter model conventions.
+- **Outputs:** Protocol fixture docs/tests under `specification/fixtures/` or the closest existing fixture location; updated TypeScript protocol types for `match_found`, `move_resolved`, `board_replaced`, and rejoin snapshots.
+- **Implementation Notes:** Define payloads before implementation code changes. `match_found` / rejoin must contain flat row-major `board`, `width`, `height`, `boardVersion`, active player, player states, and clocks. `move_resolved` must contain generated replacement tiles in deterministic refill order; no seed or competitive score fields. `board_replaced.reason` must support `"no_legal_moves"`.
+- **Acceptance:**
+  - Fixture set includes match start, accepted move with generated tiles, swap fizzle, no-legal-move board replacement, and rejoin.
+  - Fixture validation asserts board arrays are 1D row-major and length equals `width * height`.
+  - Fixture validation asserts `generatedTiles` order is columns left-to-right and top-to-bottom within each column after gravity.
+  - Fixture validation fails if `seed`, `originalSeed`, or `rngState` is present in client-visible online payloads.
+
+**T-v0.9-A02** (TODO) · Dart protocol DTOs
+- **Req:** MR-3, MR-6, MR-9 · **Size:** S · **Deps:** T-v0.9-A01
+- **Context:** [flutter-native-migration § Flutter Game Core](flutter-native-migration.md#7-flutter-game-core).
+- **Inputs:** Fixtures from A01; `apps/frontend/lib/models/` if still used.
+- **Outputs:** `apps/frontend/lib/net/protocol.dart` plus tests that decode every A01 fixture.
+- **Implementation Notes:** Keep DTOs separate from render widgets and from pure `game_core` models. Preserve `boardVersion` as a first-class value for reconciliation.
+- **Acceptance:**
+  - Flutter tests decode fixtures into typed objects.
+  - Missing `boardVersion` or malformed generated-tile arrays produce clear parse failures.
+
+### Sub-track B — Pure Dart game_core
+
+**T-v0.9-B01** (TODO) · Dart board model and generator
+- **Req:** FR-1, FR-3, NFR-5 · **Size:** M · **Deps:** T-v0.9-A01
+- **Context:** [flutter-native-migration § Target package layout](flutter-native-migration.md#target-package-layout).
+- **Inputs:** Legacy TypeScript engine tests as behaviour reference.
+- **Outputs:** `apps/frontend/lib/game_core/board.dart`, `tile.dart`, `generator.dart`, and unit tests.
+- **Implementation Notes:** No Flutter imports. The generator must be injectable so Practice/vs Bot can be deterministic in tests without exposing seeds to online clients.
+- **Acceptance:**
+  - Tests cover board creation, valid tile values, injected generator repeatability, and no initial accidental matches if that invariant is retained.
+
+**T-v0.9-B02** (TODO) · Dart judge: swaps, matches, gravity, refill
+- **Req:** FR-2, FR-3, FR-4, NFR-5 · **Size:** M · **Deps:** T-v0.9-B01
+- **Context:** [requirement § Functional requirements](requirement.md#1-functional-requirements--gameplay--modes).
+- **Inputs:** `apps/frontend/lib/game_core/` from B01; legacy `MatchEngine` tests.
+- **Outputs:** `apps/frontend/lib/game_core/judge.dart`, `resolution.dart`, tests for swaps, cascades, Practice scoring, gravity, refill, and generated-tile reporting.
+- **Implementation Notes:** Resolution must report enough steps for Flutter animations and enough generated tile data for local sessions to mirror the online packet shape. Refill reporting uses the same deterministic order as the server: columns left-to-right, top-to-bottom within each column.
+- **Acceptance:**
+  - A valid Practice swap returns ordered cascade steps, score delta, generated tiles, and final flat board.
+  - Competitive session code can consume the same steps without exposing or rendering a point score.
+  - A no-match adjacent swap returns a fizzle result rather than a protocol/input error.
+
+**T-v0.9-B03** (TODO) · No-legal-move detection and board replacement
+- **Req:** MR-9, NFR-5 · **Size:** S · **Deps:** T-v0.9-B02
+- **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
+- **Inputs:** Dart judge from B02.
+- **Outputs:** `apps/frontend/lib/game_core/legal_moves.dart` plus tests.
+- **Implementation Notes:** Expose `hasLegalMove(board)` and `replaceBoard(reason: noLegalMoves)` helpers for local sessions. Online clients consume server replacement packets instead of calling this for authority.
+- **Acceptance:**
+  - Tests include at least one board with legal moves and one board with none.
+  - Replacement creates a playable board and reports `reason: no_legal_moves`.
+
+**T-v0.9-B04** (TODO) · Local bot and player-state effects
+- **Req:** FR-4, FR-6, CR-1, CR-6, CR-9 · **Size:** M · **Deps:** T-v0.9-B02
+- **Context:** [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
+- **Inputs:** Legacy bot behaviour and character/stat helpers.
+- **Outputs:** `apps/frontend/lib/game_core/bot.dart`, `player_state.dart`, `practice_scoring.dart`, tests.
+- **Implementation Notes:** Keep this local and pure. Use current character/stat rules where they already exist in the product; do not introduce new character balancing.
+- **Acceptance:**
+  - Bot chooses a legal move and returns within the configured bound.
+  - Player-state effects match existing backend/shared-js expectations for tile effects. Point score is Practice-only.
+
+### Sub-track C — Flutter game UI and local modes
+
+**T-v0.9-C01** (TODO) · Flutter board renderer and input controller
+- **Req:** FR-2, NFR-1, NFR-2, NFR-8, NFR-9 · **Size:** M · **Deps:** T-v0.9-B02
+- **Context:** [system-design § 3](system-design.md#3-layered-component-view).
+- **Inputs:** `apps/frontend/lib/screens/`, current theme, Dart `game_core`.
+- **Outputs:** `apps/frontend/lib/game_ui/board_view.dart`, `board_controller.dart`, animation helpers, widget tests.
+- **Implementation Notes:** Use Flutter widgets/CustomPainter as appropriate. Board size, hit targets, focus, keyboard/touch/mouse input, reduced-motion behaviour, and animation timing must be stable across mobile and web.
+- **Acceptance:**
+  - Widget tests cover selecting/swapping by tap and keyboard.
+  - Reduced-motion mode skips or shortens nonessential movement while preserving state updates.
+
+**T-v0.9-C02** (TODO) · Practice mode: score-only endless local session
+- **Req:** FR-5, NFR-5 · **Size:** M · **Deps:** T-v0.9-B03, T-v0.9-C01
+- **Context:** [requirement § FR-5](requirement.md#1-functional-requirements--gameplay--modes); [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
+- **Inputs:** Home/mode flow, character selection, Dart judge/generator.
+- **Outputs:** `apps/frontend/lib/screens/practice_game_screen.dart` and/or session controller under `apps/frontend/lib/game_ui/`.
+- **Implementation Notes:** Practice has no opponent, no turn clock, no win/lose/draw, and no competitive result. Display only the player's score and continue until the player leaves.
+- **Acceptance:**
+  - Starting Practice creates no server room and opens a playable Flutter board.
+  - Score updates after cascades.
+  - Leaving returns to the home flow without showing a result screen.
+
+**T-v0.9-C03** (TODO) · Local vs Bot session
+- **Req:** FR-5, FR-6, FR-7, NFR-5 · **Size:** M · **Deps:** T-v0.9-B04, T-v0.9-C01
+- **Context:** [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
+- **Inputs:** Dart bot, Dart judge, existing result screen.
+- **Outputs:** `apps/frontend/lib/screens/bot_game_screen.dart` and local bot session controller.
+- **Implementation Notes:** No gameplay socket. The local judge/generator owns board state for both human and bot turns.
+- **Acceptance:**
+  - vs Bot can be completed offline.
+  - Bot turns animate through the same board UI as human moves.
+  - End result is produced locally.
+
+**T-v0.9-C04** (TODO) · Board replacement notification UI
+- **Req:** MR-9, NFR-9 · **Size:** S · **Deps:** T-v0.9-C01
+- **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
+- **Inputs:** Board renderer/session controllers.
+- **Outputs:** Reusable notification/banner component under `apps/frontend/lib/game_ui/`.
+- **Implementation Notes:** Trigger for local sessions when `game_core` replaces a board; trigger for online sessions when `board_replaced.reason == "no_legal_moves"`.
+- **Acceptance:**
+  - Widget test verifies the notification appears exactly once per replacement and does not block input after dismissal/timeout.
+
+### Sub-track D — Online Flutter client
+
+**T-v0.9-D01** (TODO) · Dart Socket.IO online client
+- **Req:** MR-1, MR-3, MR-6, AR-3 · **Size:** M · **Deps:** T-v0.9-A02
+- **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
+- **Inputs:** Current matchmaking services, room token flow, Dart protocol DTOs.
+- **Outputs:** `apps/frontend/lib/net/online_game_client.dart` plus tests/mocks.
+- **Implementation Notes:** The Flutter client attaches the server-issued room token directly to the socket handshake. The app session token remains HTTP-only. No WebView bridge participates.
+- **Acceptance:**
+  - Client emits moves/forfeits and handles match start, move resolved, board replaced, rejoin, game over, auth rejection.
+  - Reconnect uses the current room-token refresh/resume path without exposing seed data.
+
+**T-v0.9-D02** (TODO) · Online Flutter session integration
+- **Req:** FR-8, MR-2, MR-3, MR-6, MR-9, NFR-6 · **Size:** M · **Deps:** T-v0.9-C01, T-v0.9-C04, T-v0.9-D01, T-v0.9-E02
+- **Context:** [system-design § 4.2](system-design.md#42-online-vs-human-move).
+- **Inputs:** `online_game_client.dart`, board renderer, backend board-delta protocol.
+- **Outputs:** `apps/frontend/lib/screens/online_game_screen.dart` and online session controller.
+- **Implementation Notes:** The online controller must render only server-authored board state. It may animate predicted selection/recoil locally, but accepted board changes come from `match_found`, `move_resolved`, and `board_replaced`.
+- **Acceptance:**
+  - `match_found` flat board table displays without local regeneration.
+  - `move_resolved.generatedTiles` animates and updates the board version.
+  - `board_replaced` swaps the full board and shows the no-move notification.
+  - Rejoin restores flat board table/dimensions/version without replaying moves.
+
+### Sub-track E — Backend board authority
+
+**T-v0.9-E01** (TODO) · Server room state without shared seed payloads
+- **Req:** MR-2, MR-3, MR-6, NFR-5 · **Size:** M · **Deps:** T-v0.9-A01
+- **Context:** [system-design § 4.2](system-design.md#42-online-vs-human-move).
+- **Inputs:** `apps/backend/src/RoomManager.ts`, `MatchEngineService.ts`, protocol types.
+- **Outputs:** Backend room/judge changes and tests.
+- **Implementation Notes:** The server may keep private randomness state internally, but client-visible vs Human payloads must expose flat board table/dimensions/version and generated tile arrays, not seed/rng replay data or competitive scores.
+- **Acceptance:**
+  - `match_found` and rejoin include flat board table/dimensions/version and no seed fields.
+  - Backend tests assert room snapshots preserve board version, player states, active player, and clocks.
+
+**T-v0.9-E02** (TODO) · Server move_resolved generated-tile arrays
+- **Req:** MR-3, MR-8, NFR-6 · **Size:** M · **Deps:** T-v0.9-E01
+- **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol).
+- **Inputs:** Backend judge cascade/refill code.
+- **Outputs:** Updated `move_resolved` events, protocol tests, bandwidth regression sample.
+- **Implementation Notes:** Hot-path packets should include ordered animation steps and generated tile arrays. The emitted generated tile order is columns left-to-right and top-to-bottom within each column. Avoid full board snapshots except where allowed by MR-3/MR-8.
+- **Acceptance:**
+  - Accepted move emits generated tiles sufficient for a client to reconstruct the final board.
+  - Test fails if every normal move sends a full board snapshot as the primary refill mechanism.
+
+**T-v0.9-E03** (TODO) · Server no-legal-move full board replacement
+- **Req:** MR-9 · **Size:** M · **Deps:** T-v0.9-E02
+- **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
+- **Inputs:** Backend judge/legal move detection.
+- **Outputs:** `board_replaced` server event, tests for no-legal-move path.
+- **Implementation Notes:** Detect after a board settles. If no legal moves exist, generate a new playable board, increment `boardVersion`, and emit `board_replaced { reason: "no_legal_moves", width, height, board, boardVersion, playerStates }`.
+- **Acceptance:**
+  - Forced no-move board emits one replacement event.
+  - Replacement board has at least one legal move.
+  - Scores/player states are preserved unless the game rules explicitly changed them before replacement.
+
+### Sub-track F — Retire legacy runtime path
+
+**T-v0.9-F01** (TODO) · Remove game-view bootstrap from Flutter routes
+- **Req:** NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-C02, T-v0.9-C03, T-v0.9-D02
+- **Context:** [flutter-native-migration § Migration plan](flutter-native-migration.md#migration-plan-step-by-step).
+- **Inputs:** `apps/frontend/lib/router.dart`, bridge services, game-view bootstrap services.
+- **Outputs:** Flutter routing/service changes that point all modes to native Flutter screens; obsolete bridge/bootstrap code removed or isolated as legacy.
+- **Implementation Notes:** Do not delete `packages/game-view` until CI/build references are removed and parity tests pass.
+- **Acceptance:**
+  - Practice, vs Bot, and vs Human route to Flutter-native gameplay.
+  - No runtime path loads a WebView/iframe for gameplay.
+
+**T-v0.9-F02** (TODO) · Docker/CI/build cleanup
+- **Req:** NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-F01
+- **Context:** [system-design § 6](system-design.md#6-deployment-topology-v10).
+- **Inputs:** `docker-compose.yml`, Dockerfiles, package scripts, CI docs.
+- **Outputs:** Build pipeline updates that no longer build or serve `packages/game-view` for the product runtime.
+- **Implementation Notes:** Keep backend/shared-js builds intact. If `packages/game-view` remains temporarily for archive/reference, mark it explicitly non-runtime.
+- **Acceptance:**
+  - Docker build succeeds without requiring the Phaser/Vite product bundle.
+  - Flutter Web/native builds run gameplay without a second embedded bundle.
+
+**T-v0.9-F03** (TODO) · Regression matrix and docs closeout
+- **Req:** MR-2, MR-3, MR-6, MR-8, MR-9, NFR-1, NFR-2, NFR-6, NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-F02
+- **Context:** [flutter-native-migration § Review checklist](flutter-native-migration.md#review-checklist).
+- **Inputs:** All v0.9 outputs.
+- **Outputs:** Updated docs, regression evidence, and launch checklist notes.
+- **Implementation Notes:** Include local Practice, local vs Bot, online vs Human, no-move board replacement, rejoin, reduced motion, keyboard, Docker build, and platform smoke tests.
+- **Acceptance:**
+  - Review checklist is complete.
+  - `flutter test`, `flutter analyze`, backend build/tests, and Docker build status are recorded.
+  - Remaining legacy references are either removed or explicitly labelled historical.
 
 ---
 
@@ -1441,7 +1647,7 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 
 - **T-CC-01** · Keep specs in sync with code (`planning.md`, `requirement.md`, `system-design.md`) · continuous · Outputs: spec updates per change.
 - **T-CC-02** · CI: shared + fe + be + shell build/test on every PR · Outputs: CI config.
-- **T-CC-03** · Determinism test across fe + be (and v0.6+ against the shell's embedded build) · Req: NFR-5, NFR-6 · Outputs: CI job.
+- **T-CC-03** · Board-authority equivalence tests: backend vs online fixtures, Dart local judge fixtures, and rejoin board-version checks · Req: NFR-5, NFR-6 · Outputs: CI job.
 - **T-CC-04** · Bandwidth regression test: fails CI if a new event enters the hot path · Req: MR-8 · Outputs: CI check.
 - **T-CC-05** · Monthly `npm audit` + `flutter pub outdated` · Outputs: hygiene report.
 
@@ -1450,20 +1656,29 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 ## Dependency graph (milestone level)
 
 ```
-v0.1  ──▶  v0.2  ──▶  v0.3  ──▶  v0.4  ──▶  v0.5  ──▶  v0.6  ──▶  v0.7  ──▶  v1.0
-                                                           │
-                                                           ├── A (shell scaffold) ──┐
-                                                           ├── B (bridge) ◀─ A01   │
-                                                           ├── C (identity client) │
-                                                           ├── D (identity server) │
-                                                           ├── E (persistence)     │
-                                                           ├── F (deletion) ◀─ D+E │
-                                                           ├── G (rejoin upgrade) ◀─ D
-                                                           ├── H (store prep)      │
-                                                           └── I (verification) ◀──┘
+v0.1 ─▶ v0.2 ─▶ v0.3 ─▶ v0.4 ─▶ v0.5 ─▶ v0.6 ─▶ v0.7 ─▶ v0.8 ─▶ v0.9 ─▶ v1.0
+                                                        │                 │
+                                                        │                 ├── A (protocol fixtures)
+                                                        │                 ├── B (Dart game_core) ◀─ A
+                                                        │                 ├── C (Flutter UI/local) ◀─ B
+                                                        │                 ├── E (backend board authority) ◀─ A
+                                                        │                 ├── D (online client) ◀─ A+C+E
+                                                        │                 └── F (retire legacy path) ◀─ C+D+E
+                                                        │
+                                                        ├── A (shell scaffold)
+                                                        ├── B (legacy bridge) ◀─ A01
+                                                        ├── C (identity client)
+                                                        ├── D (identity server)
+                                                        ├── E (persistence)
+                                                        ├── F (deletion) ◀─ D+E
+                                                        ├── G (rejoin upgrade) ◀─ D
+                                                        ├── H (store prep)
+                                                        └── I (verification)
 ```
 
 Within v0.6, sub-tracks **A, C, D, E, H** are cold-start parallel. **B** opens once A01 merges. **F** opens once D + E are usable. **G** opens once D is usable. **I** closes the milestone.
+
+Within v0.9, **A** must land first because it defines the protocol contract. **B** and **E** can then proceed in parallel. **C** starts once the Dart judge can resolve local moves. **D** integrates after the Dart DTOs, board UI, and backend board-delta path exist. **F** is last and removes the legacy runtime path only after all modes are playable in Flutter.
 
 ---
 

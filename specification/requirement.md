@@ -25,20 +25,20 @@ Scope of this document: **functional gameplay & modes**, **multiplayer & network
   4. If falling and refilling produces new matches, those MUST resolve in the same way, recursively (cascades).
 Resolution MUST complete before the next swap input is accepted.
 
-**FR-4 — Scoring.** Each cleared tile MUST award points to the player whose swap caused the clear. Cascades MUST award escalating points: a tile cleared in the *n*th cascade step is worth more than the same tile cleared in step 1. The exact formula is defined in [§ Open values](#open-values).
+**FR-4 — Practice scoring.** Practice mode MUST display a local score for training feedback. Each cleared tile SHOULD award points to the player whose swap caused the clear, and cascades SHOULD award escalating points. The exact formula is defined in [§ Open values](#open-values). Competitive modes (**vs Bot** and **vs Human**) MUST NOT display or transmit point scores; their competitive state comes from player stats, clocks, turns, and match outcome.
 
 **FR-5 — Game modes.** The game MUST support exactly three modes, selectable from the entry screen:
-  - **Practice** — solo, no opponent, no clock, no scoring pressure. Used to learn the mechanic.
+  - **Practice** — solo, no opponent, no clock, no competitive result. Used to learn the mechanic. The screen displays score only and continues until the player leaves.
   - **vs Bot** — single player against a local AI opponent, turn-based with per-player clocks.
   - **vs Human** — two humans online, turn-based with per-player clocks.
 
 **FR-6 — Bot opponent.** The bot MUST only submit legal swaps. It SHOULD prefer swaps that clear more tiles (i.e. it is not a random mover). It MUST always submit its move within a bounded "thinking time" so the game never stalls. Exact bound is defined in [§ Open values](#open-values).
 
-**FR-7 — End conditions.** A match ends when any of the following is true:
-  - (a) A player's clock reaches zero. The other player wins.
-  - (b) Both players disconnect and neither returns within the reconnection window (see MR-6).
-  - (c) *(future)* A score cap is reached. *Out of scope for the first spec.*
-On end, each player MUST see a clear **WIN / LOSE / DRAW** outcome together with both final scores.
+**FR-7 — End conditions.** A competitive match (**vs Bot** or **vs Human**) ends when any of the following is true:
+  - (a) A player's stamina or health reaches zero. The other player wins.
+On end, each player MUST see a clear **WIN / LOSE / DRAW** outcome. Competitive result screens MUST NOT include point scores unless a later requirement reintroduces them.
+
+Practice mode is explicitly exempt from WIN / LOSE / DRAW. It has no opponent, no timer, no match result, and ends only when the player leaves.
 
 **FR-8 — Shared board.** In **vs Bot** and **vs Human** modes, both participants MUST play on the *same* board. A swap by one player changes the board that the other player will see on their next turn. There is no separate "my board" and "your board".
 
@@ -48,23 +48,28 @@ On end, each player MUST see a clear **WIN / LOSE / DRAW** outcome together with
 
 **MR-1 — Matchmaking.** A player who chooses **vs Human** MUST be paired with another waiting player if one exists. If no human opponent is available within a bounded wait time, the player MUST be offered (or automatically transitioned into) a bot match rather than being left waiting indefinitely. Exact wait bound is defined in [§ Open values](#open-values).
 
-**MR-2 — Determinism.** The initial board layout and every subsequent refill tile MUST be fully determined by a shared numeric seed provided by the server at match start. Given the seed and the ordered list of moves in a match, any client MUST be able to compute byte-identical board state at every step. No other source of randomness may influence board state.
+**MR-2 — Board authority.** In **vs Human**, the server MUST be authoritative for the board table and every generated replacement tile. The server MUST NOT rely on clients sharing or replaying a random seed. Clients receive the current board table from the server at match start and rejoin; during normal play they apply server-authored board-delta packets. In **Practice** and **vs Bot**, a local Dart authoritative judge MAY generate and resolve the board on-device because no remote opponent depends on the result.
 
-**MR-3 — Minimal wire protocol.** During normal play, the server MUST NOT send full board state to clients. It MUST send only:
-  - the seed at match start,
-  - each player's moves (two adjacent cell coordinates + whose move it is) as they happen,
-  - clock updates and turn-change notifications.
-Full-state messages are reserved for rejoin-after-disconnect (see MR-6) and MUST NOT appear in the hot path.
+**MR-3 — Board-delta wire protocol.** During normal **vs Human** play, the server MUST send enough board data for Flutter clients to animate and reconstruct the authoritative board without a shared seed:
+  - `match_found` / rejoin payloads include the current board table as a flat 1D row-major array, explicit `width` / `height`, and board version.
+  - accepted moves emit ordered resolve steps: cleared cells, falling tile movements, stat updates, and a 1D array of newly generated tiles with their destination coordinates and symbols.
+  - server and client MUST agree on refill consumption order: after gravity settles, scan columns left-to-right and fill each column's empty cells top-to-bottom. `generatedTiles` MUST be emitted and consumed in that order.
+  - if the settled board has no legal moves, the server emits a dedicated full-board replacement notification containing the new flat board table, dimensions, and reason `no_legal_moves`.
+  - turn-change and clock/player-state updates remain server-authored.
+
+Full board tables MAY appear at match start, rejoin, explicit reconciliation, and no-legal-move board replacement. Normal refill flow SHOULD use generated-tile arrays rather than seed replay.
 
 **MR-4 — Turn enforcement.** The server MUST be authoritative for whose turn it is. Moves submitted by the non-active player MUST be rejected without affecting game state. Clients MAY render optimistic UI for their own accepted move, but MUST reconcile on the next server update.
 
 **MR-5 — Per-player clocks.** Each player MUST have a bounded total thinking time per match (chess-clock semantics: the active player's clock ticks down, the opponent's does not). The server MUST be authoritative for both clocks. Clients render clocks based on server updates; they MUST NOT independently run their own authoritative clock in head-to-head modes. Exact per-player time is defined in [§ Open values](#open-values).
 
-**MR-6 — Disconnection & reconnection.** If a player's connection drops mid-match, the server MUST hold the match open for a bounded window and MUST allow that player to rejoin and resume with full state restored (seed + move history + current clocks). If the window elapses without a rejoin, the match MUST end per FR-7(b). Rejoin tokens MUST be keyed by authenticated user id (see AR-1) rather than socket id, so a player MAY resume from a different device (e.g. phone → laptop) as long as both sessions belong to the same account and the window has not elapsed. Exact window is defined in [§ Open values](#open-values).
+**MR-6 — Disconnection & reconnection.** If a player's connection drops mid-match, the server MUST hold the match open for a bounded window and MUST allow that player to rejoin and resume with full state restored (current flat board table, dimensions, board version, player states, active player, and current clocks). If the window elapses without a rejoin, the match MUST end per FR-7(b). Rejoin tokens MUST be keyed by authenticated user id (see AR-1) rather than socket id, so a player MAY resume from a different device (e.g. phone → laptop) as long as both sessions belong to the same account and the window has not elapsed. Exact window is defined in [§ Open values](#open-values).
 
 **MR-7 — Move validation.** The server MUST validate every submitted move against at least: (i) bounds, (ii) adjacency, (iii) turn ownership, (iv) that the submitting socket belongs to the correct room, (v) that the submitting socket was authenticated at handshake with a valid **room token** whose `{roomId, userId, slot}` claims match the target room and player slot. Invalid moves MUST NOT mutate state and MUST be reported back to the submitter as rejected. Expired room tokens MUST cause a dedicated `auth_token_rejected` event (see AR-3) so the shell can re-issue a fresh one without dropping the match.
 
-**MR-8 — Bandwidth ceiling.** Total wire traffic for a typical match SHOULD remain on the order of a few kilobytes. Move messages are tiny (a pair of coordinates plus metadata); no board snapshots are sent in the hot path. This is a design consequence of MR-2 and MR-3 and exists as an explicit target so future changes don't silently regress it.
+**MR-8 — Bandwidth ceiling.** Total wire traffic for a typical match SHOULD remain modest. The protocol no longer optimises for seed-only replay; instead it sends board-delta packets containing generated tiles and animation data. Hot-path messages SHOULD avoid full board tables except when required for no-legal-move replacement or reconciliation. This exists as an explicit target so future changes don't silently regress into sending full snapshots after every move.
+
+**MR-9 — No-legal-move board replacement.** After every settled board state, the authoritative judge MUST check whether at least one legal match-producing swap exists. If none exists, it MUST replace or shuffle the entire board into a playable state, increment the board version, and emit a notification containing the new flat board table, dimensions, and reason `no_legal_moves`. The client MUST show a clear, non-blocking notification that the board was replaced because no move was available.
 
 ---
 
@@ -72,20 +77,20 @@ Full-state messages are reserved for rejoin-after-disconnect (see MR-6) and MUST
 
 **AR-1 — Mandatory authentication.** Every player MUST sign in before reaching matchmaking or any game mode, including Practice. There is no guest play: the product is distributed only as a Flutter app shell (iOS, Android, Flutter Web) which gates all gameplay behind authentication. The raw embedded game view is never reachable without a valid auth token.
 
-**AR-2 — Sign-in providers.** The product MUST offer **Apple Sign-In** and **Google Sign-In** as authentication options. Email/password sign-in MUST NOT be offered in the first spec. (Apple Sign-In is required alongside Google to comply with App Store Review Guideline 4.8.)
+**AR-2 — Sign-in providers.** The product MUST support the currently shipped local username/password account flow. Google OAuth MAY be added without Firebase. Apple Sign-In MAY be added if the product also offers Google Sign-In on iOS and App Store compliance requires parity. Firebase Auth is not part of the target architecture.
 
 **AR-3 — Two-token flow.** Two distinct tokens, scoped to two distinct responsibilities.
 
-- **Firebase idToken** (shell-only). The Flutter shell MUST obtain the idToken from the provider and refresh it as required by the provider's SDK. The idToken is used to authenticate the shell's HTTP matchmaking calls to our server (§ system-design 2.4). The idToken MUST NOT cross the shell/game bridge and MUST NOT be used on the Socket.IO handshake.
-- **Room token** (server-issued, game-view-bound). When matchmaking succeeds, our server MUST sign a short-lived room token carrying `{roomId, userId, slot, seed, exp}` and return it in the matchmaking response. The shell MUST pass this room token to the embedded game view via the `startMatch` bridge message. The game view MUST attach the room token to its Socket.IO handshake. On server-side rejection (expired token, usually on long matches), the game view MUST emit `authTokenRejected` via the bridge; the shell MUST then call the matchmaking resume endpoint with its current idToken, receive a fresh room token, and call `startMatch` again.
+- **Session token** (Flutter-app HTTP token). The Flutter app MUST obtain a session token from our backend local auth flow or an approved OAuth exchange endpoint. The token is used to authenticate HTTP matchmaking/account calls to our server (§ system-design 2.4). The session token MUST NOT be used on the Socket.IO gameplay handshake.
+- **Room token** (server-issued, Flutter-game-client-bound). When matchmaking succeeds, our server MUST sign a short-lived room token carrying `{roomId, userId, slot, exp}` and return it in the matchmaking response. The Flutter client MUST attach the room token to its Socket.IO handshake. The room token MUST NOT carry a board seed. On server-side rejection (expired token, usually on long matches), the Flutter client MUST call the matchmaking resume endpoint with its current session token, receive a fresh room token, and reconnect/resume.
 
-The game view MUST NOT initiate sign-in itself. Apart from the room token and platform lifecycle events (foreground, background, pause, resume), no gameplay data MAY cross the shell/game bridge — in particular, moves, clock ticks, and match events stay inside the game view's socket connection.
+The game client MUST NOT initiate sign-in itself. The full Flutter client owns sign-in, matchmaking, socket connection, lifecycle handling, and rendering; no shell/game WebView bridge is part of the target architecture.
 
 **AR-4 — Account deletion.** The app MUST provide an in-app path to permanently delete the signed-in account, accessible without contacting support. On deletion, the user row MUST be removed and any associated match-history rows MUST be anonymised (replace userId with a tombstone identifier) so that the opponent's history remains intact. Deletion MUST complete within a bounded grace period defined in [§ Open values](#open-values).
 
 **AR-5 — Privacy & terms.** A published privacy policy and terms-of-service MUST be reachable from within the app prior to sign-in. The app MUST NOT collect personal data beyond what the sign-in provider returns (display name, avatar URL, provider-scoped user id) plus what is strictly required for gameplay and reconnection.
 
-**AR-6 — Match history persistence.** For every completed match, the server MUST persist a record containing: match id, both player ids, final scores, outcome (W/L/D), duration, and end timestamp. Persisted match history is the only durable state introduced by identity; live match state (board, moves, clocks) remains in-memory for the duration of the match only.
+**AR-6 — Match history persistence.** For every completed competitive match, the server MUST persist a record containing: match id, both player ids, outcome (W/L/D), duration, and end timestamp. Competitive match history MUST NOT require point scores. Persisted match history is the only durable state introduced by identity; live match state (board, moves, clocks) remains in-memory for the duration of the match only.
 
 **AR-7 — Cross-device session.** An authenticated user MUST be able to have at most one active match at a time. Opening a second client while a match is in progress MUST either resume that same match (if within the reconnection window) or refuse to start a new one. This follows from MR-6 combined with AR-1.
 
@@ -93,7 +98,7 @@ The game view MUST NOT initiate sign-in itself. Apart from the room token and pl
 
 ## 4. Character & progression requirements
 
-**CR-1 — Character selection.** Before **every** match (all modes including Practice) the player MUST be presented with the character roster and MAY pick any owned character. Selection is **per-match**: a player is never locked to a single character across matches. The most-recently-picked character is remembered (server-side `user_progress.default_character_id`, mirrored to client preference) only as a default pre-selection on the picker — the player can always change it. The selected character's identifier MUST be sent with the matchmaking request (or with the `StartLocalMatch` bridge message in solo) so server-side stats / skill resolution can use it.
+**CR-1 — Character selection.** Before **every** match (all modes including Practice) the player MUST be presented with the character roster and MAY pick any owned character. Selection is **per-match**: a player is never locked to a single character across matches. The most-recently-picked character is remembered (server-side `user_progress.default_character_id`, mirrored to client preference) only as a default pre-selection on the picker — the player can always change it. The selected character's identifier MUST be sent with the matchmaking request for online play or passed into the local Dart session for Practice / vs Bot so stats and skill resolution can use it.
 
 **CR-2 — Character definition.** Each character MUST define: `id`, `displayName`, `baseMaxHealth`, `baseMaxMana`, `baseMaxStamina`, `baseAtk`, and exactly **three** skills. Definitions live in `packages/shared-js/src/character/` and are imported by both the server (authoritative damage) and the client (UI affordances). Adding a new character MUST be possible without changing engine or HUD code.
 
@@ -145,9 +150,9 @@ Damage / heal amounts MUST be capped at the relevant stat's `[0, max]` window. T
 
 ### Determinism
 
-**NFR-5 — Determinism is a correctness invariant, not a preference.** No code path that affects board state may introduce randomness from any source other than the seeded RNG whose seed comes from the server. Calls to `Math.random()`, wall-clock-based randomness, or environment-derived entropy in board-affecting code are violations of this requirement, not stylistic choices.
+**NFR-5 — Randomness authority.** Board-affecting randomness MUST be owned by the current authoritative judge. For **vs Human**, that judge is the server and clients MUST consume explicit board tables / generated tile arrays rather than derive board state from a shared seed. For **Practice** and **vs Bot**, that judge is the local Dart game-core library. Calls to unstructured randomness in UI/rendering code MUST NOT affect board state.
 
-**NFR-6 — Board equivalence across clients.** For any match, at any point in time, the post-resolution board state on every connected client MUST be identical cell-for-cell. Divergence is a critical bug.
+**NFR-6 — Board equivalence across clients.** For any **vs Human** match, at any point in time, the post-resolution board state on every connected client MUST match the server's authoritative board table for the same board version. Divergence is a critical bug.
 
 ### Accessibility
 
@@ -163,8 +168,8 @@ Damage / heal amounts MUST be capped at the relevant stat's `[0, max]` window. T
 
 **NFR-11 — Platform support.** The product MUST run correctly on:
   - **Flutter Web**, opened in the latest two major versions of Chrome, Firefox, and Safari on desktop, and at least one evergreen mobile browser.
-  - **iOS**, as a Flutter app shell wrapping the game view in a WKWebView. Minimum iOS version is defined in [§ Open values](#open-values).
-  - **Android**, as a Flutter app shell wrapping the game view in a platform WebView. Minimum Android version is defined in [§ Open values](#open-values).
+  - **iOS**, as a Flutter app. Minimum iOS version is defined in [§ Open values](#open-values).
+  - **Android**, as a Flutter app. Minimum Android version is defined in [§ Open values](#open-values).
 Board state MUST be cell-identical across all three runtime targets for a given match.
 
 **NFR-12 — Low-friction entry.**
@@ -182,7 +187,7 @@ These values are intentionally left as placeholders in this specification. They 
 |---|---|---|
 | Grid size (rows × cols) | FR-1 | 8 × 8 |
 | Symbol palette count | FR-1 | 5 – 6 colours/shapes |
-| Cascade scoring formula | FR-4 | `cleared_tiles × 10 × cascade_level` |
+| Practice scoring formula | FR-4 | `cleared_tiles × 10 × cascade_level` |
 | Bot thinking-time bound | FR-6 | ≤ 1 s per move |
 | Matchmaking wait before bot fallback | MR-1 | ≤ 10 s |
 | Per-player clock | MR-5 | 5 min per player per match |
@@ -191,7 +196,7 @@ These values are intentionally left as placeholders in this specification. They 
 | Account deletion grace period | AR-4 | 30 days (soft-delete + hard-delete on expiry), or immediate hard-delete for simplicity |
 | Minimum iOS version | NFR-11 | iOS 15 |
 | Minimum Android version | NFR-11 | Android 10 (API 29) |
-| Identity provider backend | AR-2, AR-3 | Firebase Auth (Apple + Google providers) |
+| Identity provider backend | AR-2, AR-3 | Backend local sessions; optional Google OAuth exchange without Firebase |
 | Persistence store | AR-6 | Postgres (production); SQLite acceptable for closed beta |
 | Swap fizzle stamina penalty | CR-10 | 3_000 ms |
 

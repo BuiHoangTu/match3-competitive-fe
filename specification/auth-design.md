@@ -1,15 +1,14 @@
-# Auth design — local accounts + SSO coexistence
+# Auth design — local accounts + optional Google OAuth
 
-Status: **SHIPPED** — local-account auth + SSO interface coexist on master.
-SSO buttons gated behind "Under development" until C01–C04 complete.
-Owner: codebase. Last updated: 2026-05-02.
+Status: **SHIPPED for local accounts**. Firebase Auth is no longer part of the target architecture.
+Owner: codebase. Last updated: 2026-05-11.
 
 ## Goals
 
 1. Ship a fully playable system on a spare PC / VM via `docker compose up`, with **no external services** required.
 2. Allow username/password local accounts (no email verification, no third-party).
-3. Keep the door open for Apple + Google SSO — same downstream code path, switchable at runtime.
-4. Same userId space for both: a local account and an SSO account look identical to the matchmaker, persistence, and rejoin paths.
+3. Keep the door open for Google OAuth without Firebase: provider tokens are exchanged with our backend for the same local session-token shape.
+4. Same userId space for all account types: a local account and a future OAuth account look identical to the matchmaker, persistence, and rejoin paths.
 
 ## Non-goals
 
@@ -29,10 +28,9 @@ Owner: codebase. Last updated: 2026-05-02.
 │   │   Caches sessionToken in memory                │     │
 │   └────────────────────────────────────────────────┘     │
 │   ┌────────────────────────────────────────────────┐     │
-│   │ FirebaseAuthService (kept; behind feature flag)│     │
-│   │   Apple / Google → Firebase idToken            │     │
+│   │ Optional GoogleOAuthService (future)           │     │
+│   │   Google id token → backend OAuth exchange     │     │
 │   └────────────────────────────────────────────────┘     │
-│   SSO buttons → "Under development" snackbar (now)        │
 └────────────────┬─────────────────────────────────────────┘
                  │ Authorization: Bearer <token>
                  ▼
@@ -40,9 +38,7 @@ Owner: codebase. Last updated: 2026-05-02.
 │ Backend (Node.js)                                        │
 │   verifyToken(token):                                    │
 │     1. Try LocalSessionSigner.verify (HMAC, fast).       │
-│     2. If that fails AND firebase-admin is initialised,  │
-│        try Firebase verifyIdToken.                       │
-│     3. Cache successful result by SHA-256(token).        │
+│     2. Cache successful result by SHA-256(token).        │
 │   POST /auth/register {username, email, password}        │
 │       → 201 {sessionToken, expiresAt, userId}            │
 │   POST /auth/login {username, password}                  │
@@ -63,8 +59,7 @@ The room-token flow downstream (matchmaking → handshake) is **unchanged** — 
 | Token | Issuer | Algorithm | Recognised by |
 |---|---|---|---|
 | Local session token | server | HS256 (HMAC-SHA256) over `{userId, kind:"session", exp}` | LocalSessionSigner.verify (try first) |
-| Firebase idToken | Firebase Auth | RS256 (asymmetric) | firebase-admin verifyIdToken (fallback) |
-| Room token | server | HS256 over `{roomId, userId, slot, seed, exp}` | RoomTokenSigner (used inside socket handshake only) |
+| Room token | server | HS256 over `{roomId, userId, slot, exp}` | RoomTokenSigner (used inside socket handshake only; no board seed) |
 
 Local session tokens have a long TTL (e.g. 7 days); the shell stores it in memory and re-issues on each app start by re-logging-in if past expiry.
 
@@ -87,28 +82,28 @@ No password complexity rules in v1.0; we'll add them later if needed.
 | Username already taken | 409 USERNAME_TAKEN |
 | Invalid credentials | 401 INVALID_CREDENTIALS (same code for "no such user" and "wrong password" — defense in depth) |
 | Missing fields | 400 BAD_REQUEST |
-| Backend has no Firebase config and SSO endpoint hit | UI shows "Under development" — endpoint never called |
+| OAuth endpoint unavailable and Google button hit | UI shows "Under development" or a typed provider error |
 
 ## Security posture
 
-- Server starts cleanly **without** any Firebase service-account credential. Firebase verification only activates if `FIREBASE_PROJECT_ID` + `GOOGLE_APPLICATION_CREDENTIALS` (or equivalent) are set.
+- Server starts cleanly with no Firebase configuration or service-account credential.
 - `ROOM_TOKEN_SECRET` and `SESSION_TOKEN_SECRET` are required for production; in dev they're auto-generated random 32-byte values per server boot (logged with a warning so operators notice).
 - Sessions are not revoked centrally on logout — the client just discards its token. Revocation is a v1.x concern (would require a tokens table + check on each verify).
 
-## Migration path to SSO
+## Migration path to Google OAuth
 
-1. Configure Firebase + Apple/Google providers (T-v0.6-C01..C04).
-2. Deploy Firebase service-account key into the server env.
-3. Flip a shell config flag from `LOCAL_ONLY` to `LOCAL_AND_SSO`.
-4. SSO buttons stop showing the "under development" snackbar and call `FirebaseAuthService` instead.
-5. Both auth paths remain valid simultaneously; users can have either kind of account.
+1. Configure Google OAuth client IDs for the Flutter targets.
+2. Add a backend OAuth exchange endpoint that verifies Google id tokens directly or through a small Google token-verification library.
+3. The exchange endpoint returns our normal `{sessionToken, expiresAt, userId}` payload.
+4. The Google button stops showing the "under development" snackbar and calls the Google OAuth exchange.
+5. Both auth paths remain valid simultaneously; users can have either kind of account. Firebase is not introduced for this path.
 
 ## Files added/changed
 
 - `apps/backend/migrations/003_local_accounts.sql` — schema
 - `apps/backend/src/persistence/LocalAccountStore.ts` — register / verifyPassword / lookup
 - `apps/backend/src/LocalSessionSigner.ts` — sign / verify session tokens
-- `apps/backend/src/AuthMiddleware.ts` — try local first, then Firebase
+- `apps/backend/src/AuthMiddleware.ts` — verify local session tokens
 - `apps/backend/src/matchmakingHttp.ts` — POST /auth/register, /auth/login
 - `apps/frontend/lib/services/local_auth_service.dart` — implements AuthStateInterface
 - `apps/frontend/lib/screens/sign_in_screen.dart` — username + password fields
