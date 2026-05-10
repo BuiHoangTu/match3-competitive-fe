@@ -20,6 +20,8 @@
     "./engine/MatchEngine":     { "types": "./dist/engine/MatchEngine.d.ts",  "default": "./dist/engine/MatchEngine.js" },
     "./engine/PlayerStats.js":  { "types": "./dist/engine/PlayerStats.d.ts",  "default": "./dist/engine/PlayerStats.js" },
     "./engine/PlayerStats":     { "types": "./dist/engine/PlayerStats.d.ts",  "default": "./dist/engine/PlayerStats.js" },
+    "./engine/scaling.js":      { "types": "./dist/engine/scaling.d.ts",      "default": "./dist/engine/scaling.js" },
+    "./engine/scaling":         { "types": "./dist/engine/scaling.d.ts",      "default": "./dist/engine/scaling.js" },
     "./engine/TileType.js":     { "types": "./dist/engine/TileType.d.ts",     "default": "./dist/engine/TileType.js" },
     "./engine/TileType":        { "types": "./dist/engine/TileType.d.ts",     "default": "./dist/engine/TileType.js" },
     "./bot/BotPlayer.js":       { "types": "./dist/bot/BotPlayer.d.ts",       "default": "./dist/bot/BotPlayer.js" },
@@ -27,6 +29,12 @@
     "./protocol.js":            { "types": "./dist/protocol.d.ts",            "default": "./dist/protocol.js" },
     "./protocol":               { "types": "./dist/protocol.d.ts",            "default": "./dist/protocol.js" },
     "./bridge.js":              { "types": "./dist/bridge.d.ts",              "default": "./dist/bridge.js" },
-    "./bridge":                 { "types": "./dist/bridge.d.ts",              "default": "./dist/bridge.js" }
+    "./bridge":                 { "types": "./dist/bridge.d.ts",              "default": "./dist/bridge.js" },
+    "./character/CharacterDef.js": { "types": "./dist/character/CharacterDef.d.ts", "default": "./dist/character/CharacterDef.js" },
+    "./character/CharacterDef":    { "types": "./dist/character/CharacterDef.d.ts", "default": "./dist/character/CharacterDef.js" },
+    "./character/cat.js":          { "types": "./dist/character/cat.d.ts",          "default": "./dist/character/cat.js" },
+    "./character/cat":             { "types": "./dist/character/cat.d.ts",          "default": "./dist/character/cat.js" },
+    "./character/registry.js":     { "types": "./dist/character/registry.d.ts",     "default": "./dist/character/registry.js" },
+    "./character/registry":        { "types": "./dist/character/registry.d.ts",     "default": "./dist/character/registry.js" }
   }
 }
