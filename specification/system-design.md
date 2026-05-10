@@ -374,9 +374,11 @@ Characters introduce per-player base stats and a skill system on top of the exis
 ```
 shared-js/
   character/
-    CharacterDef.ts   — interface + Skill schema; pure types
-    cat.ts            — first concrete character ("scratch", "strong bite", "board strike")
-    registry.ts       — id → CharacterDef map; iteration order is stable
+    CharacterDef.ts   — CharacterDef + Skill + SkillEffect (discriminated union of stat-change /
+                         activate-tiles / move-tiles primitives) + AmountExpr + TileSelector. Pure types.
+    cat.ts            — first concrete character ("scratch", "strong bite", "board strike"),
+                         expressed as effect lists.
+    registry.ts       — id → CharacterDef map; iteration order is stable.
   engine/
     PlayerStats.ts    — extended: scaledStats(base, level), levelFromXp(xp), xpToNext(level)
     MatchEngine.ts    — extended: returns extraTurnsFromMatch4Plus per cascade step

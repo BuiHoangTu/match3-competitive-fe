@@ -21,37 +21,73 @@ describe("Cat character (CR-4)", () => {
     expect(CAT.baseAtk).toBe(10);
   });
 
-  it("CR-4(a) Scratch: 4× damage, no targeting, does not consume turn", () => {
+  it("CR-4(a) Scratch: 4×atk damage, no targeting, does not consume turn", () => {
     const scratch = CAT.skills[0];
     expect(scratch.id).toBe("scratch");
     expect(scratch.name).toBe("Scratch");
     expect(scratch.manaCost).toBe(5);
     expect(scratch.consumesTurn).toBe(false);
     expect(scratch.targeting).toEqual({ kind: "none" });
-    expect(scratch.damageMultiplier).toBe(4);
-    expect(scratch.healFractionOfDamage).toBeUndefined();
+    expect(scratch.effects).toEqual([
+      {
+        kind: "stat-change",
+        target: "opponent",
+        stat: "health",
+        op: "damage",
+        amount: { kind: "atk-multiplier", factor: 4 },
+      },
+    ]);
   });
 
-  it("CR-4(b) Strong Bite: 8× damage, single-tile, consumes turn, heals 50% of damage", () => {
+  it("CR-4(b) Strong Bite: activates target, 8×atk damage, heals 50% of damage", () => {
     const bite = CAT.skills[1];
     expect(bite.id).toBe("strong_bite");
     expect(bite.name).toBe("Strong Bite");
     expect(bite.manaCost).toBe(25);
     expect(bite.consumesTurn).toBe(true);
     expect(bite.targeting).toEqual({ kind: "single-tile" });
-    expect(bite.damageMultiplier).toBe(8);
-    expect(bite.healFractionOfDamage).toBe(0.5);
+    expect(bite.effects).toEqual([
+      { kind: "activate-tiles", selector: { kind: "target-cell" } },
+      {
+        kind: "stat-change",
+        target: "opponent",
+        stat: "health",
+        op: "damage",
+        amount: { kind: "atk-multiplier", factor: 8 },
+      },
+      {
+        kind: "stat-change",
+        target: "self",
+        stat: "health",
+        op: "heal",
+        amount: { kind: "fraction-of-damage-dealt", fraction: 0.5 },
+      },
+    ]);
   });
 
-  it("CR-4(c) Board Strike: 20× damage, area, consumes turn, full-board radius", () => {
+  it("CR-4(c) Board Strike: activates whole board, 20×atk damage, area-targeted", () => {
     const strike = CAT.skills[2];
     expect(strike.id).toBe("board_strike");
     expect(strike.name).toBe("Board Strike");
     expect(strike.manaCost).toBe(60);
     expect(strike.consumesTurn).toBe(true);
     expect(strike.targeting).toEqual({ kind: "area", radius: 99 });
-    expect(strike.damageMultiplier).toBe(20);
-    expect(strike.healFractionOfDamage).toBeUndefined();
+    expect(strike.effects).toEqual([
+      { kind: "activate-tiles", selector: { kind: "all-board" } },
+      {
+        kind: "stat-change",
+        target: "opponent",
+        stat: "health",
+        op: "damage",
+        amount: { kind: "atk-multiplier", factor: 20 },
+      },
+    ]);
+  });
+
+  it("every skill's effects array is non-empty", () => {
+    for (const s of CAT.skills) {
+      expect(s.effects.length).toBeGreaterThan(0);
+    }
   });
 });
 

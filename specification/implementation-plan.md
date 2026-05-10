@@ -1385,6 +1385,14 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 - **Acceptance:**
   - Integration tests for each of cat's three skills: damage maths, heal cap, mana cost, turn behaviour.
 
+**T-v0.8-B0X** · Swap-fizzle stamina penalty + room broadcast
+- **Req:** CR-10 · **Size:** S · **Deps:** —
+- **Outputs:** In `MatchEngineService.submitMove`, when the engine-level "produces match" check fails (`validateProducesMatch === false`), instead of (or in addition to) emitting `move_rejected { reason: "no_match" }`, deduct `FIZZLE_STAMINA_MS` from the offender via `tickStamina`, persist into `playerStates`, and emit a new room-wide `swap_fizzled { playerId, r1, c1, r2, c2, playerStates }`. Do NOT switch the active player. Add the constant to `apps/backend/src/constants.ts`. Update protocol types. Client (game-view) listens and shows opponent-side bounce animation if the move was the opponent's.
+- **Acceptance:**
+  - Integration test: a fizzle move emits `swap_fizzled` to both sockets; offender's stamina decreased by `FIZZLE_STAMINA_MS`; `activePlayer` unchanged.
+  - Stamina hitting zero via fizzles still triggers `match_ended { loserReason: "time" }`.
+  - `move_rejected` is reserved for true input errors (adjacency, bounds, turn ownership); `swap_fizzled` is the no-match path.
+
 **T-v0.8-B03** · Extra-turn rule and turn-switch gate
 - **Req:** CR-9 · **Size:** S · **Deps:** F02
 - **Outputs:** Inside `MatchEngineService.submitMove` cascade loop, accumulate `extraTurnsRemaining` per swap. After resolution, switch active player only when `extraTurnsRemaining === 0`. Otherwise decrement and keep the same active player; broadcast `turn_changed` with `extraTurnsRemaining` and the same `activePlayerId`.

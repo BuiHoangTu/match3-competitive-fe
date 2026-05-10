@@ -97,12 +97,21 @@ The game view MUST NOT initiate sign-in itself. Apart from the room token and pl
 
 **CR-2 — Character definition.** Each character MUST define: `id`, `displayName`, `baseMaxHealth`, `baseMaxMana`, `baseMaxStamina`, `baseAtk`, and exactly **three** skills. Definitions live in `packages/shared-js/src/character/` and are imported by both the server (authoritative damage) and the client (UI affordances). Adding a new character MUST be possible without changing engine or HUD code.
 
-**CR-3 — Skill schema.** A skill MUST define: `id`, `name`, `manaCost`, `consumesTurn` (bool), `targeting` (`"none" | "single-tile" | "area"` with optional radius), `damageMultiplier`, optional `healFractionOfDamage`. Skills MUST be rejected when mana is insufficient. Skills marked `consumesTurn: true` MUST end the caster's turn after resolution.
+**CR-3 — Skill schema.** A skill MUST define `id`, `name`, `manaCost`, `consumesTurn` (bool), `targeting` (does the player need to pick a cell or area before resolution: `"none" | "single-tile" | "area"`), and an ordered list of **effects**. Skills MUST be rejected when mana is insufficient. Skills marked `consumesTurn: true` MUST end the caster's turn after resolution. The effect list is the skill's behaviour — there are no other bespoke skill fields.
 
-**CR-4 — First character (cat).** The first shipped character has these three skills:
-  - **CR-4(a) Scratch** — damage = `4 × baseAtk`, no targeting, `consumesTurn: false`.
-  - **CR-4(b) Strong Bite** — damage = `8 × baseAtk` against opponent; heals caster `50%` of dealt damage (capped at maxHealth); `targeting: "single-tile"` (player picks one cell, that cell is activated and applies its tile effect on top); `consumesTurn: true`.
-  - **CR-4(c) Board Strike** — damage = `20 × baseAtk`; `targeting: "area"` covering the entire board (effective radius = full grid); every activated tile applies its `applyTileEffects` contribution; `consumesTurn: true`.
+Each `SkillEffect` is one of a small set of primitives:
+- `stat-change` — increase or decrease a target's stat. Discriminators: `target ∈ {self, opponent}`, `stat ∈ {health, mana, stamina}`, `op ∈ {damage, heal}` (subtract or add), `amount` chosen from `flat(N)`, `atk-multiplier(K)` (= `K × caster.atk × levelScaling`), or `fraction-of-damage-dealt(F)` (= `F × cumulative damage dealt by earlier effects in *this* skill resolution`).
+- `activate-tiles` — clear a selected set of tiles and apply each tile's `applyTileEffects` contribution. Selector chosen from `target-cell`, `all-board`, `row-of-target`, `column-of-target`, `area-around-target(radius)`, `by-symbol(s)`.
+- `move-tiles` — change tiles' positions (swap two cells, shift a row, shuffle the board, etc.). Specific movements are added as needed.
+
+The resolver MUST apply effects in declared order. Future skills add effects by listing them; future effect families add a discriminated-union arm plus one resolver branch. New skills MUST NOT require schema-shape changes.
+
+**CR-4 — First character (cat).** The first shipped character has these three skills, expressed as effect lists:
+  - **CR-4(a) Scratch** — `targeting: "none"`, `consumesTurn: false`. Effects: `[stat-change(opponent, health, damage, atk-multiplier(4))]`.
+  - **CR-4(b) Strong Bite** — `targeting: "single-tile"`, `consumesTurn: true`. Effects, in order: `activate-tiles(target-cell)`, `stat-change(opponent, health, damage, atk-multiplier(8))`, `stat-change(self, health, heal, fraction-of-damage-dealt(0.5))`.
+  - **CR-4(c) Board Strike** — `targeting: "area"` (full board), `consumesTurn: true`. Effects: `[activate-tiles(all-board), stat-change(opponent, health, damage, atk-multiplier(20))]`.
+
+Damage / heal amounts MUST be capped at the relevant stat's `[0, max]` window. The `fraction-of-damage-dealt` source MUST resolve to the running total of damage applied by earlier effects in the same skill resolution (not across skills, not across moves).
 
 **CR-5 — Persistent progression.** Each user MUST have a server-persisted `(userId, xp, defaultCharacterId)` row. XP and the derived level survive across matches and devices.
 
@@ -113,6 +122,12 @@ The game view MUST NOT initiate sign-in itself. Apart from the room token and pl
 **CR-8 — Mid-match level up.** If accumulated XP crosses a level threshold during a match, the engine MUST broadcast a `level_up` event; the affected player's `maxHealth` increases by `+10%` and current `health` is restored to the new `maxHealth` immediately. `atk` increase applies on the next damage roll.
 
 **CR-9 — "Match-4 again" rule.** A swap (or a cascade-step that follows from it) producing **a single line of 4 or more identical tiles** in the same row or column MUST grant the matcher `+1 extra turn` (the active player keeps the turn instead of yielding). Multiple independent 4+ lines in one cascade step grant cumulative extra turns (two simultaneous 4+ matches → +2). L-shaped intersections of two shorter (3-cell) legs MUST NOT count; an L counts only if at least one of its legs is 4+ on its own. Extra turns from a cascade are awarded to the original swap-maker, not to the cascade itself.
+
+**CR-10 — Swap fizzle penalty.** A swap that is adjacency-valid but produces zero matches (a "fizzle") MUST:
+  - **NOT** consume the player's turn — the same player remains active.
+  - Animate the tiles back to their original positions on the client (existing behaviour).
+  - Subtract a fixed stamina penalty `FIZZLE_STAMINA_MS` from the offending player (placeholder default: `3_000` ms — see [§ Open values](#open-values); pin before implementation).
+  - Broadcast a `swap_fizzled { playerId, r1, c1, r2, c2, playerStates }` event to **the entire room** so both clients can update HUD stamina and (optionally) render an opponent-side animation that mirrors the failed swap. The current `move_rejected` event remains, sent only to the offender, for input-error reasons (out of bounds, non-adjacent, not your turn). Fizzle is a separate categorical event because it is part of normal play, not an error.
 
 ---
 
@@ -178,6 +193,7 @@ These values are intentionally left as placeholders in this specification. They 
 | Minimum Android version | NFR-11 | Android 10 (API 29) |
 | Identity provider backend | AR-2, AR-3 | Firebase Auth (Apple + Google providers) |
 | Persistence store | AR-6 | Postgres (production); SQLite acceptable for closed beta |
+| Swap fizzle stamina penalty | CR-10 | 3_000 ms |
 
 ---
 
