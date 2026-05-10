@@ -96,6 +96,8 @@ export interface StartLocalMatchMessage {
     savedState: SoloSnapshotPayload | null;
     /** Owning user's ID — used to key the localStorage save slot. */
     userId: string;
+    /** Character selected for this solo match. */
+    characterId: string;
   };
 }
 

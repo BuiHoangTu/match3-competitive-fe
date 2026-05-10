@@ -103,6 +103,7 @@ describe("GameBridge", () => {
         seed: 1234567,
         savedState: null,
         userId: "user-alice",
+        characterId: "cat",
       },
     });
 
@@ -113,6 +114,7 @@ describe("GameBridge", () => {
       seed: 1234567,
       savedState: null,
       userId: "user-alice",
+      characterId: "cat",
     });
   });
 
@@ -135,7 +137,7 @@ describe("GameBridge", () => {
       JSON.stringify({
         type: BridgeMessageType.START_LOCAL_MATCH,
         version: "1",
-        payload: { seed: 999, savedState, userId: "user-bob" },
+        payload: { seed: 999, savedState, userId: "user-bob", characterId: "cat" },
       })
     );
 

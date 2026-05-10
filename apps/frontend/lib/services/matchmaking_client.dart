@@ -29,8 +29,7 @@ class ActiveSession {
   final String mode;
   final String roomId;
 
-  factory ActiveSession.fromJson(Map<String, dynamic> json) =>
-      ActiveSession(
+  factory ActiveSession.fromJson(Map<String, dynamic> json) => ActiveSession(
         mode: json['mode'] as String,
         roomId: json['roomId'] as String,
       );
@@ -99,12 +98,16 @@ class MatchmakingClient {
   Future<MatchmakingResult> join({
     required String idToken,
     required MatchmakingMode mode,
+    String characterId = 'cat',
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/join');
     return _send(
       uri: uri,
       idToken: idToken,
-      body: {'mode': mode.wire},
+      body: {
+        'mode': mode.wire,
+        'characterId': characterId,
+      },
     );
   }
 

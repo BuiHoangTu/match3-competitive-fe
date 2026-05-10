@@ -36,6 +36,7 @@ class HomeScreen extends StatefulWidget {
     required this.onVsHumanPressed,
     required this.onAccountPressed,
     this.onAutoResumeCheck,
+    this.onAutoResumeModeLaunch,
   });
 
   /// Currently signed-in user, used to display avatar + name.
@@ -59,6 +60,13 @@ class HomeScreen extends StatefulWidget {
   /// is opportunistic, never blocking.
   final Future<String?> Function()? onAutoResumeCheck;
 
+  /// Optional direct launch path used only for server-side auto-resume.
+  ///
+  /// Normal button presses intentionally route through character selection.
+  /// Auto-resume is different: the room already exists, so picking a new
+  /// character would be misleading and could not affect the active match.
+  final Future<void> Function(String mode)? onAutoResumeModeLaunch;
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -80,11 +88,18 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         switch (mode) {
           case 'pve':
-            await _runLaunch(widget.onVsBotPressed, dialogLabel: 'Resuming match…');
+            await _runLaunch(
+              () => (widget.onAutoResumeModeLaunch ??
+                  (_) => widget.onVsBotPressed())(
+                'pve',
+              ),
+              dialogLabel: 'Resuming match…',
+            );
             break;
           case 'turn_based':
             await _runLaunch(
-              widget.onVsHumanPressed,
+              () => (widget.onAutoResumeModeLaunch ??
+                  (_) => widget.onVsHumanPressed())('turn_based'),
               dialogLabel: 'Resuming match…',
             );
             break;
@@ -198,8 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: 'Solo play — no timer, no opponent',
                     icon: Icons.self_improvement_rounded,
                     enabled: !_launching,
-                    onPressed: () =>
-                        _runLaunch(widget.onPracticePressed),
+                    onPressed: () => _runLaunch(widget.onPracticePressed),
                   ),
                 ),
                 const SizedBox(height: 12),

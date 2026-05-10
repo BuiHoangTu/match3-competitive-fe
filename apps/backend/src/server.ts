@@ -126,9 +126,9 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   const matchStartTimes = new Map<string, number>();
   const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  // socketBridge needs ctx, but ctx needs socketBridge — break the cycle by
-  // creating a partial context first and then injecting the bridge.
-  const ctxPartial = {
+  // socketBridge needs ctx, but ctx needs socketBridge. Seed the field with a
+  // placeholder, then replace it immediately after constructing the bridge.
+  const ctx: ServerContext = {
     io,
     roomManager,
     rejoinManager,
@@ -137,11 +137,9 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     persistence,
     rootSeedSource,
     matchStartTimes,
-    disconnectedPlayers,
+    socketBridge: undefined as unknown as SocketBridge,
   };
-  const socketBridge = new SocketBridge(io, ctxPartial as ServerContext, matchEngineService);
-  (ctxPartial as ServerContext).socketBridge = socketBridge;
-  const ctx: ServerContext = ctxPartial as ServerContext;
+  ctx.socketBridge = new SocketBridge(io, ctx, matchEngineService);
 
   // T-v0.6-D02 — Room-token handshake middleware.
   registerHandshake(io, roomManager);

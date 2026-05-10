@@ -36,8 +36,9 @@ import '../../lib/services/matchmaking_client.dart';
 /// Builds a fake [HttpPoster] that returns [status] and a JSON [body].
 HttpPoster _poster({required int status, required Object responseBody}) {
   return (Uri url, {Map<String, String>? headers, Object? body}) async {
-    final encoded =
-        responseBody is String ? responseBody as String : jsonEncode(responseBody);
+    final encoded = responseBody is String
+        ? responseBody as String
+        : jsonEncode(responseBody);
     return http.Response(encoded, status);
   };
 }
@@ -225,7 +226,8 @@ void main() {
       expect(sent.expiresAt, 8888);
     });
 
-    test('calls onReconnecting callback when active-room is detected', () async {
+    test('calls onReconnecting callback when active-room is detected',
+        () async {
       bool reconnectingCalled = false;
       final (loader, transport) = _mockView();
 
@@ -285,7 +287,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchActiveRoomGone>()),
       );
     });
@@ -296,7 +299,8 @@ void main() {
       final (loader, _) = _mockView();
       final client = MatchmakingClient(
         baseUrl: baseUrl,
-        postFn: _poster(status: 401, responseBody: {'code': 'AUTH_INVALID_TOKEN'}),
+        postFn:
+            _poster(status: 401, responseBody: {'code': 'AUTH_INVALID_TOKEN'}),
       );
 
       final launcher = MatchSessionLauncher(
@@ -306,7 +310,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchAuthRejected>()),
       );
     });
@@ -336,7 +341,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchAuthRejected>()),
       );
     });
@@ -357,7 +363,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -376,7 +383,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -398,7 +406,8 @@ void main() {
       );
 
       expect(
-        () => launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () =>
+            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -425,6 +434,7 @@ void main() {
       final handle = await launcher.launchLocal(
         idToken: idToken,
         userId: 'user-alice',
+        characterId: 'cat',
         onActiveMatchBlock: () => blocked = true,
       );
 
@@ -437,6 +447,7 @@ void main() {
       expect(sent, isA<StartLocalMatchMessage>());
       final start = sent as StartLocalMatchMessage;
       expect(start.userId, 'user-alice');
+      expect(start.characterId, 'cat');
       expect(start.savedState, isNull);
       // Seed is CSPRNG-generated; assert it's in the documented range.
       expect(start.seed, greaterThanOrEqualTo(0));
@@ -546,6 +557,45 @@ void main() {
       transport.inject(const ReadyMessage());
       await Future<void>.delayed(Duration.zero);
       expect(transport.sent.first, isA<StartLocalMatchMessage>());
+    });
+
+    test('passes selected characterId through matchmaking and startLocalMatch',
+        () async {
+      Object? capturedJoinBody;
+      final (loader, transport) = _mockView();
+      final client = MatchmakingClient(
+        baseUrl: baseUrl,
+        getFn: (url, {headers}) async =>
+            http.Response(jsonEncode({'active': false}), 200),
+        postFn: (url, {headers, body}) async {
+          capturedJoinBody = body;
+          return http.Response(jsonEncode(_joinOk()), 200);
+        },
+      );
+      final launcher = MatchSessionLauncher(
+        matchmaking: client,
+        loadView: loader,
+        assetUrl: assetUrl,
+      );
+
+      await launcher.launch(
+        idToken: idToken,
+        mode: MatchmakingMode.pve,
+        characterId: 'cat',
+      );
+      expect(
+          capturedJoinBody, jsonEncode({'mode': 'pve', 'characterId': 'cat'}));
+
+      final localHandle = await launcher.launchLocal(
+        idToken: idToken,
+        userId: 'user-alice',
+        characterId: 'cat',
+      );
+      expect(localHandle, isNotNull);
+      transport.inject(const ReadyMessage());
+      await Future<void>.delayed(Duration.zero);
+      final startLocal = transport.sent.last as StartLocalMatchMessage;
+      expect(startLocal.characterId, 'cat');
     });
   });
 

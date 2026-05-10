@@ -21,7 +21,8 @@ class _Stub {
     Map<String, String>? headers,
     Object? body,
   }) async {
-    final encoded = this.body is String ? this.body as String : jsonEncode(this.body);
+    final encoded =
+        this.body is String ? this.body as String : jsonEncode(this.body);
     return http.Response(encoded, status);
   }
 }
@@ -245,7 +246,8 @@ void main() {
   });
 
   group('header wiring', () {
-    test('includes Authorization: Bearer <idToken> and JSON body', () async {
+    test('includes Authorization, mode, and characterId in JSON body',
+        () async {
       Map<String, String>? capturedHeaders;
       Object? capturedBody;
       final client = MatchmakingClient(
@@ -264,10 +266,14 @@ void main() {
           );
         },
       );
-      await client.join(idToken: 'XYZ', mode: MatchmakingMode.pve);
+      await client.join(
+        idToken: 'XYZ',
+        mode: MatchmakingMode.pve,
+        characterId: 'cat',
+      );
       expect(capturedHeaders?['Authorization'], 'Bearer XYZ');
       expect(capturedHeaders?['Content-Type'], 'application/json');
-      expect(capturedBody, jsonEncode({'mode': 'pve'}));
+      expect(capturedBody, jsonEncode({'mode': 'pve', 'characterId': 'cat'}));
     });
   });
 }

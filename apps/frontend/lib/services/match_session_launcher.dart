@@ -120,6 +120,7 @@ class MatchSessionLauncher {
   Future<GameViewHandle> launch({
     required String idToken,
     required MatchmakingMode mode,
+    String characterId = 'cat',
     void Function()? onReconnecting,
   }) async {
     developer.log(
@@ -135,7 +136,11 @@ class MatchSessionLauncher {
 
     try {
       try {
-        final r = await matchmaking.join(idToken: idToken, mode: mode);
+        final r = await matchmaking.join(
+          idToken: idToken,
+          mode: mode,
+          characterId: characterId,
+        );
         roomToken = r.roomToken;
         expiresAt = r.expiresAt;
       } on MatchmakingActiveRoom catch (e) {
@@ -209,6 +214,7 @@ class MatchSessionLauncher {
   Future<GameViewHandle?> launchLocal({
     required String idToken,
     required String userId,
+    String characterId = 'cat',
     void Function()? onActiveMatchBlock,
   }) async {
     developer.log(
@@ -263,6 +269,7 @@ class MatchSessionLauncher {
       handle,
       seed: seed,
       userId: userId,
+      characterId: characterId,
     );
 
     return handle;
@@ -318,6 +325,7 @@ class MatchSessionLauncher {
     GameViewHandle handle, {
     required int seed,
     required String userId,
+    required String characterId,
   }) {
     bool started = false;
 
@@ -331,6 +339,7 @@ class MatchSessionLauncher {
       handle.transport.send(StartLocalMatchMessage(
         seed: seed,
         userId: userId,
+        characterId: characterId,
       ));
     }
 

@@ -33,11 +33,8 @@ void main() {
 
   setUpAll(() {
     final raw = File(fixturePath).readAsStringSync();
-    fixtureNames = raw
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
-        .toSet();
+    fixtureNames =
+        raw.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toSet();
   });
 
   // T-v0.6-I06 · Bridge-surface regression guard
@@ -49,8 +46,7 @@ void main() {
     test(
         'no BridgeMessageType.all entry is missing from the fixture — '
         'adding a message without updating the fixture fails', () {
-      final extra =
-          BridgeMessageType.all.difference(fixtureNames);
+      final extra = BridgeMessageType.all.difference(fixtureNames);
       expect(
         extra,
         isEmpty,
@@ -62,8 +58,7 @@ void main() {
     test(
         'no fixture entry is missing from BridgeMessageType.all — '
         'removing a Dart constant without updating the fixture fails', () {
-      final missing =
-          fixtureNames.difference(BridgeMessageType.all);
+      final missing = fixtureNames.difference(BridgeMessageType.all);
       expect(
         missing,
         isEmpty,
@@ -120,10 +115,10 @@ void main() {
         userId: 'user-alice',
       );
       final json = msg.toJson();
-      final decoded =
-          BridgeMessage.fromJson(json) as StartLocalMatchMessage;
+      final decoded = BridgeMessage.fromJson(json) as StartLocalMatchMessage;
       expect(decoded.seed, equals(1234567));
       expect(decoded.userId, equals('user-alice'));
+      expect(decoded.characterId, equals('cat'));
       expect(decoded.savedState, isNull);
       expect(decoded.version, equals('1'));
     });
@@ -141,12 +136,14 @@ void main() {
       final msg = StartLocalMatchMessage(
         seed: 999,
         userId: 'user-bob',
+        characterId: 'cat',
         savedState: saved,
       );
       final decoded =
           BridgeMessage.fromJson(msg.toJson()) as StartLocalMatchMessage;
       expect(decoded.seed, equals(999));
       expect(decoded.userId, equals('user-bob'));
+      expect(decoded.characterId, equals('cat'));
       expect(decoded.savedState, isNotNull);
       expect(decoded.savedState!.board, equals(saved.board));
       expect(decoded.savedState!.rngState, equals(42));
@@ -203,8 +200,7 @@ void main() {
         selfScore: 1200,
         opponentScore: 800,
       );
-      final decoded =
-          BridgeMessage.fromJson(msg.toJson()) as MatchEndedMessage;
+      final decoded = BridgeMessage.fromJson(msg.toJson()) as MatchEndedMessage;
       expect(decoded.outcome, equals(MatchOutcome.win));
       expect(decoded.selfScore, equals(1200));
       expect(decoded.opponentScore, equals(800));
@@ -227,7 +223,8 @@ void main() {
   group('BridgeMessage.fromJson', () {
     test('throws FormatException for unknown type', () {
       expect(
-        () => BridgeMessage.fromJson('{"type":"unknownType","version":"1","payload":{}}'),
+        () => BridgeMessage.fromJson(
+            '{"type":"unknownType","version":"1","payload":{}}'),
         throwsA(isA<FormatException>()),
       );
     });

@@ -7,6 +7,7 @@
 // Route summary:
 //   /sign-in          → SignInScreen          (public — no guard)
 //   /home             → HomeScreen            (guarded)
+//   /character-select → CharacterSelectScreen (guarded — mode via extra)
 //   /match            → MatchScreen           (guarded — GameViewHandle via extra)
 //   /result           → ResultScreen          (guarded — MatchResult via extra)
 //   /account          → AccountScreen         (guarded)
@@ -35,6 +36,7 @@ import 'package:go_router/go_router.dart';
 import 'models/match_result.dart';
 import 'models/user_profile.dart';
 import 'screens/account_screen.dart';
+import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/match_screen.dart';
 import 'screens/privacy_screen.dart';
@@ -43,6 +45,7 @@ import 'screens/register_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/account_client.dart';
+import 'services/character_preference.dart';
 import 'services/game_view_bootstrap.dart';
 import 'services/local_auth_service.dart';
 import 'services/match_session_launcher.dart';
@@ -57,6 +60,7 @@ abstract final class Routes {
   static const signIn = 'sign-in';
   static const register = 'register';
   static const home = 'home';
+  static const characterSelect = 'character-select';
   static const match = 'match';
   static const result = 'result';
   static const account = 'account';
@@ -185,6 +189,7 @@ GoRouter createRouter({
         loadView: loadGameView,
         assetUrl: assetUrl,
       );
+  const characterPreference = CharacterPreference();
 
   void showUnderDevelopment(BuildContext ctx, String which) {
     ScaffoldMessenger.of(ctx).showSnackBar(
@@ -217,8 +222,8 @@ GoRouter createRouter({
     }
   }
 
-  Future<void> handleRegister(BuildContext ctx, String username,
-      String password, String? email) async {
+  Future<void> handleRegister(
+      BuildContext ctx, String username, String password, String? email) async {
     if (localAuth == null) {
       ScaffoldMessenger.of(ctx).showSnackBar(
         const SnackBar(content: Text('Registration not configured')),
@@ -247,6 +252,7 @@ GoRouter createRouter({
       );
     }
   }
+
   return GoRouter(
     initialLocation: auth.isSignedIn ? '/home' : '/sign-in',
     refreshListenable: auth is Listenable ? auth as Listenable : null,
@@ -282,7 +288,8 @@ GoRouter createRouter({
                 unawaited(handleLocalSignIn(context, u, p)),
             onRegisterPressed: () => context.goNamed(Routes.register),
             onAppleSignInPressed: () => showUnderDevelopment(context, 'Apple'),
-            onGoogleSignInPressed: () => showUnderDevelopment(context, 'Google'),
+            onGoogleSignInPressed: () =>
+                showUnderDevelopment(context, 'Google'),
             onPrivacyPressed: () => context.goNamed(Routes.privacy),
             onTermsPressed: () => context.goNamed(Routes.terms),
           ),
@@ -370,7 +377,8 @@ GoRouter createRouter({
                 developer.log('launchGame solo failed: $e', name: 'router');
                 if (!ctx.mounted) return;
                 ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(content: Text('Failed to launch game: ${e.message}')),
+                  SnackBar(
+                      content: Text('Failed to launch game: ${e.message}')),
                 );
               }
               return;
@@ -439,13 +447,151 @@ GoRouter createRouter({
             state,
             HomeScreen(
               profile: profile,
-              onPracticePressed: () => launchGame(context, 'solo'),
-              onVsBotPressed: () => launchGame(context, 'pve'),
-              onVsHumanPressed: () => launchGame(context, 'turn_based'),
-              // launchGame already returns Future<void>; HomeScreen expects
-              // Future<void> Function() and gates duplicate taps internally.
+              onPracticePressed: () async =>
+                  context.goNamed(Routes.characterSelect, extra: 'solo'),
+              onVsBotPressed: () async =>
+                  context.goNamed(Routes.characterSelect, extra: 'pve'),
+              onVsHumanPressed: () async => context.goNamed(
+                Routes.characterSelect,
+                extra: 'turn_based',
+              ),
               onAccountPressed: () => context.goNamed(Routes.account),
               onAutoResumeCheck: autoResumeCheck,
+              onAutoResumeModeLaunch: (mode) => launchGame(context, mode),
+            ),
+          );
+        },
+      ),
+
+      // -----------------------------------------------------------------------
+      // /character-select — guarded — mode passed via GoRouter extra
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/character-select',
+        name: Routes.characterSelect,
+        pageBuilder: (context, state) {
+          final mode = state.extra as String?;
+          if (mode == null) {
+            Future.microtask(() {
+              if (context.mounted) context.goNamed(Routes.home);
+            });
+            return _buildPage(
+              context,
+              state,
+              const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+
+          Future<void> launchGame(
+            BuildContext ctx,
+            String selectedCharacterId,
+          ) async {
+            developer.log(
+              'Launching game mode=$mode characterId=$selectedCharacterId',
+              name: 'router',
+            );
+            await characterPreference.setDefaultCharacter(selectedCharacterId);
+            if (!ctx.mounted) return;
+
+            final tok = auth.idToken;
+            if (tok == null) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(content: Text('Please sign in first')),
+              );
+              return;
+            }
+
+            if (mode == 'solo') {
+              final userId = auth.currentUser?.userId;
+              if (userId == null) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Please sign in first')),
+                );
+                return;
+              }
+              try {
+                final handle = await launcher.launchLocal(
+                  idToken: tok,
+                  userId: userId,
+                  characterId: selectedCharacterId,
+                  onActiveMatchBlock: () {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                        content: Text(
+                            'You already have an active match — finish or leave it first'),
+                      ));
+                    }
+                  },
+                );
+                if (handle == null) return;
+                if (!ctx.mounted) return;
+                ctx.goNamed(Routes.match, extra: handle);
+              } on LaunchAuthRejected {
+                if (!ctx.mounted) return;
+                await auth.signOut();
+                if (!ctx.mounted) return;
+                ctx.goNamed(Routes.signIn);
+              } on LaunchTransport catch (e) {
+                developer.log('launchGame solo failed: $e', name: 'router');
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(
+                      content: Text('Failed to launch game: ${e.message}')),
+                );
+              }
+              return;
+            }
+
+            final mmMode = switch (mode) {
+              'pve' => MatchmakingMode.pve,
+              'turn_based' => MatchmakingMode.turnBased,
+              _ => MatchmakingMode.turnBased,
+            };
+            try {
+              final handle = await launcher.launch(
+                idToken: tok,
+                mode: mmMode,
+                characterId: selectedCharacterId,
+                onReconnecting: () {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                      content: Text('Reconnecting to your match…'),
+                      duration: Duration(seconds: 2),
+                    ));
+                  }
+                },
+              );
+              if (!ctx.mounted) return;
+              ctx.goNamed(Routes.match, extra: handle);
+            } on LaunchActiveRoomGone {
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text(
+                    'Previous match ended — tap a mode to start a new one'),
+              ));
+            } on LaunchAuthRejected {
+              if (!ctx.mounted) return;
+              await auth.signOut();
+              if (!ctx.mounted) return;
+              ctx.goNamed(Routes.signIn);
+            } on LaunchTransport catch (e) {
+              developer.log('launchGame failed: $e', name: 'router');
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(content: Text('Failed to launch game: ${e.message}')),
+              );
+            }
+          }
+
+          return _buildPage(
+            context,
+            state,
+            CharacterSelectScreen(
+              onLoadDefault: characterPreference.getDefaultCharacter,
+              onConfirm: (characterId) => launchGame(context, characterId),
+              onBack: () => context.goNamed(Routes.home),
             ),
           );
         },
@@ -551,7 +697,8 @@ GoRouter createRouter({
               developer.log('deleteAccount failed: $e', name: 'router');
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Could not delete account: ${e.message}')),
+                SnackBar(
+                    content: Text('Could not delete account: ${e.message}')),
               );
               return;
             }

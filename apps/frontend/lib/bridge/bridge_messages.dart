@@ -209,6 +209,7 @@ final class StartLocalMatchMessage extends BridgeMessage {
   const StartLocalMatchMessage({
     required this.seed,
     required this.userId,
+    this.characterId = 'cat',
     this.savedState,
     super.version,
   }) : super(type: BridgeMessageType.startLocalMatch);
@@ -221,6 +222,10 @@ final class StartLocalMatchMessage extends BridgeMessage {
   /// slot (`match3:solo:${userId}`).
   final String userId;
 
+  /// Character selected for this solo match. Defaults to the first v0.8
+  /// character so older persisted launch messages remain readable.
+  final String characterId;
+
   /// Previously-persisted controller state, or null to start fresh.
   final SoloSnapshot? savedState;
 
@@ -230,6 +235,7 @@ final class StartLocalMatchMessage extends BridgeMessage {
     return StartLocalMatchMessage(
       seed: payload['seed'] as int,
       userId: payload['userId'] as String,
+      characterId: payload['characterId'] as String? ?? 'cat',
       savedState: rawSaved is Map<String, dynamic>
           ? SoloSnapshot.fromMap(rawSaved)
           : null,
@@ -245,6 +251,7 @@ final class StartLocalMatchMessage extends BridgeMessage {
     final inner = <String, Object?>{
       'seed': seed,
       'userId': userId,
+      'characterId': characterId,
       'savedState': savedState?.toMap(),
     };
     return <String, Object>{

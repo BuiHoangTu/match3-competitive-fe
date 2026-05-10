@@ -80,6 +80,7 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.6 Flutter shell + Accounts | CODE-COMPLETE | All A–G code-level tasks shipped. Remaining: C01/C02 (Firebase + Apple capability), H-track (store enrolment), I01/I03/I04 (device verification). 124 be + 74 fe + 126 shell tests green. |
 | v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
 | v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
+| v0.8 Characters | PARTIAL | Foundations shipped: F01 character registry, F02 extra-turn/scaling helpers, F03 user_progress store/migration. S01 shell picker is partially wired. Pending: backend character start, skills, fizzle, XP/level-up, HUD skill UI. |
 
 ---
 
@@ -1339,32 +1340,35 @@ Each H-task acceptance: artifact exists and is linked from `apps/frontend/docs/a
 
 ---
 
-## v0.8 — Characters, skills, persistent progression  *(TODO)*
+## v0.8 — Characters, skills, persistent progression  *(PARTIAL)*
 
 Single new milestone. Two foundation tasks gate the rest; integration follows in two parallel tracks (backend + UI).
 
 ### Sub-track Foundation — engine + DB
 
-**T-v0.8-F01** · Character & skill registry in shared-js
+**T-v0.8-F01** (DONE) · Character & skill registry in shared-js
 - **Req:** CR-2, CR-3, CR-4 · **Size:** M · **Deps:** —
 - **Outputs:** `packages/shared-js/src/character/CharacterDef.ts` (interface, `Skill` schema, `Targeting` types), `character/cat.ts` (concrete definition with the three skills), `character/registry.ts` (id → CharacterDef), unit tests asserting shape and damage formulae for the three skills (no Phaser, no Node).
+- **Current state:** Shipped in `packages/shared-js/src/character/` with Cat registry tests and package exports.
 - **Acceptance:**
   - `CharacterDef` and `Skill` exported and consumable from `apps/backend/` and `packages/game-view/`.
   - Cat's three skills match CR-4 exactly (4× / 8×+50%heal / 20×).
   - Tests verify each skill's `damageMultiplier`, `consumesTurn`, `targeting`, and (for Strong Bite) the heal fraction.
   - `packages/shared-js/package.json` `exports` map updated for the new subpaths.
 
-**T-v0.8-F02** · Match-4 detection + level scaling in engine
+**T-v0.8-F02** (DONE) · Match-4 detection + level scaling in engine
 - **Req:** CR-6, CR-9 · **Size:** M · **Deps:** —
 - **Outputs:** `packages/shared-js/src/engine/MatchEngine.ts` extended to expose `extraTurnsFromMatches(matches)` returning the per-step extra-turn count given the L-shape exclusion rule. `engine/PlayerStats.ts` extended with `scaledStats(base, level)` and `levelFromXp(xp)` / `xpToNext(level)`. Unit tests for: single 4-line, two parallel 4-lines (= 2 turns), L of two 3-legs (= 0), L where one leg is 4+ (= 1).
+- **Current state:** `extraTurnsFromMatches` shipped in `MatchEngine.ts`; scaling helpers shipped in `engine/scaling.ts` and exported as `@match3/shared-js/engine/scaling`.
 - **Acceptance:**
   - Pure functions, immutable. No Phaser, no Node.
   - Tests cover all four shape variants from CR-9.
   - `scaledStats({ baseMaxHealth: 100, baseAtk: 10 }, 5)` returns `{ maxHealth: 150, atk: 15 }` (compounding).
 
-**T-v0.8-F03** · Persistence: `user_progress` table
+**T-v0.8-F03** (DONE) · Persistence: `user_progress` table
 - **Req:** CR-5 · **Size:** S · **Deps:** —
 - **Outputs:** New migration `apps/backend/migrations/<n>_user_progress.sql` (`user_id PK FK→users(user_id) ON DELETE CASCADE, xp INT NOT NULL DEFAULT 0, default_character_id TEXT NOT NULL DEFAULT 'cat', updated_at TIMESTAMPTZ`). `apps/backend/src/persistence/UserProgressStore.ts` with `get(userId)`, `addXp(userId, delta)`, `setDefaultCharacter(userId, id)`. Account-deletion sweep extended to drop the row.
+- **Current state:** Shipped as `004_user_progress.sql`, `UserProgressStore.ts`, unit tests, Postgres-gated integration tests, and account-deletion cascade coverage.
 - **Acceptance:**
   - Migration runs cleanly on a fresh and an existing DB.
   - Store has unit tests against an in-memory SQLite (or a Postgres test fixture).
@@ -1425,9 +1429,10 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 
 ### Sub-track Shell — character selection screen
 
-**T-v0.8-S01** · Character-select screen
+**T-v0.8-S01** (PARTIAL) · Character-select screen
 - **Req:** CR-1 · **Size:** M · **Deps:** F01
 - **Outputs:** New Flutter screen `lib/screens/character_select_screen.dart`; reachable from HomeScreen before each match. Lists characters with display name + base stats + skill summary. Selection writes to local `shared_preferences` and is passed to `/matchmaking/join` (or `StartLocalMatch`) as `characterId`. Default loaded from `user_progress.default_character_id` on sign-in.
+- **Current state:** Shell screen, local preference service, route, and `characterId` plumbing are present. Pending: load/sync default from server-side `user_progress.default_character_id` and consume selected character authoritatively in backend B01.
 - **Acceptance:** widget tests for selection persistence and the "remember selection" affordance.
 
 ---
