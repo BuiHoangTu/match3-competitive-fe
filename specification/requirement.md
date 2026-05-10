@@ -93,7 +93,7 @@ The game view MUST NOT initiate sign-in itself. Apart from the room token and pl
 
 ## 4. Character & progression requirements
 
-**CR-1 — Character selection.** Before each match (all modes including Practice) the player MUST pick a character. The selection MUST persist as the user's default for the next match. The selected character's identifier MUST be sent with the matchmaking request (or with the `StartLocalMatch` bridge message in solo) so server-side stats / skill resolution can use it.
+**CR-1 — Character selection.** Before **every** match (all modes including Practice) the player MUST be presented with the character roster and MAY pick any owned character. Selection is **per-match**: a player is never locked to a single character across matches. The most-recently-picked character is remembered (server-side `user_progress.default_character_id`, mirrored to client preference) only as a default pre-selection on the picker — the player can always change it. The selected character's identifier MUST be sent with the matchmaking request (or with the `StartLocalMatch` bridge message in solo) so server-side stats / skill resolution can use it.
 
 **CR-2 — Character definition.** Each character MUST define: `id`, `displayName`, `baseMaxHealth`, `baseMaxMana`, `baseMaxStamina`, `baseAtk`, and exactly **three** skills. Definitions live in `packages/shared-js/src/character/` and are imported by both the server (authoritative damage) and the client (UI affordances). Adding a new character MUST be possible without changing engine or HUD code.
 
