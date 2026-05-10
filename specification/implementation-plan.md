@@ -1339,6 +1339,91 @@ Each H-task acceptance: artifact exists and is linked from `apps/frontend/docs/a
 
 ---
 
+## v0.8 — Characters, skills, persistent progression  *(TODO)*
+
+Single new milestone. Two foundation tasks gate the rest; integration follows in two parallel tracks (backend + UI).
+
+### Sub-track Foundation — engine + DB
+
+**T-v0.8-F01** · Character & skill registry in shared-js
+- **Req:** CR-2, CR-3, CR-4 · **Size:** M · **Deps:** —
+- **Outputs:** `packages/shared-js/src/character/CharacterDef.ts` (interface, `Skill` schema, `Targeting` types), `character/cat.ts` (concrete definition with the three skills), `character/registry.ts` (id → CharacterDef), unit tests asserting shape and damage formulae for the three skills (no Phaser, no Node).
+- **Acceptance:**
+  - `CharacterDef` and `Skill` exported and consumable from `apps/backend/` and `packages/game-view/`.
+  - Cat's three skills match CR-4 exactly (4× / 8×+50%heal / 20×).
+  - Tests verify each skill's `damageMultiplier`, `consumesTurn`, `targeting`, and (for Strong Bite) the heal fraction.
+  - `packages/shared-js/package.json` `exports` map updated for the new subpaths.
+
+**T-v0.8-F02** · Match-4 detection + level scaling in engine
+- **Req:** CR-6, CR-9 · **Size:** M · **Deps:** —
+- **Outputs:** `packages/shared-js/src/engine/MatchEngine.ts` extended to expose `extraTurnsFromMatches(matches)` returning the per-step extra-turn count given the L-shape exclusion rule. `engine/PlayerStats.ts` extended with `scaledStats(base, level)` and `levelFromXp(xp)` / `xpToNext(level)`. Unit tests for: single 4-line, two parallel 4-lines (= 2 turns), L of two 3-legs (= 0), L where one leg is 4+ (= 1).
+- **Acceptance:**
+  - Pure functions, immutable. No Phaser, no Node.
+  - Tests cover all four shape variants from CR-9.
+  - `scaledStats({ baseMaxHealth: 100, baseAtk: 10 }, 5)` returns `{ maxHealth: 150, atk: 15 }` (compounding).
+
+**T-v0.8-F03** · Persistence: `user_progress` table
+- **Req:** CR-5 · **Size:** S · **Deps:** —
+- **Outputs:** New migration `apps/backend/migrations/<n>_user_progress.sql` (`user_id PK FK→users(user_id) ON DELETE CASCADE, xp INT NOT NULL DEFAULT 0, default_character_id TEXT NOT NULL DEFAULT 'cat', updated_at TIMESTAMPTZ`). `apps/backend/src/persistence/UserProgressStore.ts` with `get(userId)`, `addXp(userId, delta)`, `setDefaultCharacter(userId, id)`. Account-deletion sweep extended to drop the row.
+- **Acceptance:**
+  - Migration runs cleanly on a fresh and an existing DB.
+  - Store has unit tests against an in-memory SQLite (or a Postgres test fixture).
+  - Account-deletion test asserts the `user_progress` row is gone after delete.
+
+### Sub-track Backend — wire skills + extra turns + XP
+
+**T-v0.8-B01** · Match start carries character ids
+- **Req:** CR-1 · **Size:** S · **Deps:** F01
+- **Outputs:** `MatchEngineService.startMatch` accepts `characters: { [playerId]: characterId }`; uses scaled `baseMaxHealth/baseAtk` from `CharacterDef` for initial `playerStates`. `MatchFoundPayload` extended with `characters`. `/matchmaking/join` body accepts `characterId` (optional; falls back to `default_character_id` from `user_progress`).
+- **Acceptance:**
+  - Integration test: human picks cat, server's initial `playerStates` reflect the cat's base stats.
+  - Default selection persists across calls.
+
+**T-v0.8-B02** · Skill resolution
+- **Req:** CR-3, CR-4 · **Size:** M · **Deps:** F01, B01
+- **Outputs:** `apps/backend/src/handlers/skill.ts` (`socket.on("skill", { skillId, target })`). Validation: caster has enough mana, room is active, it's the caster's turn, target shape matches `targeting`. Resolution: deduct mana, compute damage = `multiplier × atk × (1 + 0.10 × level)`, apply heal if applicable, activate target tiles via the existing engine path (so per-tile effects also fire), emit `skill_resolved`. Suppress turn switch when `consumesTurn === false`.
+- **Acceptance:**
+  - Integration tests for each of cat's three skills: damage maths, heal cap, mana cost, turn behaviour.
+
+**T-v0.8-B03** · Extra-turn rule and turn-switch gate
+- **Req:** CR-9 · **Size:** S · **Deps:** F02
+- **Outputs:** Inside `MatchEngineService.submitMove` cascade loop, accumulate `extraTurnsRemaining` per swap. After resolution, switch active player only when `extraTurnsRemaining === 0`. Otherwise decrement and keep the same active player; broadcast `turn_changed` with `extraTurnsRemaining` and the same `activePlayerId`.
+- **Acceptance:**
+  - Integration test: a swap that produces a 4-line keeps the active player; a follow-up move from the same player is accepted; `turn_changed` payload carries `extraTurnsRemaining: 1` then `0`.
+
+**T-v0.8-B04** · XP award on match end + mid-match level up
+- **Req:** CR-7, CR-8 · **Size:** M · **Deps:** F02, F03, B01
+- **Outputs:** On `match_ended`, compute `xpDelta = floor(score × 0.10)` for each player and call `userProgressStore.addXp`. Emit `xp_awarded { playerId, xpDelta, newXp, newLevel }` alongside `match_ended`. During `submitMove` resolution, after applying tile-effect EXP grants, if `levelFromXp(newXp) > levelFromXp(oldXp)`, broadcast `level_up { playerId, newLevel, playerStates }` and refill the player's HP to the new max.
+- **Acceptance:**
+  - Integration test: a match where one player crosses an XP threshold mid-match emits `level_up` exactly once and HP is refilled.
+  - Match-end test: persistent XP is incremented by the correct amount.
+
+### Sub-track Game-view — skill UI + extra-turn UX
+
+**T-v0.8-G01** · Character header in HUD
+- **Req:** CR-1, CR-6 · **Size:** S · **Deps:** F01, B01
+- **Outputs:** `Hud.ts` renders character display name + level + tiny XP bar above the existing HP/Stamina/Mana stack.
+- **Acceptance:** unit test renders "Lv N · DisplayName" and bar fills proportional to xp/xpToNext.
+
+**T-v0.8-G02** · Skill buttons + targeting flow
+- **Req:** CR-3, CR-4 · **Size:** M · **Deps:** F01, B02, G01
+- **Outputs:** Three skill buttons in the HUD. Click → if `targeting === "single-tile"`, enter target-pick mode (cell hover highlight); on confirm, emit `skill { skillId, target: {row, col} }` via SyncClient. If `targeting === "area"`, area highlight + confirm. If `targeting === "none"`, fire immediately. Disable buttons while mana < cost or while not the caster's turn (except for `consumesTurn:false` skills, which can be used any time it's the caster's turn).
+- **Acceptance:** unit/widget tests for the three buttons' enable/disable logic and the target-pick flow for Strong Bite.
+
+**T-v0.8-G03** · Animations + extra-turn banner
+- **Req:** CR-9 · **Size:** S · **Deps:** F02, B03, G02
+- **Outputs:** On `skill_resolved`, briefly flash the target / area; on `turn_changed.extraTurnsRemaining > 0`, show a "+1 turn!" banner that fades after 1.5 s.
+- **Acceptance:** smoke-tested visually; one unit test confirms the banner fires when extraTurnsRemaining transitions 0 → ≥1.
+
+### Sub-track Shell — character selection screen
+
+**T-v0.8-S01** · Character-select screen
+- **Req:** CR-1 · **Size:** M · **Deps:** F01
+- **Outputs:** New Flutter screen `lib/screens/character_select_screen.dart`; reachable from HomeScreen before each match. Lists characters with display name + base stats + skill summary. Selection writes to local `shared_preferences` and is passed to `/matchmaking/join` (or `StartLocalMatch`) as `characterId`. Default loaded from `user_progress.default_character_id` on sign-in.
+- **Acceptance:** widget tests for selection persistence and the "remember selection" affordance.
+
+---
+
 ## Cross-cutting tasks
 
 - **T-CC-01** · Keep specs in sync with code (`planning.md`, `requirement.md`, `system-design.md`) · continuous · Outputs: spec updates per change.

@@ -91,7 +91,32 @@ The game view MUST NOT initiate sign-in itself. Apart from the room token and pl
 
 ---
 
-## 4. Non-functional requirements
+## 4. Character & progression requirements
+
+**CR-1 — Character selection.** Before each match (all modes including Practice) the player MUST pick a character. The selection MUST persist as the user's default for the next match. The selected character's identifier MUST be sent with the matchmaking request (or with the `StartLocalMatch` bridge message in solo) so server-side stats / skill resolution can use it.
+
+**CR-2 — Character definition.** Each character MUST define: `id`, `displayName`, `baseMaxHealth`, `baseMaxMana`, `baseMaxStamina`, `baseAtk`, and exactly **three** skills. Definitions live in `packages/shared-js/src/character/` and are imported by both the server (authoritative damage) and the client (UI affordances). Adding a new character MUST be possible without changing engine or HUD code.
+
+**CR-3 — Skill schema.** A skill MUST define: `id`, `name`, `manaCost`, `consumesTurn` (bool), `targeting` (`"none" | "single-tile" | "area"` with optional radius), `damageMultiplier`, optional `healFractionOfDamage`. Skills MUST be rejected when mana is insufficient. Skills marked `consumesTurn: true` MUST end the caster's turn after resolution.
+
+**CR-4 — First character (cat).** The first shipped character has these three skills:
+  - **CR-4(a) Scratch** — damage = `4 × baseAtk`, no targeting, `consumesTurn: false`.
+  - **CR-4(b) Strong Bite** — damage = `8 × baseAtk` against opponent; heals caster `50%` of dealt damage (capped at maxHealth); `targeting: "single-tile"` (player picks one cell, that cell is activated and applies its tile effect on top); `consumesTurn: true`.
+  - **CR-4(c) Board Strike** — damage = `20 × baseAtk`; `targeting: "area"` covering the entire board (effective radius = full grid); every activated tile applies its `applyTileEffects` contribution; `consumesTurn: true`.
+
+**CR-5 — Persistent progression.** Each user MUST have a server-persisted `(userId, xp, defaultCharacterId)` row. XP and the derived level survive across matches and devices.
+
+**CR-6 — Level scaling.** Effective `maxHealth` and `atk` MUST scale with level using compounding `+10%` per level: `effective = base × (1 + 0.10 × level)`. Other stats (mana, stamina) MAY scale; the v1 cut keeps them flat.
+
+**CR-7 — XP award on match end.** On every match-end (including pve and solo), `10%` of the in-match score (or a defined XP-per-clear bucket) MUST be added to the user's permanent XP. The exact formula MUST be deterministic so a replay of the same moves yields the same XP gain.
+
+**CR-8 — Mid-match level up.** If accumulated XP crosses a level threshold during a match, the engine MUST broadcast a `level_up` event; the affected player's `maxHealth` increases by `+10%` and current `health` is restored to the new `maxHealth` immediately. `atk` increase applies on the next damage roll.
+
+**CR-9 — "Match-4 again" rule.** A swap (or a cascade-step that follows from it) producing **a single line of 4 or more identical tiles** in the same row or column MUST grant the matcher `+1 extra turn` (the active player keeps the turn instead of yielding). Multiple independent 4+ lines in one cascade step grant cumulative extra turns (two simultaneous 4+ matches → +2). L-shaped intersections of two shorter (3-cell) legs MUST NOT count; an L counts only if at least one of its legs is 4+ on its own. Extra turns from a cascade are awarded to the original swap-maker, not to the cascade itself.
+
+---
+
+## 5. Non-functional requirements
 
 ### Performance
 

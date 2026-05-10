@@ -367,6 +367,47 @@ The bot fallback reuses the same `RoomManager` pipeline as a human match. From t
 
 ---
 
+## 4.5 Characters, skills, progression (v0.8)
+
+Characters introduce per-player base stats and a skill system on top of the existing tile-effect engine. The architecture extends the existing pattern (server-authoritative for `turn_based`; client-deterministic-with-server-relay for pve) — no new processes.
+
+```
+shared-js/
+  character/
+    CharacterDef.ts   — interface + Skill schema; pure types
+    cat.ts            — first concrete character ("scratch", "strong bite", "board strike")
+    registry.ts       — id → CharacterDef map; iteration order is stable
+  engine/
+    PlayerStats.ts    — extended: scaledStats(base, level), levelFromXp(xp), xpToNext(level)
+    MatchEngine.ts    — extended: returns extraTurnsFromMatch4Plus per cascade step
+
+apps/backend/
+  persistence/UserProgressStore.ts   — read/write (userId, xp, defaultCharacterId)
+  services/MatchEngineService.ts     — accepts characterId per slot at startMatch;
+                                        applies skills (consume mana, deal damage, heal);
+                                        suppresses turn switch when extraTurns > 0;
+                                        awards XP at match-end and emits level_up mid-match.
+  handlers/skill.ts                  — socket.on("skill", { skillId, target })
+```
+
+### 4.5.1 Wire additions
+
+- `MatchFoundPayload` carries `characters: { [playerId]: characterId }` so each client renders the right portrait + skill set.
+- `move_resolved` and `turn_changed` extend with `extraTurnsRemaining: number` (the active player's cumulative pending extra turns from 4+ matches; turn does not switch while > 0).
+- New event `skill_resolved { playerId, skillId, damageDealt, healedAmount, activatedCells, playerStates }` — broadcast to room when a skill resolves.
+- New event `level_up { playerId, newLevel, playerStates }` — broadcast when an XP grant crosses a threshold mid-match.
+- New event `xp_awarded { playerId, xpDelta, newXp, newLevel }` — emitted alongside `match_ended`.
+
+### 4.5.2 Authority and determinism
+
+Skill damage and stat scaling MUST be computed server-side for `turn_based` and `pve` (whose end-of-match flow already routes through `match_complete`). Solo can compute locally since there's no opposing player. The 4+-line "extra turn" rule is a pure function of the cascade step's matched cells; clients and server compute it identically from the engine's match output. Mid-match level-ups are a deterministic function of (current xp + xp-from-this-match) crossing a threshold; the server is the announcer to keep both clients in sync.
+
+### 4.5.3 Persistence
+
+A new table `user_progress (user_id PK, xp INT NOT NULL DEFAULT 0, default_character_id TEXT NOT NULL, updated_at TIMESTAMPTZ)` is added to Postgres. The account-deletion sweep (AR-4) MUST drop the corresponding row. Match-history rows are unchanged — XP earned per match is reconstructable from the score column if ever needed for audit.
+
+---
+
 ## 5. Mapping to the milestone plan
 
 Each version in [planning.md § 2](planning.md#2-milestones--per-version-scope) corresponds to a specific subset of this architecture. No component comes online before its version; nothing lingers half-built.

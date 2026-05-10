@@ -189,6 +189,30 @@ Versions are cumulative: v0.3 includes everything from v0.1 and v0.2.
 
 ---
 
+### v0.8 — Characters, skills, and persistent progression
+
+**Theme:** Players pick a character; characters have unique stats and three skills each. Permanent level/XP carries between matches.
+
+**In-scope requirements:**
+- CR-1 Character selection, CR-2 Character definition, CR-3 Skill schema, CR-4 First character (cat) with three skills, CR-5 Persistent progression, CR-6 Level scaling, CR-7 XP award on match end, CR-8 Mid-match level up, CR-9 "Match-4 again" rule.
+
+**Out of scope:** balancing across more than one character (we ship the cat only); rune/equipment systems; cosmetic unlocks; ranked-mode integration with character.
+
+**Deliverables:**
+- `packages/shared-js/src/character/` registry + cat definition. Pure data.
+- `MatchEngine` returns per-cascade-step `extraTurnsFromMatch4` count. Engine tests cover L-shape exclusion + multi-line-in-one-step.
+- New Postgres table `user_progress` with migration; `UserProgressStore` persistence layer; account-deletion sweep extended.
+- `MatchEngineService` extended: `startMatch` accepts character id per slot; skill resolver applies damage/heal/mana-cost; turn-switch is suppressed while `extraTurnsRemaining > 0`; XP awarded at `match_ended`; mid-match `level_up` emitted.
+- New socket events: `skill { skillId, target }` (client → server), `skill_resolved`, `level_up`, `xp_awarded` (server → client).
+- Game-view: character portrait + level/XP bar in HUD, three skill buttons with mana cost, target picker for single-tile / area skills, "+1 turn!" banner on 4+ matches.
+- Flutter shell: character-select screen pre-match; remembers default per user.
+
+**Definition of done:** A player can pick the cat, play a pve match, level up mid-match, see HP refilled, end the match, see XP added to their persistent profile, and the new level applies on the next match. 4+ line match grants an extra turn deterministically (server and client agree).
+
+**Effort:** ~4 dev-weeks. Touchpoints across all four packages but each is bounded.
+
+---
+
 ### v1.0 — Public launch
 
 **Theme:** Ready for real users and real traffic, across web and both mobile platforms.
@@ -218,8 +242,9 @@ Versions are cumulative: v0.3 includes everything from v0.1 and v0.2.
 | v0.5 | Robustness / reconnect | MR-6 (initial, socket-keyed), NFR-3, NFR-4 | 3 |
 | v0.6 | Flutter shell + Accounts | AR-1, AR-2, AR-3, AR-4, AR-5, AR-6, AR-7, NFR-11 (extended), MR-6 (upgraded to userId-keyed) | 6 |
 | v0.7 | Accessibility + platform matrix | NFR-8 (keyboard), NFR-9, NFR-10, NFR-11 (formal), NFR-12 | 3 |
+| v0.8 | Characters, skills, progression | CR-1 – CR-9 | 4 |
 | v1.0 | Public launch | (infra + observability + store releases) | 3 |
-| **Total** |   |   | **~30 dev-weeks** |
+| **Total** |   |   | **~34 dev-weeks** |
 
 With a solo developer at 4 focused days/week, that's roughly 8–9 calendar months. With 2–3 developers working in parallel where the plan allows (rendering + networking in v0.4; shell + server-identity in v0.6), roughly 4–5 months.
 
