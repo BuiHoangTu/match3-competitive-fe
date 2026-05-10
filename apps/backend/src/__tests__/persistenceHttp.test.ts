@@ -20,6 +20,9 @@ import {
 import {
   InMemoryMatchHistoryStore,
 } from "../persistence/MatchHistoryStore";
+import {
+  InMemoryUserProgressStore,
+} from "../persistence/UserProgressStore";
 
 async function httpJson(
   port: number,
@@ -56,7 +59,7 @@ describe("GET /user/history (T-v0.6-E08)", () => {
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
     handle = await startServer(0, {
-      persistence: { userStore, matchHistoryStore },
+      persistence: { userStore, matchHistoryStore, userProgressStore: new InMemoryUserProgressStore() },
     });
   });
 
@@ -154,7 +157,7 @@ describe("POST /account/delete (T-v0.6-F01)", () => {
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
     handle = await startServer(0, {
-      persistence: { userStore, matchHistoryStore },
+      persistence: { userStore, matchHistoryStore, userProgressStore: new InMemoryUserProgressStore() },
     });
   });
 
@@ -240,7 +243,7 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
     handle = await startServer(0, {
-      persistence: { userStore, matchHistoryStore },
+      persistence: { userStore, matchHistoryStore, userProgressStore: new InMemoryUserProgressStore() },
     });
   });
 

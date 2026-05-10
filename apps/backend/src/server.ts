@@ -49,8 +49,9 @@ export interface ServerOptions {
   localAccounts?: import("./persistence/LocalAccountStore").LocalAccountStore;
 
   /**
-   * Override the bot-fallback wait (ms). Defaults to BOT_WAIT_MS (5 s).
-   * Pass a small value (e.g. 50) in integration tests to avoid slow bots.
+   * Override the matchmaking bot-fallback wait time. Used by integration
+   * tests to make pve matchmaking complete quickly (default 5_000 ms is
+   * fine in production, too slow for vitest's 5 s timeout).
    */
   botWaitMs?: number;
 }
@@ -123,6 +124,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
   });
 
   const matchStartTimes = new Map<string, number>();
+  const disconnectedPlayers = new Map<string, ReturnType<typeof setTimeout>>();
 
   // socketBridge needs ctx, but ctx needs socketBridge — break the cycle by
   // creating a partial context first and then injecting the bridge.
@@ -135,6 +137,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     persistence,
     rootSeedSource,
     matchStartTimes,
+    disconnectedPlayers,
   };
   const socketBridge = new SocketBridge(io, ctxPartial as ServerContext, matchEngineService);
   (ctxPartial as ServerContext).socketBridge = socketBridge;
@@ -163,6 +166,8 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     async close(): Promise<void> {
       idleSweeper.stop();
       matchmaking.shutdown();
+      for (const handle of disconnectedPlayers.values()) clearTimeout(handle);
+      disconnectedPlayers.clear();
       await new Promise<void>((resolve) => {
         io.close(() => resolve());
       });
@@ -200,17 +205,19 @@ async function bootstrap(): Promise<void> {
 
   if (process.env.DATABASE_URL) {
     try {
-      const [{ getPool }, { PgUserStore }, { PgMatchHistoryStore }, { PgLocalAccountStore }] =
+      const [{ getPool }, { PgUserStore }, { PgMatchHistoryStore }, { PgLocalAccountStore }, { PgUserProgressStore }] =
         await Promise.all([
           import("./db"),
           import("./persistence/UserStore"),
           import("./persistence/MatchHistoryStore"),
           import("./persistence/LocalAccountStore"),
+          import("./persistence/UserProgressStore"),
         ]);
       const pool = getPool();
       persistence = {
         userStore: new PgUserStore(),
         matchHistoryStore: new PgMatchHistoryStore(),
+        userProgressStore: new PgUserProgressStore(pool),
       };
       localAccounts = new PgLocalAccountStore(pool);
       console.log("[bootstrap] Postgres-backed persistence + local accounts enabled");

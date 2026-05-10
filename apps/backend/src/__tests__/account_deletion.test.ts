@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { PgUserStore } from "../persistence/UserStore";
 import { PgMatchHistoryStore } from "../persistence/MatchHistoryStore";
+import { PgUserProgressStore } from "../persistence/UserProgressStore";
 import { deleteAccount, tombstoneFor } from "../persistence/AccountDeletion";
 import { _setPool } from "../db";
 
@@ -135,6 +136,29 @@ describe.skipIf(!hasDb)("Account deletion — real Postgres (T-v0.6-F05)", () =>
     const row = await userStore.findById(userId);
     expect(row?.displayName).toBe("Second");
     expect(row?.provider).toBe("google.com"); // preserved
+  }, 15_000);
+
+  it("user_progress row removed via ON DELETE CASCADE (T-v0.8-F03)", async () => {
+    const progressStore = new PgUserProgressStore(pool);
+    const ts = Date.now();
+    const userId = trackUser(`test-progress-cascade-${ts}`);
+
+    // Insert user, then add XP to create a user_progress row.
+    await userStore.upsert({ userId, displayName: "ProgressUser", provider: "local" });
+    await progressStore.addXp(userId, 50);
+
+    // Confirm the progress row exists.
+    const before = await progressStore.get(userId);
+    expect(before).not.toBeNull();
+    expect(before?.xp).toBe(50);
+
+    // Delete the account — cascade should drop user_progress automatically.
+    const result = await deleteAccount(userId, { userStore, matchHistoryStore });
+    expect(result.deleted).toBe(true);
+
+    // The users row is gone (hard-deleted), so querying user_progress should return null.
+    const after = await progressStore.get(userId);
+    expect(after).toBeNull();
   }, 15_000);
 
   it("match history listForUser returns only caller rows (T-v0.6-E08 PG)", async () => {
