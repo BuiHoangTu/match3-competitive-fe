@@ -69,6 +69,8 @@ flutter run -d chrome          # Run on web (requires Chrome/Chromium)
 flutter build web              # Build for production
 ```
 
+**All js tests** must be performed by using ./docker-compose.test.yml. DO NOT RUN OUTSIDE CONATAINERS. Flutter tests are allowed to run normally.
+
 ## Architecture
 
 Four strict layers — **never mix them**:
