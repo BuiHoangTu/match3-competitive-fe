@@ -84,7 +84,7 @@ Map<String, Object?> _joinOk({
 void main() {
   const baseUrl = 'http://localhost:3001';
   const assetUrl = '/game/';
-  const idToken = 'id-alice';
+  const sessionToken = 'session-alice';
 
   group('MatchSessionLauncher — happy path', () {
     test('returns handle and dispatches startMatch when ready fires', () async {
@@ -103,7 +103,7 @@ void main() {
       // is attached. Inject ReadyMessage afterwards so we know the listener
       // is in place.
       final handle = await launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.turnBased,
       );
       transport.inject(const ReadyMessage());
@@ -133,7 +133,7 @@ void main() {
       );
 
       await launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.turnBased,
       );
       transport.inject(const ReadyMessage());
@@ -160,7 +160,7 @@ void main() {
       );
 
       await launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.turnBased,
       );
 
@@ -213,7 +213,7 @@ void main() {
       );
 
       final handle = await launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.turnBased,
       );
       transport.inject(const ReadyMessage());
@@ -251,7 +251,7 @@ void main() {
       );
 
       final launchFuture = launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.turnBased,
         onReconnecting: () => reconnectingCalled = true,
       );
@@ -287,8 +287,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchActiveRoomGone>()),
       );
     });
@@ -310,8 +310,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchAuthRejected>()),
       );
     });
@@ -341,8 +341,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchAuthRejected>()),
       );
     });
@@ -363,8 +363,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -383,8 +383,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -406,8 +406,8 @@ void main() {
       );
 
       expect(
-        () =>
-            launcher.launch(idToken: idToken, mode: MatchmakingMode.turnBased),
+        () => launcher.launch(
+            sessionToken: sessionToken, mode: MatchmakingMode.turnBased),
         throwsA(isA<LaunchTransport>()),
       );
     });
@@ -432,7 +432,7 @@ void main() {
 
       var blocked = false;
       final handle = await launcher.launchLocal(
-        idToken: idToken,
+        sessionToken: sessionToken,
         userId: 'user-alice',
         characterId: 'cat',
         onActiveMatchBlock: () => blocked = true,
@@ -477,7 +477,7 @@ void main() {
 
       var blocked = false;
       final handle = await launcher.launchLocal(
-        idToken: idToken,
+        sessionToken: sessionToken,
         userId: 'user-alice',
         onActiveMatchBlock: () => blocked = true,
       );
@@ -502,7 +502,7 @@ void main() {
 
       expect(
         () => launcher.launchLocal(
-          idToken: idToken,
+          sessionToken: sessionToken,
           userId: 'user-alice',
         ),
         throwsA(isA<LaunchAuthRejected>()),
@@ -523,7 +523,7 @@ void main() {
       );
 
       final handle = await launcher.launchLocal(
-        idToken: idToken,
+        sessionToken: sessionToken,
         userId: 'user-alice',
       );
 
@@ -549,7 +549,7 @@ void main() {
       );
 
       final handle = await launcher.launchLocal(
-        idToken: idToken,
+        sessionToken: sessionToken,
         userId: 'user-bob',
       );
 
@@ -579,7 +579,7 @@ void main() {
       );
 
       await launcher.launch(
-        idToken: idToken,
+        sessionToken: sessionToken,
         mode: MatchmakingMode.pve,
         characterId: 'cat',
       );
@@ -587,7 +587,7 @@ void main() {
           capturedJoinBody, jsonEncode({'mode': 'pve', 'characterId': 'cat'}));
 
       final localHandle = await launcher.launchLocal(
-        idToken: idToken,
+        sessionToken: sessionToken,
         userId: 'user-alice',
         characterId: 'cat',
       );

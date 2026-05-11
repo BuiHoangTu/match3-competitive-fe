@@ -1,7 +1,7 @@
 /// T-v0.6-B12 · Bridge integration test (deterministic)
 ///
 /// Drives the full bridge message sequence using a [BridgeMockTransport]
-/// (no real WebView, no Firebase, no network).
+/// (no real WebView, no external auth provider, no network).
 ///
 /// Sequences covered:
 ///   1. Normal flow:  shell waits for ready → sends startMatch → game emits matchEnded
@@ -136,7 +136,8 @@ void main() {
     // Sequence 2: stale token → authTokenRejected → re-send startMatch → matchEnded
     // -----------------------------------------------------------------------
 
-    test('token-refresh flow: authTokenRejected → re-startMatch → matchEnded', () async {
+    test('token-refresh flow: authTokenRejected → re-startMatch → matchEnded',
+        () async {
       // Step 1: game emits ready.
       transport.emitReady();
       await shell.waitForMessages(1);

@@ -15,7 +15,7 @@ class _SignedInAuth implements AuthStateInterface {
       const UserProfile(userId: 'u1', displayName: 'Test Player');
 
   @override
-  String? get idToken => 'id-token';
+  String? get sessionToken => 'session-token';
 
   @override
   Future<void> signOut() async {}

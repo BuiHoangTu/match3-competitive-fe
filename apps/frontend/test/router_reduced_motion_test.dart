@@ -30,7 +30,7 @@ class _SignedInAuth implements AuthStateInterface {
       const UserProfile(userId: 'u1', displayName: 'Test Player');
 
   @override
-  String? get idToken => null;
+  String? get sessionToken => null;
 
   @override
   Future<void> signOut() async {}
@@ -44,7 +44,7 @@ class _SignedOutAuth implements AuthStateInterface {
   UserProfile? get currentUser => null;
 
   @override
-  String? get idToken => null;
+  String? get sessionToken => null;
 
   @override
   Future<void> signOut() async {}

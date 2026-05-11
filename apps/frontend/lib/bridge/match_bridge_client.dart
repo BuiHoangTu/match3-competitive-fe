@@ -6,7 +6,7 @@
 /// Security rules:
 ///   - The raw [roomToken] value is never logged; only [expiresAt] and a
 ///     short hash prefix are logged for correlation.
-///   - The Firebase idToken MUST NOT be passed to this function — it accepts
+///   - The app session token MUST NOT be passed to this function — it accepts
 ///     only the shape [{roomToken, expiresAt}] as returned by the matchmaking
 ///     endpoint.
 library;
@@ -28,7 +28,7 @@ import 'bridge_transport.dart';
 /// a token refresh following [AuthTokenRejectedMessage]).
 ///
 /// Type note: this function accepts [roomToken] as a plain [String], not a
-/// Firebase credential shape — passing an object with a `userId` field is a
+/// session/user credential shape — passing an object with a `userId` field is a
 /// compile-time error because [String] does not have that field.
 void sendStartMatch(
   BridgeTransport transport, {

@@ -48,7 +48,7 @@ void main() {
 
     test('type system rejects passing a shape with userId at compile-time', () {
       // This is enforced by the type signature: roomToken is a String, not an
-      // object. The test documents this fact — a Firebase token shape cannot
+      // object. The test documents this fact — a session token shape cannot
       // be passed because String has no userId field.
       //
       // If the test compiles, the constraint is satisfied.

@@ -49,7 +49,7 @@ sealed class LaunchError implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
-/// The user's idToken was rejected by the matchmaking endpoint (HTTP 401).
+/// The user's sessionToken was rejected by the matchmaking endpoint (HTTP 401).
 /// The router should sign out and redirect to sign-in.
 class LaunchAuthRejected extends LaunchError {
   const LaunchAuthRejected(super.message);
@@ -97,7 +97,7 @@ class MatchSessionLauncher {
   /// URL of the Phaser bundle (e.g. `/game/` or `http://localhost:5173`).
   final String assetUrl;
 
-  /// Launches a game session for [mode] authenticated with [idToken].
+  /// Launches a game session for [mode] authenticated with [sessionToken].
   ///
   /// On [MatchmakingActiveRoom] the launcher transparently calls
   /// [MatchmakingClient.resume] — the caller is notified of this via the
@@ -118,7 +118,7 @@ class MatchSessionLauncher {
   ///   - [LaunchActiveRoomGone]  — 410 on resume (rejoin window expired)
   ///   - [LaunchTransport]       — anything else (network, bad payload, etc.)
   Future<GameViewHandle> launch({
-    required String idToken,
+    required String sessionToken,
     required MatchmakingMode mode,
     String characterId = 'cat',
     void Function()? onReconnecting,
@@ -137,7 +137,7 @@ class MatchSessionLauncher {
     try {
       try {
         final r = await matchmaking.join(
-          idToken: idToken,
+          sessionToken: sessionToken,
           mode: mode,
           characterId: characterId,
         );
@@ -152,7 +152,8 @@ class MatchSessionLauncher {
           name: 'launcher',
         );
         onReconnecting?.call();
-        final r = await matchmaking.resume(idToken: idToken, roomId: e.roomId);
+        final r = await matchmaking.resume(
+            sessionToken: sessionToken, roomId: e.roomId);
         roomToken = r.roomToken;
         expiresAt = r.expiresAt;
       }
@@ -212,7 +213,7 @@ class MatchSessionLauncher {
   ///   - [LaunchAuthRejected]  — 401 from /matchmaking/status.
   ///   - [LaunchTransport]     — failure to mount the game view.
   Future<GameViewHandle?> launchLocal({
-    required String idToken,
+    required String sessionToken,
     required String userId,
     String characterId = 'cat',
     void Function()? onActiveMatchBlock,
@@ -224,7 +225,8 @@ class MatchSessionLauncher {
 
     // Step 1: active-session probe. Network failures are non-fatal — proceed.
     try {
-      final session = await matchmaking.getActiveSession(idToken: idToken);
+      final session =
+          await matchmaking.getActiveSession(sessionToken: sessionToken);
       if (session != null) {
         developer.log(
           'launchLocal blocked: active room=${session.roomId}',

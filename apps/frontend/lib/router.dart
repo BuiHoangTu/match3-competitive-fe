@@ -18,7 +18,7 @@
 //   All routes except /sign-in and /legal/* redirect to /sign-in when
 //   [AuthStateInterface.isSignedIn] returns false.
 //   The interface is defined below; the concrete implementation is provided
-//   by sub-track C (T-v0.6-C05 auth_service.dart).
+//   by the local auth adapter below.
 //
 // Reduced-motion:
 //   Every route uses [pageBuilder] instead of [builder]. The helper
@@ -35,10 +35,14 @@ import 'package:go_router/go_router.dart';
 
 import 'models/match_result.dart';
 import 'models/user_profile.dart';
+import 'net/board_delta_socket_client.dart';
 import 'screens/account_screen.dart';
 import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/match_screen.dart';
+import 'screens/online_game_screen.dart';
+import 'screens/practice_game_screen.dart';
+import 'screens/pve_game_screen.dart';
 import 'screens/privacy_screen.dart';
 import 'screens/result_screen.dart';
 import 'screens/register_screen.dart';
@@ -61,6 +65,9 @@ abstract final class Routes {
   static const register = 'register';
   static const home = 'home';
   static const characterSelect = 'character-select';
+  static const practice = 'practice';
+  static const pve = 'pve';
+  static const onlineMatch = 'online-match';
   static const match = 'match';
   static const result = 'result';
   static const account = 'account';
@@ -83,12 +90,12 @@ abstract class AuthStateInterface {
   /// Returns the currently signed-in user profile, or null when signed out.
   UserProfile? get currentUser;
 
-  /// Current Firebase idToken if signed in, otherwise null. Used by HTTP
+  /// Current app session token if signed in, otherwise null. Used by HTTP
   /// clients (matchmaking, account-deletion) for `Authorization: Bearer`.
-  String? get idToken => null;
+  String? get sessionToken => null;
 
   /// Sign out the current user. Default no-op for the stub; real
-  /// implementations clear the Firebase session and emit a null auth state.
+  /// implementations clear the app session and emit a null auth state.
   Future<void> signOut() async {}
 }
 
@@ -96,7 +103,7 @@ abstract class AuthStateInterface {
 ///
 /// Always returns signed-in with a placeholder profile so that the router
 /// can be exercised in tests and development without real auth.
-/// REPLACE this with the Firebase-backed implementation from T-v0.6-C05.
+/// Kept for tests that need a simple unauthenticated auth state.
 class StubAuthState implements AuthStateInterface {
   @override
   bool get isSignedIn => false; // starts unauthenticated so guard is active
@@ -105,7 +112,7 @@ class StubAuthState implements AuthStateInterface {
   UserProfile? get currentUser => null;
 
   @override
-  String? get idToken => null;
+  String? get sessionToken => null;
 
   @override
   Future<void> signOut() async {}
@@ -129,7 +136,7 @@ class LocalAuthStateAdapter extends ChangeNotifier
   UserProfile? get currentUser => _service.currentUser;
 
   @override
-  String? get idToken => _service.sessionToken;
+  String? get sessionToken => _service.sessionToken;
 
   @override
   Future<void> signOut() async {
@@ -172,6 +179,8 @@ GoRouter createRouter({
   LocalAuthService? localAuth,
   MatchmakingClient? matchmaking,
   MatchSessionLauncher? sessionLauncher,
+  BoardDeltaConnectionFactory boardDeltaConnectionFactory =
+      createSocketIoBoardDeltaConnection,
 }) {
   const backendUrl = String.fromEnvironment(
     'BACKEND_URL',
@@ -333,11 +342,23 @@ GoRouter createRouter({
           // (snackbars, navigation).
           Future<void> launchGame(BuildContext ctx, String mode) async {
             developer.log('Launching game mode=$mode', name: 'router');
-            final tok = auth.idToken;
+            final tok = auth.sessionToken;
             if (tok == null) {
               ScaffoldMessenger.of(ctx).showSnackBar(
                 const SnackBar(content: Text('Please sign in first')),
               );
+              return;
+            }
+
+            final characterId =
+                await characterPreference.getDefaultCharacter() ?? 'cat';
+            if (!ctx.mounted) return;
+            if (mode == 'pve') {
+              ctx.goNamed(Routes.pve, extra: characterId);
+              return;
+            }
+            if (mode == 'turn_based') {
+              ctx.goNamed(Routes.onlineMatch, extra: characterId);
               return;
             }
 
@@ -354,7 +375,7 @@ GoRouter createRouter({
               }
               try {
                 final handle = await launcher.launchLocal(
-                  idToken: tok,
+                  sessionToken: tok,
                   userId: userId,
                   onActiveMatchBlock: () {
                     if (ctx.mounted) {
@@ -391,7 +412,7 @@ GoRouter createRouter({
             };
             try {
               final handle = await launcher.launch(
-                idToken: tok,
+                sessionToken: tok,
                 mode: mmMode,
                 onReconnecting: () {
                   if (ctx.mounted) {
@@ -432,10 +453,10 @@ GoRouter createRouter({
           // Solo doesn't show up here (no server tracking) — solo's resume
           // happens entirely inside the game-view via localStorage.
           Future<String?> autoResumeCheck() async {
-            final tok = auth.idToken;
+            final tok = auth.sessionToken;
             if (tok == null) return null;
             try {
-              final session = await mm.getActiveSession(idToken: tok);
+              final session = await mm.getActiveSession(sessionToken: tok);
               return session?.mode;
             } catch (_) {
               return null;
@@ -495,7 +516,7 @@ GoRouter createRouter({
             await characterPreference.setDefaultCharacter(selectedCharacterId);
             if (!ctx.mounted) return;
 
-            final tok = auth.idToken;
+            final tok = auth.sessionToken;
             if (tok == null) {
               ScaffoldMessenger.of(ctx).showSnackBar(
                 const SnackBar(content: Text('Please sign in first')),
@@ -504,43 +525,15 @@ GoRouter createRouter({
             }
 
             if (mode == 'solo') {
-              final userId = auth.currentUser?.userId;
-              if (userId == null) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('Please sign in first')),
-                );
-                return;
-              }
-              try {
-                final handle = await launcher.launchLocal(
-                  idToken: tok,
-                  userId: userId,
-                  characterId: selectedCharacterId,
-                  onActiveMatchBlock: () {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                        content: Text(
-                            'You already have an active match — finish or leave it first'),
-                      ));
-                    }
-                  },
-                );
-                if (handle == null) return;
-                if (!ctx.mounted) return;
-                ctx.goNamed(Routes.match, extra: handle);
-              } on LaunchAuthRejected {
-                if (!ctx.mounted) return;
-                await auth.signOut();
-                if (!ctx.mounted) return;
-                ctx.goNamed(Routes.signIn);
-              } on LaunchTransport catch (e) {
-                developer.log('launchGame solo failed: $e', name: 'router');
-                if (!ctx.mounted) return;
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                      content: Text('Failed to launch game: ${e.message}')),
-                );
-              }
+              ctx.goNamed(Routes.practice, extra: selectedCharacterId);
+              return;
+            }
+            if (mode == 'pve') {
+              ctx.goNamed(Routes.pve, extra: selectedCharacterId);
+              return;
+            }
+            if (mode == 'turn_based') {
+              ctx.goNamed(Routes.onlineMatch, extra: selectedCharacterId);
               return;
             }
 
@@ -551,7 +544,7 @@ GoRouter createRouter({
             };
             try {
               final handle = await launcher.launch(
-                idToken: tok,
+                sessionToken: tok,
                 mode: mmMode,
                 characterId: selectedCharacterId,
                 onReconnecting: () {
@@ -592,6 +585,81 @@ GoRouter createRouter({
               onLoadDefault: characterPreference.getDefaultCharacter,
               onConfirm: (characterId) => launchGame(context, characterId),
               onBack: () => context.goNamed(Routes.home),
+            ),
+          );
+        },
+      ),
+
+      // -----------------------------------------------------------------------
+      // /practice — guarded — Flutter-native local Practice
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/practice',
+        name: Routes.practice,
+        pageBuilder: (context, state) {
+          final characterId = state.extra as String? ?? 'cat';
+          return _buildPage(
+            context,
+            state,
+            PracticeGameScreen(
+              characterId: characterId,
+              onLeave: () => context.goNamed(Routes.home),
+            ),
+          );
+        },
+      ),
+
+      // -----------------------------------------------------------------------
+      // /pve — guarded — Flutter-native local PvE
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/pve',
+        name: Routes.pve,
+        pageBuilder: (context, state) {
+          final characterId = state.extra as String? ?? 'cat';
+          return _buildPage(
+            context,
+            state,
+            PveGameScreen(
+              characterId: characterId,
+              onLeave: () => context.goNamed(Routes.home),
+            ),
+          );
+        },
+      ),
+
+      // -----------------------------------------------------------------------
+      // /online-match — guarded — Flutter-native board-delta online match
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/online-match',
+        name: Routes.onlineMatch,
+        pageBuilder: (context, state) {
+          final tok = auth.sessionToken;
+          if (tok == null) {
+            Future.microtask(() {
+              if (context.mounted) context.goNamed(Routes.signIn);
+            });
+            return _buildPage(
+              context,
+              state,
+              const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          }
+          final characterId = state.extra as String? ?? 'cat';
+          return _buildPage(
+            context,
+            state,
+            OnlineGameScreen(
+              sessionToken: tok,
+              backendUrl: backendUrl,
+              mode: MatchmakingMode.turnBased,
+              characterId: characterId,
+              matchmaking: mm,
+              connectionFactory: boardDeltaConnectionFactory,
+              onLeave: () => context.goNamed(Routes.home),
             ),
           );
         },
@@ -685,14 +753,14 @@ GoRouter createRouter({
                 displayName: 'Player',
               );
           Future<void> doDelete() async {
-            final tok = auth.idToken;
+            final tok = auth.sessionToken;
             if (tok == null) {
-              developer.log('deleteAccount: no idToken', name: 'router');
+              developer.log('deleteAccount: no sessionToken', name: 'router');
               if (context.mounted) context.goNamed(Routes.signIn);
               return;
             }
             try {
-              await account.delete(idToken: tok);
+              await account.delete(sessionToken: tok);
             } on AccountDeleteError catch (e) {
               developer.log('deleteAccount failed: $e', name: 'router');
               if (!context.mounted) return;

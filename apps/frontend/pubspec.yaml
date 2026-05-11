@@ -20,19 +20,17 @@ dependencies:
   # Legal / markdown screens
   flutter_markdown: ^0.7.0
 
-  # Firebase (T-v0.6-C01 — requires Firebase project setup before activating on device)
-  firebase_core: ^3.6.0
-  firebase_auth: ^5.3.0
-
-  # Auth providers (T-v0.6-C03, T-v0.6-C04)
+  # Optional Google OAuth provider. App sessions still come from backend local auth.
   google_sign_in: ^6.2.2
-  sign_in_with_apple: ^6.1.2
 
-  # Crypto — SHA-256 nonce hashing for Apple Sign-In (T-v0.6-C03)
+  # Hashing for non-sensitive token log correlation.
   crypto: ^3.0.5
 
   # HTTP client for matchmaking REST calls (T-v0.6-F01)
   http: ^1.2.0
+
+  # Native Socket.IO client for Flutter board-delta online matches.
+  socket_io_client: ^3.1.2
 
   # WebView for embedded game view — iOS/Android (T-v0.6-A08b)
   webview_flutter: ^4.0.0
