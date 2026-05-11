@@ -32,9 +32,6 @@ dependencies:
   # Native Socket.IO client for Flutter board-delta online matches.
   socket_io_client: ^3.1.2
 
-  # WebView for embedded game view — iOS/Android (T-v0.6-A08b)
-  webview_flutter: ^4.0.0
-
   # Persistent local storage for the session token (T-Local-09).
   shared_preferences: ^2.3.0
 

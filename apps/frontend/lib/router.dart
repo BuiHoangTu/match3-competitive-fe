@@ -8,7 +8,6 @@
 //   /sign-in          → SignInScreen          (public — no guard)
 //   /home             → HomeScreen            (guarded)
 //   /character-select → CharacterSelectScreen (guarded — mode via extra)
-//   /match            → MatchScreen           (guarded — GameViewHandle via extra)
 //   /result           → ResultScreen          (guarded — MatchResult via extra)
 //   /account          → AccountScreen         (guarded)
 //   /legal/privacy    → PrivacyScreen         (public — no guard)
@@ -24,8 +23,7 @@
 //   Every route uses [pageBuilder] instead of [builder]. The helper
 //   [_buildPage] wraps a child widget in [NoTransitionPage] when
 //   MediaQuery.disableAnimations is true, otherwise [MaterialPage].
-//   Shell-side transitions (page route animations) become instant while the
-//   game view tween animations (inside the WebView) are unaffected.
+//   Shell-side transitions (page route animations) become instant.
 
 import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:developer' as developer;
@@ -39,7 +37,6 @@ import 'net/board_delta_socket_client.dart';
 import 'screens/account_screen.dart';
 import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/match_screen.dart';
 import 'screens/online_game_screen.dart';
 import 'screens/practice_game_screen.dart';
 import 'screens/pve_game_screen.dart';
@@ -50,9 +47,7 @@ import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/account_client.dart';
 import 'services/character_preference.dart';
-import 'services/game_view_bootstrap.dart';
 import 'services/local_auth_service.dart';
-import 'services/match_session_launcher.dart';
 import 'services/matchmaking_client.dart';
 
 // ---------------------------------------------------------------------------
@@ -68,7 +63,6 @@ abstract final class Routes {
   static const practice = 'practice';
   static const pve = 'pve';
   static const onlineMatch = 'online-match';
-  static const match = 'match';
   static const result = 'result';
   static const account = 'account';
   static const privacy = 'privacy';
@@ -178,7 +172,6 @@ GoRouter createRouter({
   AccountClient? accountClient,
   LocalAuthService? localAuth,
   MatchmakingClient? matchmaking,
-  MatchSessionLauncher? sessionLauncher,
   BoardDeltaConnectionFactory boardDeltaConnectionFactory =
       createSocketIoBoardDeltaConnection,
 }) {
@@ -188,16 +181,6 @@ GoRouter createRouter({
   );
   final account = accountClient ?? AccountClient(baseUrl: backendUrl);
   final mm = matchmaking ?? MatchmakingClient(baseUrl: backendUrl);
-  const assetUrl = String.fromEnvironment(
-    'GAME_URL',
-    defaultValue: '/game/',
-  );
-  final launcher = sessionLauncher ??
-      MatchSessionLauncher(
-        matchmaking: mm,
-        loadView: loadGameView,
-        assetUrl: assetUrl,
-      );
   const characterPreference = CharacterPreference();
 
   void showUnderDevelopment(BuildContext ctx, String which) {
@@ -335,11 +318,7 @@ GoRouter createRouter({
                 displayName: 'Player',
               );
 
-          // Launches the game view in the given mode and navigates to /match.
-          // Delegates orchestration to [MatchSessionLauncher.launch] (server
-          // matchmaking) or [MatchSessionLauncher.launchLocal] (solo, pure
-          // client-side). This callsite only handles UI side-effects
-          // (snackbars, navigation).
+          // Launches the native Flutter game screen for the selected mode.
           Future<void> launchGame(BuildContext ctx, String mode) async {
             developer.log('Launching game mode=$mode', name: 'router');
             final tok = auth.sessionToken;
@@ -361,97 +340,12 @@ GoRouter createRouter({
               ctx.goNamed(Routes.onlineMatch, extra: characterId);
               return;
             }
-
-            // Solo branches into the client-side path. We still call the
-            // active-session probe before launching so a player who's mid-
-            // game in turn_based or pve can't accidentally drop their match.
-            if (mode == 'solo') {
-              final userId = auth.currentUser?.userId;
-              if (userId == null) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('Please sign in first')),
-                );
-                return;
-              }
-              try {
-                final handle = await launcher.launchLocal(
-                  sessionToken: tok,
-                  userId: userId,
-                  onActiveMatchBlock: () {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                        content: Text(
-                            'You already have an active match — finish or leave it first'),
-                      ));
-                    }
-                  },
-                );
-                if (handle == null) return; // blocked by active-session
-                if (!ctx.mounted) return;
-                ctx.goNamed(Routes.match, extra: handle);
-              } on LaunchAuthRejected {
-                if (!ctx.mounted) return;
-                await auth.signOut();
-                if (!ctx.mounted) return;
-                ctx.goNamed(Routes.signIn);
-              } on LaunchTransport catch (e) {
-                developer.log('launchGame solo failed: $e', name: 'router');
-                if (!ctx.mounted) return;
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                      content: Text('Failed to launch game: ${e.message}')),
-                );
-              }
-              return;
-            }
-
-            final mmMode = switch (mode) {
-              'pve' => MatchmakingMode.pve,
-              'turn_based' => MatchmakingMode.turnBased,
-              _ => MatchmakingMode.turnBased,
-            };
-            try {
-              final handle = await launcher.launch(
-                sessionToken: tok,
-                mode: mmMode,
-                onReconnecting: () {
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Reconnecting to your match…'),
-                      duration: Duration(seconds: 2),
-                    ));
-                  }
-                },
-              );
-              if (!ctx.mounted) return;
-              ctx.goNamed(Routes.match, extra: handle);
-            } on LaunchActiveRoomGone {
-              // Resume after the rejoin window expired — the previous match
-              // is gone. User can tap a mode again to start fresh.
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                content: Text(
-                    'Previous match ended — tap a mode to start a new one'),
-              ));
-            } on LaunchAuthRejected {
-              if (!ctx.mounted) return;
-              await auth.signOut();
-              if (!ctx.mounted) return;
-              ctx.goNamed(Routes.signIn);
-            } on LaunchTransport catch (e) {
-              developer.log('launchGame failed: $e', name: 'router');
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                SnackBar(content: Text('Failed to launch game: ${e.message}')),
-              );
-            }
           }
 
           // After a page reload, the user may have an active server-side
           // match. Ask the backend; if so, HomeScreen auto-fires the matching
           // mode handler so they land back in the match instead of the lobby.
-          // Solo doesn't show up here (no server tracking) — solo's resume
-          // happens entirely inside the game-view via localStorage.
+          // Solo doesn't show up here because practice is fully local.
           Future<String?> autoResumeCheck() async {
             final tok = auth.sessionToken;
             if (tok == null) return null;
@@ -535,46 +429,6 @@ GoRouter createRouter({
             if (mode == 'turn_based') {
               ctx.goNamed(Routes.onlineMatch, extra: selectedCharacterId);
               return;
-            }
-
-            final mmMode = switch (mode) {
-              'pve' => MatchmakingMode.pve,
-              'turn_based' => MatchmakingMode.turnBased,
-              _ => MatchmakingMode.turnBased,
-            };
-            try {
-              final handle = await launcher.launch(
-                sessionToken: tok,
-                mode: mmMode,
-                characterId: selectedCharacterId,
-                onReconnecting: () {
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                      content: Text('Reconnecting to your match…'),
-                      duration: Duration(seconds: 2),
-                    ));
-                  }
-                },
-              );
-              if (!ctx.mounted) return;
-              ctx.goNamed(Routes.match, extra: handle);
-            } on LaunchActiveRoomGone {
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                content: Text(
-                    'Previous match ended — tap a mode to start a new one'),
-              ));
-            } on LaunchAuthRejected {
-              if (!ctx.mounted) return;
-              await auth.signOut();
-              if (!ctx.mounted) return;
-              ctx.goNamed(Routes.signIn);
-            } on LaunchTransport catch (e) {
-              developer.log('launchGame failed: $e', name: 'router');
-              if (!ctx.mounted) return;
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                SnackBar(content: Text('Failed to launch game: ${e.message}')),
-              );
             }
           }
 
@@ -666,59 +520,12 @@ GoRouter createRouter({
       ),
 
       // -----------------------------------------------------------------------
-      // /match — guarded — GameViewHandle passed via GoRouter extra
-      // -----------------------------------------------------------------------
-      GoRoute(
-        path: '/match',
-        name: Routes.match,
-        pageBuilder: (context, state) {
-          final handle = state.extra as GameViewHandle?;
-
-          // If no handle was passed (e.g. direct deep-link), show a loading
-          // indicator and redirect to home after a short delay.
-          if (handle == null) {
-            developer.log(
-              '/match reached without GameViewHandle — redirecting to home',
-              name: 'router',
-            );
-            Future.microtask(() {
-              if (context.mounted) context.goNamed(Routes.home);
-            });
-            return _buildPage(
-              context,
-              state,
-              const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              ),
-            );
-          }
-
-          return _buildPage(
-            context,
-            state,
-            MatchScreen(
-              handle: handle,
-              onMatchLeft: () {
-                handle.transport.dispose();
-                context.goNamed(Routes.home);
-              },
-              onMatchEnded: (result) {
-                handle.transport.dispose();
-                context.goNamed(Routes.result, extra: result);
-              },
-            ),
-          );
-        },
-      ),
-
-      // -----------------------------------------------------------------------
       // /result — guarded — MatchResult passed via GoRouter extra
       // -----------------------------------------------------------------------
       GoRoute(
         path: '/result',
         name: Routes.result,
         pageBuilder: (context, state) {
-          // MatchResult is passed as extra from the bridge matchEnded handler.
           final result = state.extra as MatchResult? ??
               const MatchResult(
                 outcome: MatchOutcome.draw,
