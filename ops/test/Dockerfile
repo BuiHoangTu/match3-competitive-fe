@@ -20,6 +20,7 @@ RUN npm ci
 COPY packages/shared-js/  packages/shared-js/
 COPY packages/game-view/  packages/game-view/
 COPY apps/backend/        apps/backend/
+COPY specification/       specification/
 
 # shared-js must be compiled to dist/ before the backend integration tests
 # run — backend imports from @match3/shared-js's compiled output.

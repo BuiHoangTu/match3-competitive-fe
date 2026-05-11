@@ -109,6 +109,7 @@ export class SocketBridge {
       const room = this.ctx.roomManager.getRoom(payload.roomId);
       if (room) {
         room.boardGrid = payload.finalGrid;
+        room.boardVersion = payload.boardVersion;
         room.rngState = payload.rngState;
         room.scores = { ...payload.scores };
       }
@@ -127,6 +128,19 @@ export class SocketBridge {
       // HP death, and snapshot rejoin, but cascade steps/finalGrid stay off
       // the socket during normal play.
       if (room) {
+        this.io.to(payload.roomId).emit("move_resolved", {
+          boardVersion: payload.boardVersion,
+          playerId: payload.playerId,
+          r1: payload.r1,
+          c1: payload.c1,
+          r2: payload.r2,
+          c2: payload.c2,
+          serverReceivedAt: payload.serverReceivedAt,
+          steps: payload.steps,
+          generatedTiles: payload.generatedTiles,
+          playerStates: payload.playerStates,
+        });
+
         for (const pid of room.players) {
           if (pid !== payload.playerId) this.io.to(pid).emit("opponent_move", move);
         }
@@ -155,6 +169,24 @@ export class SocketBridge {
         activePlayerId: activePlayer,
         playerStates,
         serverReceivedAt,
+      });
+    });
+
+    this.service.on("board_replaced", (payload) => {
+      const room = this.ctx.roomManager.getRoom(payload.roomId);
+      if (room) {
+        room.boardGrid = payload.boardGrid;
+        room.boardVersion = payload.boardVersion;
+        room.rngState = payload.rngState;
+      }
+
+      this.io.to(payload.roomId).emit("board_replaced", {
+        reason: payload.reason,
+        width: payload.width,
+        height: payload.height,
+        boardVersion: payload.boardVersion,
+        board: payload.board,
+        playerStates: payload.playerStates,
       });
     });
 

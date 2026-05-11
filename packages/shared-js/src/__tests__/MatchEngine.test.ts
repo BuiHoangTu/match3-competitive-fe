@@ -184,6 +184,20 @@ describe("refill", () => {
     refill(grid, rng);
     expect(grid[0][0]).toBe(-1);
   });
+
+  it("consumes generated tiles column-left, then top-to-bottom", () => {
+    const grid = [
+      [-1, -1, 9],
+      [-1, 8, -1],
+    ];
+    let next = 0;
+    const result = refill(grid, () => (next++ + 0.01) / 5);
+
+    expect(result).toEqual([
+      [0, 2, 9],
+      [1, 8, 3],
+    ]);
+  });
 });
 
 describe("resolveBoard", () => {

@@ -4,7 +4,7 @@
  * Validates:
  * - Invalid swap (no match) is rejected with move_rejected { no_match }
  * - Valid swap relays the accepted move to the opponent only
- * - Cascades remain server-private on the hot socket path
+ * - The hot path broadcasts Flutter-native board-delta move_resolved payloads
  * - Snapshot rejoin: boardGrid + rngState in rejoin_ok match live room state
  * - Server determinism: two independent simulations from the same seed + moves
  *   produce byte-identical boardGrid and rngState at every step
@@ -19,6 +19,7 @@ import { swapTiles } from "@match3/shared-js/engine/Board";
 import { createStatefulRng } from "@match3/shared-js/engine/rng";
 import { findMatches, resolveBoardAnimated } from "@match3/shared-js/engine/MatchEngine";
 import type {
+  BoardDeltaMoveResolvedPayload,
   MatchFoundPayload,
   Move,
 } from "@match3/shared-js/protocol";
@@ -212,27 +213,39 @@ describe("server-authoritative PvP move handler", () => {
     expect(senderGotOpponentMove).toBe(false);
   });
 
-  it("does not broadcast server cascade payloads on the hot path", async () => {
+  it("broadcasts board-delta move_resolved on the hot path", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const grid = mA.boardGrid!;
     const swap = findMatchingSwap(grid);
     if (!swap) throw new Error("No matching swap found");
 
-    let sawMoveResolved = false;
-    sockA.once("move_resolved", () => {
-      sawMoveResolved = true;
-    });
-    sockB.once("move_resolved", () => {
-      sawMoveResolved = true;
-    });
-
     const opponentSocket = firstPlayerSocket === sockA ? sockB : sockA;
     const relayedPromise = waitForEvent<Move>(opponentSocket, "opponent_move");
+    const resolvedAPromise = waitForEvent<BoardDeltaMoveResolvedPayload>(sockA, "move_resolved");
+    const resolvedBPromise = waitForEvent<BoardDeltaMoveResolvedPayload>(sockB, "move_resolved");
+
     firstPlayerSocket.emit("move", { roomId: mA.roomId, ...swap });
-    await relayedPromise;
-    await new Promise((r) => setTimeout(r, 100));
-    expect(sawMoveResolved).toBe(false);
+    const [relayed, resolvedA, resolvedB] = await Promise.all([
+      relayedPromise,
+      resolvedAPromise,
+      resolvedBPromise,
+    ]);
+
+    expect(relayed.playerId).toBe(firstPlayerSocket.id);
+    for (const resolved of [resolvedA, resolvedB]) {
+      expect(resolved.playerId).toBe(firstPlayerSocket.id);
+      expect(resolved.r1).toBe(swap.r1);
+      expect(resolved.c1).toBe(swap.c1);
+      expect(resolved.r2).toBe(swap.r2);
+      expect(resolved.c2).toBe(swap.c2);
+      expect(resolved.boardVersion).toBeGreaterThan(mA.boardVersion ?? 1);
+      expect(Array.isArray(resolved.steps)).toBe(true);
+      expect(resolved.steps.length).toBeGreaterThan(0);
+      expect(Array.isArray(resolved.generatedTiles)).toBe(true);
+      expect("scores" in resolved).toBe(false);
+      expect("pointsEarned" in resolved).toBe(false);
+    }
   });
 
   it("invalid swap (no_match) emits move_rejected only to the offending socket", async () => {

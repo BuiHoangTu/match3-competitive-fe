@@ -21,6 +21,54 @@ export interface Move {
   timestamp: number;
 }
 
+// ─── v0.9 Flutter-native board-delta protocol ───────────────────────────────
+
+/** Flat row-major board table. Index = row * width + col. */
+export interface FlatBoardWire {
+  width: number;
+  height: number;
+  boardVersion: number;
+  board: number[];
+}
+
+/** A generated tile consumed after gravity in deterministic refill order. */
+export interface GeneratedTileWire {
+  row: number;
+  col: number;
+  tile: number;
+}
+
+/** Hot-path move-resolution packet for the Flutter-native online client. */
+export interface BoardDeltaMoveResolvedPayload {
+  boardVersion: number;
+  playerId: string;
+  r1: number;
+  c1: number;
+  r2: number;
+  c2: number;
+  serverReceivedAt?: number;
+  steps: ResolvedStepWire[];
+  generatedTiles: GeneratedTileWire[];
+  playerStates?: Record<string, PlayerState>;
+  boardHash?: string;
+}
+
+/** Start/rejoin snapshot for the Flutter-native online client. */
+export interface BoardDeltaMatchFoundPayload extends FlatBoardWire {
+  roomId: string;
+  opponentId: string;
+  myPlayerId: string;
+  activePlayerId: string | null;
+  mode: "turn_based";
+  playerStates: Record<string, PlayerState>;
+}
+
+/** Full-board replacement when the settled board has no legal moves. */
+export interface BoardReplacedPayload extends FlatBoardWire {
+  reason: "no_legal_moves";
+  playerStates?: Record<string, PlayerState>;
+}
+
 // ─── Server-authoritative PvP types ──────────────────────────────────────────
 
 /**
@@ -48,9 +96,9 @@ export interface ResolvedStepWire {
 }
 
 /**
- * Internal/server-authoritative resolve payload. This is kept for backend
- * service tests and snapshot bookkeeping; normal hot-path clients animate
- * locally from the accepted `Move` relay and do not receive cascade steps.
+ * Internal/server-authoritative resolve payload. During the Flutter-native
+ * migration, SocketBridge projects this into a score-free board-delta
+ * `move_resolved` hot-path packet for online clients.
  */
 export interface MoveResolvedPayload {
   /** The player who made the move. */
@@ -61,8 +109,12 @@ export interface MoveResolvedPayload {
   c2: number;
   /** Server wall-clock ms when the move event reached the backend. */
   serverReceivedAt?: number;
+  /** Monotonic flat-board version after this resolution. */
+  boardVersion?: number;
   /** Cascade-by-cascade animation data. Non-empty — 0-match swaps are rejected. */
   steps: ResolvedStepWire[];
+  /** Generated replacement tiles in deterministic refill order. */
+  generatedTiles?: GeneratedTileWire[];
   /** Final board after all cascades have settled. Authoritative truth. */
   finalGrid: number[][];
   /** RNG state after the resolution — used for snapshot rejoin. */
@@ -87,6 +139,7 @@ export interface MatchFoundPayload {
   opponentId: string;
   myPlayerId: string;
   firstPlayerId: string;
+  activePlayerId?: string | null;
   mode: string;
   /** HMAC-signed token; store in sessionStorage for reconnect after network drop. */
   rejoinToken: string;
@@ -96,6 +149,11 @@ export interface MatchFoundPayload {
    * then animate hot-path moves locally from server-accepted move relays.
    */
   boardGrid?: number[][];
+  /** turn_based v0.9: flat row-major board snapshot. */
+  width?: number;
+  height?: number;
+  boardVersion?: number;
+  board?: number[];
   /**
    * turn_based only: RNG state at match start (equals originalSeed initially).
    * Used by the client to stash for diagnostics; server drives all resolutions.
@@ -216,6 +274,11 @@ export interface RejoinOkPayload {
   opponentId: string | null;
   /** Fresh token to replace the one stored in sessionStorage. */
   rejoinToken: string;
+  /** turn_based v0.9: flat row-major board snapshot. */
+  width?: number;
+  height?: number;
+  boardVersion?: number;
+  board?: number[];
   /**
    * turn_based only: authoritative board state at the moment of rejoin.
    * Client renders from this snapshot; no move-replay needed.

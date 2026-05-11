@@ -15,7 +15,7 @@ import { describe, it, expect } from "vitest";
 import { io as ioClient } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
-import { setVerifyIdTokenImpl, resetVerifyIdTokenImpl, clearTokenCache } from "../AuthMiddleware";
+import { setExternalTokenVerifierForTests, resetExternalTokenVerifierForTests, clearTokenCache } from "../AuthMiddleware";
 import { verify as verifyRoomToken } from "../RoomTokenSigner";
 import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
 import { createRng } from "@match3/shared-js/engine/rng";
@@ -102,8 +102,8 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
   it(
     "HTTP /matchmaking/resume issues a fresh room token; reconnect receives match_found",
     async () => {
-      setVerifyIdTokenImpl(async (token: string) => ({
-        uid: `user:${token}`,
+      setExternalTokenVerifierForTests(async (token: string) => ({
+        userId: `user:${token}`,
         exp: Math.floor(Date.now() / 1000) + 3600,
       }));
       clearTokenCache();
@@ -176,7 +176,7 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
 
         client2.disconnect();
       } finally {
-        resetVerifyIdTokenImpl();
+        resetExternalTokenVerifierForTests();
         clearTokenCache();
         await server.close();
       }
@@ -187,8 +187,8 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
   it(
     "failure mode: replay slowed > 2 s is detectable",
     async () => {
-      setVerifyIdTokenImpl(async (token: string) => ({
-        uid: `user:${token}`,
+      setExternalTokenVerifierForTests(async (token: string) => ({
+        userId: `user:${token}`,
         exp: Math.floor(Date.now() / 1000) + 3600,
       }));
       clearTokenCache();
@@ -226,7 +226,7 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
         console.log(`[rejoin-latency-slow v0.6] replay=${durationMs}ms (expected > 2000)`);
         void roomId;
       } finally {
-        resetVerifyIdTokenImpl();
+        resetExternalTokenVerifierForTests();
         clearTokenCache();
         await server.close();
       }

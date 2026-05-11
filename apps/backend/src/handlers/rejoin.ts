@@ -13,6 +13,10 @@ import type { ServerContext } from "../context";
 import { defaultPlayerState, type PlayerState } from "../services/MatchEngineService";
 import { logEvent } from "../logger";
 
+function flattenGrid(grid: number[][] | undefined): number[] | undefined {
+  return grid ? grid.flatMap((row) => row) : undefined;
+}
+
 export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void {
   // The socket's userId is set by the D02 room-token handshake middleware.
   // Sockets without a verified identity receive rejoin_failed; clients
@@ -74,17 +78,6 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
 
     if (updatedRoom.gameMode === "turn_based") {
       // ── Snapshot rejoin for turn_based ───────────────────────────────────
-      // Remap scores: the old socket ID may have changed — map to current IDs.
-      const remappedScores: { [playerId: string]: number } = {};
-      for (const [pid, pts] of Object.entries(updatedRoom.scores ?? {})) {
-        const newPid = oldPlayerId && pid === oldPlayerId ? socket.id : pid;
-        remappedScores[newPid] = pts;
-      }
-      // Also ensure the rejoining socket key exists even if score was zero.
-      if (!(socket.id in remappedScores)) {
-        remappedScores[socket.id] = 0;
-      }
-
       // Pull playerStates from the judge; fall back to default if not yet started.
       const rawPlayerStates = ctx.socketBridge.getPlayerStates(roomId);
       // Remap any stale socket-ID key to the current socket.id.
@@ -103,15 +96,19 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
       socket.emit("rejoin_ok", {
         roomId,
         seed: updatedRoom.seed,
+        mode: updatedRoom.gameMode,
         myPlayerId: socket.id,
         activePlayerId: updatedRoom.activePlayer,
         playerStates,
         opponentId,
         rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
         // Snapshot fields:
+        width: updatedRoom.boardGrid?.[0]?.length ?? 0,
+        height: updatedRoom.boardGrid?.length ?? 0,
+        boardVersion: updatedRoom.boardVersion ?? 1,
+        board: flattenGrid(updatedRoom.boardGrid),
         boardGrid: updatedRoom.boardGrid,
         rngState: updatedRoom.rngState,
-        scores: remappedScores,
         originalSeed: updatedRoom.originalSeed,
       });
     } else {

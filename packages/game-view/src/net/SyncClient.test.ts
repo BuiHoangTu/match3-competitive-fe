@@ -229,12 +229,12 @@ describe("SyncClient", () => {
 
   // 10. io() receives auth: { token } in handshake options
   it("io() receives auth: { token } in handshake options", async () => {
-    client.startMatch("firebase-jwt-abc");
+    client.startMatch("room-jwt-abc");
     const connectPromise = client.connect();
 
     expect(mockIo).toHaveBeenCalledWith(
       "http://localhost:3001",
-      expect.objectContaining({ auth: { token: "firebase-jwt-abc" } })
+      expect.objectContaining({ auth: { token: "room-jwt-abc" } })
     );
 
     trigger("connect");

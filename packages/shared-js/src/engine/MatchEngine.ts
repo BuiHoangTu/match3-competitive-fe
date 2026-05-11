@@ -217,9 +217,17 @@ export function applyGravity(grid: number[][]): number[][] {
  * Returns a new grid.
  */
 export function refill(grid: number[][], rng: () => number): number[][] {
-  const newGrid = grid.map((row) =>
-    row.map((cell) => (cell === -1 ? randInt(rng, 0, NUM_SYMBOLS - 1) : cell))
-  );
+  const newGrid = grid.map((row) => [...row]);
+  const height = newGrid.length;
+  const width = newGrid[0]?.length ?? 0;
+
+  for (let c = 0; c < width; c++) {
+    for (let r = 0; r < height; r++) {
+      if (newGrid[r][c] === -1) {
+        newGrid[r][c] = randInt(rng, 0, NUM_SYMBOLS - 1);
+      }
+    }
+  }
   return newGrid;
 }
 
@@ -302,8 +310,10 @@ export function resolveBoardAnimated(
     const { newGrid: afterGravity, movements } = applyGravityWithMovements(removed);
 
     const newTilePositions: { row: number; col: number }[] = [];
-    for (let r = 0; r < afterGravity.length; r++) {
-      for (let c = 0; c < (afterGravity[r]?.length ?? 0); c++) {
+    const height = afterGravity.length;
+    const width = afterGravity[0]?.length ?? 0;
+    for (let c = 0; c < width; c++) {
+      for (let r = 0; r < height; r++) {
         if (afterGravity[r][c] === -1) newTilePositions.push({ row: r, col: c });
       }
     }

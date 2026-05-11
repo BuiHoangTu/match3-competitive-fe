@@ -23,6 +23,8 @@ export type Room = {
   originalSeed?: number;
   /** Authoritative board grid for turn_based rooms. Updated after every move. */
   boardGrid?: number[][];
+  /** Monotonic board version for flat-board snapshots and deltas. */
+  boardVersion?: number;
   /** mulberry32 integer state after the last resolution. Advances each move. */
   rngState?: number;
   /** Per-player running score totals (socket ID → points). turn_based only. */
@@ -67,6 +69,7 @@ export class RoomManager {
     if (gameMode === "turn_based") {
       room.originalSeed = seed;
       room.boardGrid = createBoard(seed).grid;
+      room.boardVersion = 1;
       room.rngState = seed;
       room.scores = {};
     }
@@ -102,6 +105,7 @@ export class RoomManager {
     if (effectiveMode === "turn_based") {
       room.originalSeed = seed;
       room.boardGrid = createBoard(seed).grid;
+      room.boardVersion = 1;
       room.rngState = seed;
       room.scores = {};
     }

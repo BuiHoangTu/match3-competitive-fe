@@ -20,6 +20,7 @@ import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
 import { createStatefulRng } from "@match3/shared-js/engine/rng";
 import {
   resolveBoardAnimated,
+  findMatches,
   type AnimatedResolveStep,
 } from "@match3/shared-js/engine/MatchEngine";
 import {
@@ -31,7 +32,11 @@ import {
   type PlayerStats,
 } from "@match3/shared-js/engine/PlayerStats";
 import { isValidMove, validateProducesMatch } from "../validator";
-import type { ResolvedStepWire, LoseReason } from "@match3/shared-js/protocol";
+import type {
+  ResolvedStepWire,
+  LoseReason,
+  GeneratedTileWire,
+} from "@match3/shared-js/protocol";
 
 // ─── PlayerState (re-exported for SocketBridge / test imports) ───────────────
 
@@ -59,7 +64,9 @@ export interface MatchEngineEvents extends Record<string, unknown> {
     r2: number;
     c2: number;
     serverReceivedAt: number;
+    boardVersion: number;
     steps: ResolvedStepWire[];
+    generatedTiles: GeneratedTileWire[];
     finalGrid: number[][];
     rngState: number;
     pointsEarned: number;
@@ -77,6 +84,17 @@ export interface MatchEngineEvents extends Record<string, unknown> {
     serverReceivedAt: number;
     playerStates: { [playerId: string]: PlayerState };
   };
+  board_replaced: {
+    roomId: string;
+    reason: "no_legal_moves";
+    width: number;
+    height: number;
+    boardVersion: number;
+    board: number[];
+    boardGrid: number[][];
+    rngState: number;
+    playerStates: { [playerId: string]: PlayerState };
+  };
   match_ended: {
     roomId: string;
     loserId: string | null;
@@ -91,6 +109,7 @@ export interface MatchEngineEvents extends Record<string, unknown> {
 
 export interface MatchSnapshot {
   boardGrid: number[][];
+  boardVersion: number;
   rngState: number;
   originalSeed: number;
   scores: { [playerId: string]: number };
@@ -104,6 +123,7 @@ interface MatchState {
   playerIds: [string, string];
   gameMode: string;
   boardGrid: number[][];
+  boardVersion: number;
   rngState: number;
   originalSeed: number;
   scores: { [playerId: string]: number };
@@ -135,6 +155,53 @@ function computePoints(steps: AnimatedResolveStep[]): number {
     total += cellCount * 10 * cascadeLevel;
   }
   return total;
+}
+
+function generatedTilesFromSteps(steps: AnimatedResolveStep[]): GeneratedTileWire[] {
+  const generated: GeneratedTileWire[] = [];
+  for (const step of steps) {
+    for (const pos of step.newTilePositions) {
+      generated.push({
+        row: pos.row,
+        col: pos.col,
+        tile: step.afterRefill[pos.row]![pos.col]!,
+      });
+    }
+  }
+  return generated;
+}
+
+function flattenGrid(grid: number[][]): number[] {
+  return grid.flatMap((row) => row);
+}
+
+function hasLegalMove(grid: number[][]): boolean {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  for (let r = 0; r < height; r++) {
+    for (let c = 0; c < width; c++) {
+      const candidates = [
+        [r + 1, c],
+        [r, c + 1],
+      ] as const;
+      for (const [r2, c2] of candidates) {
+        if (r2 >= height || c2 >= width) continue;
+        const board = { grid, width, height };
+        const swapped = swapTiles(board, r, c, r2, c2);
+        if (findMatches(swapped.grid).length > 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function createPlayableReplacement(seed: number): { grid: number[][]; rngState: number } {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const nextSeed = (seed + attempt + 1) >>> 0;
+    const grid = createBoard(nextSeed).grid;
+    if (hasLegalMove(grid)) return { grid, rngState: nextSeed };
+  }
+  return { grid: createBoard((seed + 101) >>> 0).grid, rngState: (seed + 101) >>> 0 };
 }
 
 function computeOutcome(
@@ -191,6 +258,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       playerIds,
       gameMode,
       boardGrid,
+      boardVersion: 1,
       rngState: originalSeed,
       originalSeed,
       scores,
@@ -257,6 +325,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
 
     // Advance board state
     state.boardGrid = finalGrid;
+    state.boardVersion += 1;
     state.rngState = rng.state();
     const pointsEarned = computePoints(steps);
     state.scores[playerId] = (state.scores[playerId] ?? 0) + pointsEarned;
@@ -330,7 +399,9 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       r2,
       c2,
       serverReceivedAt,
+      boardVersion: state.boardVersion,
       steps: wireSteps,
+      generatedTiles: generatedTilesFromSteps(steps),
       finalGrid,
       rngState: state.rngState,
       pointsEarned,
@@ -342,6 +413,24 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
     if (hpKillOpponentId !== null) {
       this._endMatchByHp(roomId, hpKillOpponentId);
       return;
+    }
+
+    if (!hasLegalMove(state.boardGrid)) {
+      const replacement = createPlayableReplacement(state.rngState);
+      state.boardGrid = replacement.grid;
+      state.rngState = replacement.rngState;
+      state.boardVersion += 1;
+      this.emit("board_replaced", {
+        roomId,
+        reason: "no_legal_moves",
+        width: state.boardGrid[0]?.length ?? 0,
+        height: state.boardGrid.length,
+        boardVersion: state.boardVersion,
+        board: flattenGrid(state.boardGrid),
+        boardGrid: state.boardGrid,
+        rngState: state.rngState,
+        playerStates: this._copyPlayerStates(state),
+      });
     }
 
     // Switch active player
@@ -491,6 +580,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
   private _snapshot(state: MatchState): MatchSnapshot {
     return {
       boardGrid: state.boardGrid,
+      boardVersion: state.boardVersion,
       rngState: state.rngState,
       originalSeed: state.originalSeed,
       scores: { ...state.scores },

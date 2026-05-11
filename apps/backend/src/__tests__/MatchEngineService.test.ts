@@ -17,7 +17,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MatchEngineService, defaultPlayerState, type PlayerState } from "../services/MatchEngineService";
-import { createBoard } from "@match3/shared-js/engine/Board";
 import { findMatches } from "@match3/shared-js/engine/MatchEngine";
 import { DEFAULTS, createDefaultStats, countTilesByType, applyTileEffects } from "@match3/shared-js/engine/PlayerStats";
 import { TileType } from "@match3/shared-js/engine/TileType";
@@ -148,6 +147,7 @@ describe("MatchEngineService", () => {
     expect(snap.playerStates[P1]).toEqual(expectedPs);
     expect(snap.playerStates[P2]).toEqual(expectedPs);
     expect(snap.originalSeed).toBe(SEED);
+    expect(snap.boardVersion).toBe(1);
     expect(Array.isArray(snap.boardGrid)).toBe(true);
     expect(snap.boardGrid.length).toBe(8);
     expect(snap.scores[P1]).toBe(0);
@@ -170,10 +170,26 @@ describe("MatchEngineService", () => {
     service.submitMove(ROOM_ID, P1, swap.r1, swap.c1, swap.r2, swap.c2);
 
     expect(resolved).toHaveLength(1);
-    const r = resolved[0] as { playerId: string; roomId: string; steps: unknown[]; finalGrid: number[][]; rngState: number; pointsEarned: number; scores: Record<string, number>; playerStates: Record<string, PlayerState> };
+    const r = resolved[0] as {
+      playerId: string;
+      roomId: string;
+      boardVersion: number;
+      steps: Array<{ newTilePositions: Array<{ row: number; col: number }> }>;
+      generatedTiles: Array<{ row: number; col: number; tile: number }>;
+      finalGrid: number[][];
+      rngState: number;
+      pointsEarned: number;
+      scores: Record<string, number>;
+      playerStates: Record<string, PlayerState>;
+    };
     expect(r.roomId).toBe(ROOM_ID);
     expect(r.playerId).toBe(P1);
+    expect(r.boardVersion).toBe(2);
     expect(r.steps.length).toBeGreaterThan(0);
+    expect(r.generatedTiles.length).toBeGreaterThan(0);
+    expect(r.generatedTiles.map(({ row, col }) => ({ row, col }))).toEqual(
+      r.steps.flatMap((step) => step.newTilePositions)
+    );
     expect(r.pointsEarned).toBeGreaterThan(0);
     expect(r.scores[P1]).toBe(r.pointsEarned);
     expect(r.finalGrid.length).toBe(8);
@@ -201,6 +217,7 @@ describe("MatchEngineService", () => {
     const after = service.getSnapshot(ROOM_ID)!;
 
     expect(after.rngState).not.toBe(before.rngState);
+    expect(after.boardVersion).toBeGreaterThan(before.boardVersion);
     expect(JSON.stringify(after.boardGrid)).not.toBe(JSON.stringify(before.boardGrid));
   });
 

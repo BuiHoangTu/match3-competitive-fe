@@ -17,6 +17,10 @@ import { registerDisconnectHandler } from "./disconnect";
 import { registerForfeitHandler } from "./forfeit";
 import { registerMatchCompleteHandler } from "./matchComplete";
 
+function flattenGrid(grid: number[][] | undefined): number[] | undefined {
+  return grid ? grid.flatMap((row) => row) : undefined;
+}
+
 export function registerConnectionHandler(io: Server, ctx: ServerContext): void {
   io.on("connection", (socket: Socket) => {
     console.log(`[connect] ${socket.id}`);
@@ -105,9 +109,14 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
               opponentId: isBotOpponent ? BOT_ID : opponentSocketId,
               myPlayerId: pid,
               firstPlayerId: room.activePlayer,
+              activePlayerId: room.activePlayer,
               mode: room.gameMode,
               // turn_based only: initial authoritative board snapshot
               ...(isTurnBased && {
+                width: room.boardGrid?.[0]?.length ?? 0,
+                height: room.boardGrid?.length ?? 0,
+                boardVersion: room.boardVersion ?? 1,
+                board: flattenGrid(room.boardGrid),
                 boardGrid: room.boardGrid,
                 rngState: room.rngState,
                 originalSeed: room.originalSeed,
