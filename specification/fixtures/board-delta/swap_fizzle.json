@@ -1,0 +1,27 @@
+{
+  "event": "move_resolved",
+  "payload": {
+    "boardVersion": 2,
+    "playerId": "player-a",
+    "r1": 0,
+    "c1": 0,
+    "r2": 0,
+    "c2": 1,
+    "steps": [],
+    "generatedTiles": [],
+    "playerStates": {
+      "player-a": {
+        "stamina": 299000,
+        "maxStamina": 300000,
+        "health": 100,
+        "maxHealth": 100,
+        "mana": 100,
+        "maxMana": 100,
+        "lv": 1,
+        "exp": 0,
+        "expToNext": 100,
+        "atk": 10
+      }
+    }
+  }
+}

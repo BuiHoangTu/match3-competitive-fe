@@ -1,0 +1,40 @@
+{
+  "event": "rejoin",
+  "payload": {
+    "roomId": "room-1",
+    "mode": "turn_based",
+    "width": 4,
+    "height": 4,
+    "boardVersion": 3,
+    "board": [0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 0, 3, 4, 0, 1],
+    "activePlayerId": "player-b",
+    "myPlayerId": "player-a",
+    "opponentId": "player-b",
+    "playerStates": {
+      "player-a": {
+        "stamina": 298500,
+        "maxStamina": 300000,
+        "health": 100,
+        "maxHealth": 100,
+        "mana": 100,
+        "maxMana": 100,
+        "lv": 1,
+        "exp": 3,
+        "expToNext": 100,
+        "atk": 10
+      },
+      "player-b": {
+        "stamina": 300000,
+        "maxStamina": 300000,
+        "health": 100,
+        "maxHealth": 100,
+        "mana": 100,
+        "maxMana": 100,
+        "lv": 1,
+        "exp": 0,
+        "expToNext": 100,
+        "atk": 10
+      }
+    }
+  }
+}

@@ -53,7 +53,7 @@ Practice mode is explicitly exempt from WIN / LOSE / DRAW. It has no opponent, n
 **MR-3 — Board-delta wire protocol.** During normal **vs Human** play, the server MUST send enough board data for Flutter clients to animate and reconstruct the authoritative board without a shared seed:
   - `match_found` / rejoin payloads include the current board table as a flat 1D row-major array, explicit `width` / `height`, and board version.
   - accepted moves emit ordered resolve steps: cleared cells, falling tile movements, stat updates, and a 1D array of newly generated tiles with their destination coordinates and symbols.
-  - server and client MUST agree on refill consumption order: after gravity settles, scan columns left-to-right and fill each column's empty cells top-to-bottom. `generatedTiles` MUST be emitted and consumed in that order.
+  - server and client MUST agree on refill consumption order: after each cascade's gravity settles, scan columns left-to-right and fill each column's empty cells top-to-bottom. `generatedTiles` MUST be emitted and consumed in that order, with multi-cascade moves concatenating each cascade's refill stream chronologically.
   - if the settled board has no legal moves, the server emits a dedicated full-board replacement notification containing the new flat board table, dimensions, and reason `no_legal_moves`.
   - turn-change and clock/player-state updates remain server-authored.
 
@@ -77,7 +77,7 @@ Full board tables MAY appear at match start, rejoin, explicit reconciliation, an
 
 **AR-1 — Mandatory authentication.** Every player MUST sign in before reaching matchmaking or any game mode, including Practice. There is no guest play: the product is distributed only as a Flutter app shell (iOS, Android, Flutter Web) which gates all gameplay behind authentication. The raw embedded game view is never reachable without a valid auth token.
 
-**AR-2 — Sign-in providers.** The product MUST support the currently shipped local username/password account flow. Google OAuth MAY be added without Firebase. Apple Sign-In MAY be added if the product also offers Google Sign-In on iOS and App Store compliance requires parity. Firebase Auth is not part of the target architecture.
+**AR-2 — Sign-in providers.** The product MUST support the currently shipped local username/password account flow. Google OAuth MAY be added through backend exchange. Apple Sign-In MAY be added if the product also offers Google Sign-In on iOS and App Store compliance requires parity. App sessions are backend-issued.
 
 **AR-3 — Two-token flow.** Two distinct tokens, scoped to two distinct responsibilities.
 
@@ -122,7 +122,7 @@ Damage / heal amounts MUST be capped at the relevant stat's `[0, max]` window. T
 
 **CR-6 — Level scaling.** Effective `maxHealth` and `atk` MUST scale with level using compounding `+10%` per level: `effective = base × (1 + 0.10 × level)`. Other stats (mana, stamina) MAY scale; the v1 cut keeps them flat.
 
-**CR-7 — XP award on match end.** On every match-end (including pve and solo), `10%` of the in-match score (or a defined XP-per-clear bucket) MUST be added to the user's permanent XP. The exact formula MUST be deterministic so a replay of the same moves yields the same XP gain.
+**CR-7 — XP award on match end.** On every match-end, a deterministic XP grant MUST be added to the user's permanent XP. Practice MAY derive XP from its local training score; competitive modes MUST use a score-free formula such as XP-per-clear, XP-per-turn, or outcome bucket. The exact formula MUST be deterministic so a replay of the same moves yields the same XP gain.
 
 **CR-8 — Mid-match level up.** If accumulated XP crosses a level threshold during a match, the engine MUST broadcast a `level_up` event; the affected player's `maxHealth` increases by `+10%` and current `health` is restored to the new `maxHealth` immediately. `atk` increase applies on the next damage roll.
 
@@ -196,7 +196,7 @@ These values are intentionally left as placeholders in this specification. They 
 | Account deletion grace period | AR-4 | 30 days (soft-delete + hard-delete on expiry), or immediate hard-delete for simplicity |
 | Minimum iOS version | NFR-11 | iOS 15 |
 | Minimum Android version | NFR-11 | Android 10 (API 29) |
-| Identity provider backend | AR-2, AR-3 | Backend local sessions; optional Google OAuth exchange without Firebase |
+| Identity provider backend | AR-2, AR-3 | Backend local sessions; optional Google OAuth exchange through our backend |
 | Persistence store | AR-6 | Postgres (production); SQLite acceptable for closed beta |
 | Swap fizzle stamina penalty | CR-10 | 3_000 ms |
 

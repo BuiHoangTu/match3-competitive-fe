@@ -7,10 +7,9 @@ Covers **Match-3 Competitive** v1.0+. Maps one-to-one to the prod topology descr
 | Component | Where | How to reach |
 |---|---|---|
 | Flutter Web shell (static) | CDN-fronted hosting | `https://<prod-domain>/` |
-| Phaser game bundle (static) | Same origin as shell | `https://<prod-domain>/game/` |
-| Socket.IO + HTTP matchmaking | Single VM / container (Node 20) | `wss://<prod-domain>/socket.io`, `https://<prod-domain>/matchmaking/*` |
+| Flutter game client (static) | CDN-fronted hosting | Included in the Flutter app bundle |
+| Socket.IO + HTTP matchmaking/auth | Single VM / container (Node 20) | `wss://<prod-domain>/socket.io`, `https://<prod-domain>/matchmaking/*`, `https://<prod-domain>/auth/*` |
 | Postgres | Managed (Cloud SQL / RDS / similar) | Connection string in secret manager |
-| Firebase Auth | Firebase prod project | Admin via Firebase console |
 
 Hostnames, regions, instance classes and credential references belong in the infra repo — this runbook only operates on them.
 
@@ -20,8 +19,7 @@ Hostnames, regions, instance classes and credential references belong in the inf
 |---|---|---|
 | `PORT` | no (default 3001) | Socket.IO + HTTP port |
 | `DATABASE_URL` | yes | Postgres connection string |
-| `FIREBASE_PROJECT_ID` | yes | idToken audience |
-| `GOOGLE_APPLICATION_CREDENTIALS` | yes | Path to service-account JSON |
+| `SESSION_SECRET` | yes | HMAC secret for app session tokens |
 | `ROOM_TOKEN_SECRET` | yes | HMAC secret for room tokens (min 32 random bytes) |
 | `ROOM_TOKEN_TTL_MS` | no (default 300000) | Room-token TTL |
 | `NODE_ENV` | yes | `production` gates fail-fast behaviour |
@@ -75,13 +73,13 @@ Drill this quarterly — see [T-v1.0-04](../specification/implementation-plan.md
 
 **Clients see `invalid_token` on connect.** Check clock skew between server VM and NTP; check `ROOM_TOKEN_SECRET` rotation (if secret rotated, existing tokens are invalid — 5-minute drain before clients reconnect).
 
-**Spike in `auth_token_rejected`.** Firebase outage or clock skew. Check Firebase status page; check VM NTP sync.
+**Spike in `auth_token_rejected`.** Check clock skew, session/room-token secret rotation, and whether clients are reconnecting with stale room tokens.
 
 **Match-history writes backing up.** DB outage or latency; the server buffers up to 500 rows in memory then drops oldest (see `match_history_buffer_dropped_total` metric). Escalate if buffer dropped > 0.
 
 **Rejoin failing after network drop.** Check rejoin window (`REJOIN_WINDOW_MS` in `apps/backend/src/constants.ts`). Check server log for `rejoin_window_expired` events. If persistent, suspect a clock-skew or HMAC mismatch.
 
-**Determinism-violation events.** Treat as high-severity. Capture: server seed, move list, both clients' final-board hashes, server `match_history` row. File a determinism incident, pin the match for offline replay.
+**Determinism-violation events.** Treat as high-severity. Capture: board version, flat board payloads, generated tile arrays, move list, both clients' final-board hashes, and server `match_history` row. File a determinism incident, pin the match for offline replay.
 
 ### Metrics to watch
 

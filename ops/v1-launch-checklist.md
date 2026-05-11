@@ -29,7 +29,7 @@ State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the p
 
 | Task | What | Owner action |
 |---|---|---|
-| Google OAuth (optional) | Configure Google OAuth without Firebase | Create Google OAuth client IDs and add a backend exchange endpoint that returns the normal app session token |
+| Google OAuth (optional) | Configure Google OAuth through backend exchange | Create Google OAuth client IDs and add a backend exchange endpoint that returns the normal app session token |
 | T-v0.6-H01 | Apple Developer enrolment ($99/yr) | Pay + verify with org docs |
 | T-v0.6-H02 | Google Play Console enrolment ($25) | Pay |
 | T-v0.6-H03 | Apple bundle id + provisioning profile | Through Apple developer portal once H01 done |
@@ -37,13 +37,13 @@ State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the p
 | T-v0.6-H05 | Icons + launch screens at all required sizes | Design pass |
 | T-v0.6-H06 | Publish privacy policy + ToS URLs publicly | Host the markdown content under a stable URL; reference from app listing |
 
-The shell already has local-account auth. Optional Google OAuth should exchange provider tokens with the backend for the same session-token shape; do not reintroduce Firebase.
+The shell already has local-account auth. Optional Google OAuth should exchange provider tokens with the backend for the same session-token shape; keep app sessions backend-issued.
 
 ### 2. Production infrastructure (v1.0 sub-tracks 01..05)
 
 | Task | What | Owner action |
 |---|---|---|
-| T-v1.0-01 | Production Flutter Web hosting (CDN + TLS + custom domain) | Pick provider (Cloudflare Pages / Netlify / Vercel / Firebase Hosting); deploy `flutter build web --release`; add to runbook |
+| T-v1.0-01 | Production Flutter Web hosting (CDN + TLS + custom domain) | Pick provider (Cloudflare Pages / Netlify / Vercel / CDN hosting); deploy `flutter build web --release`; add to runbook |
 | T-v1.0-02 | Production Socket.IO server | VM or container; systemd or PM2; TLS reverse-proxy; runbook entry |
 | T-v1.0-03 | Managed Postgres + daily backup + 7-day PITR | Cloud SQL / RDS / similar; run `npm run migrate:up` against it |
 | T-v1.0-04 | Backup restore drill | Restore latest backup to a staging instance; verify row counts; archive log |

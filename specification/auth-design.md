@@ -1,13 +1,13 @@
 # Auth design — local accounts + optional Google OAuth
 
-Status: **SHIPPED for local accounts**. Firebase Auth is no longer part of the target architecture.
+Status: **SHIPPED for local accounts**. The target architecture uses backend-issued local session tokens.
 Owner: codebase. Last updated: 2026-05-11.
 
 ## Goals
 
 1. Ship a fully playable system on a spare PC / VM via `docker compose up`, with **no external services** required.
 2. Allow username/password local accounts (no email verification, no third-party).
-3. Keep the door open for Google OAuth without Firebase: provider tokens are exchanged with our backend for the same local session-token shape.
+3. Keep the door open for Google OAuth through backend exchange: provider tokens are exchanged with our backend for the same local session-token shape.
 4. Same userId space for all account types: a local account and a future OAuth account look identical to the matchmaker, persistence, and rejoin paths.
 
 ## Non-goals
@@ -86,7 +86,7 @@ No password complexity rules in v1.0; we'll add them later if needed.
 
 ## Security posture
 
-- Server starts cleanly with no Firebase configuration or service-account credential.
+- Server starts cleanly with no external identity-backend configuration or service-account credential.
 - `ROOM_TOKEN_SECRET` and `SESSION_TOKEN_SECRET` are required for production; in dev they're auto-generated random 32-byte values per server boot (logged with a warning so operators notice).
 - Sessions are not revoked centrally on logout — the client just discards its token. Revocation is a v1.x concern (would require a tokens table + check on each verify).
 
@@ -96,7 +96,7 @@ No password complexity rules in v1.0; we'll add them later if needed.
 2. Add a backend OAuth exchange endpoint that verifies Google id tokens directly or through a small Google token-verification library.
 3. The exchange endpoint returns our normal `{sessionToken, expiresAt, userId}` payload.
 4. The Google button stops showing the "under development" snackbar and calls the Google OAuth exchange.
-5. Both auth paths remain valid simultaneously; users can have either kind of account. Firebase is not introduced for this path.
+5. Both auth paths remain valid simultaneously; users can have either kind of account. No separate identity backend is introduced for this path.
 
 ## Files added/changed
 

@@ -1,0 +1,72 @@
+{
+  "event": "move_resolved",
+  "payload": {
+    "boardVersion": 2,
+    "playerId": "player-a",
+    "r1": 2,
+    "c1": 1,
+    "r2": 2,
+    "c2": 2,
+    "steps": [
+      {
+        "matchedCells": [[2, 0], [2, 1], [2, 2]],
+        "movements": [
+          { "col": 0, "fromRow": 1, "toRow": 2 },
+          { "col": 0, "fromRow": 0, "toRow": 1 },
+          { "col": 1, "fromRow": 1, "toRow": 2 },
+          { "col": 1, "fromRow": 0, "toRow": 1 },
+          { "col": 2, "fromRow": 1, "toRow": 2 },
+          { "col": 2, "fromRow": 0, "toRow": 1 }
+        ],
+        "newTilePositions": [
+          { "row": 0, "col": 0 },
+          { "row": 0, "col": 1 },
+          { "row": 0, "col": 2 }
+        ],
+        "afterGravity": [
+          [-1, -1, -1, 3],
+          [0, 1, 2, 4],
+          [1, 2, 3, 0],
+          [3, 4, 0, 1]
+        ],
+        "afterRefill": [
+          [4, 0, 1, 3],
+          [0, 1, 2, 4],
+          [1, 2, 3, 0],
+          [3, 4, 0, 1]
+        ]
+      }
+    ],
+    "generatedTiles": [
+      { "row": 0, "col": 0, "tile": 4 },
+      { "row": 0, "col": 1, "tile": 0 },
+      { "row": 0, "col": 2, "tile": 1 }
+    ],
+    "playerStates": {
+      "player-a": {
+        "stamina": 298500,
+        "maxStamina": 300000,
+        "health": 100,
+        "maxHealth": 100,
+        "mana": 100,
+        "maxMana": 100,
+        "lv": 1,
+        "exp": 3,
+        "expToNext": 100,
+        "atk": 10
+      },
+      "player-b": {
+        "stamina": 300000,
+        "maxStamina": 300000,
+        "health": 100,
+        "maxHealth": 100,
+        "mana": 100,
+        "maxMana": 100,
+        "lv": 1,
+        "exp": 0,
+        "expToNext": 100,
+        "atk": 10
+      }
+    }
+  }
+}

@@ -77,7 +77,7 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.3 vs Bot | DONE | LobbyScene, ResultScene, BotPlayer, local TimerManager — scenes since retired in A09 |
 | v0.4 vs Human online | DONE | `apps/backend/` server with WaitingQueue, RoomManager, Validator, TimerManager, BotManager; SyncClient |
 | v0.5 Robustness | DONE | All T-v0.5-01..04 + T-v0.5-10..15 shipped; NFR-4 ≤2s, NFR-3/6 100-iter desync=0 |
-| v0.6 Flutter shell + Accounts | CODE-COMPLETE | Local-account flow is the target auth path. Firebase-era SSO tasks are legacy and should be removed or rewritten as optional Google OAuth without Firebase. H-track/store and device verification remain external gates. |
+| v0.6 Flutter shell + Accounts | CODE-COMPLETE | Local-account flow is the target auth path. provider-backed SSO tasks are legacy and should be removed or rewritten as optional Google OAuth through backend exchange. H-track/store and device verification remain external gates. |
 | v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
 | v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
 | v0.8 Characters | PARTIAL | Foundations shipped: F01 character registry, F02 extra-turn/scaling helpers, F03 user_progress store/migration. S01 shell picker is partially wired. Pending: backend character start, skills, fizzle, XP/level-up, HUD skill UI. |
@@ -172,7 +172,7 @@ All tasks shipped on master (commits 9d92fb5, 2d68c9f, 38df0ed — 2026-04-20). 
 
 Nine sub-tracks. **A, C, D, E, H** can start in parallel on day one. **B** depends on A01. **F, G** depend on D and D+E respectively. **I** closes the milestone.
 
-Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gating this milestone — AR-4 grace period, min iOS, min Android, identity provider (Firebase Auth is the default).
+Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gating this milestone — AR-4 grace period, min iOS, min Android, and auth-provider policy. The current target is backend-issued local session tokens, with optional Google OAuth exchange later.
 
 ### Sub-track A — Flutter shell scaffold
 
@@ -333,7 +333,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 2.2](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** `packages/shared-js/src/protocol.d.ts` (adjacent pattern).
 - **Outputs:** `packages/shared-js/src/bridge.d.ts` with TypeScript declarations for every message listed in § 2.2. `apps/frontend/lib/bridge/bridge_messages.dart` with Dart equivalents.
-- **Implementation Notes:** Keep the set closed — only the six messages in § 2.2. No gameplay events. Version field on every message for forward-compat. **Revision note (2026-04-24):** The original bridge used `setAuthToken` carrying a Firebase idToken. Spec updated to use `startMatch(roomToken, expiresAt)` where `roomToken` is a server-issued room-scoped JWT. A follow-up task T-v0.6-B01b is filed to rename message types on both sides.
+- **Implementation Notes:** Keep the set closed — only the six messages in § 2.2. No gameplay events. Version field on every message for forward-compat. **Revision note (2026-04-24):** The original bridge used `setAuthToken` carrying an app session token. Spec updated to use `startMatch(roomToken, expiresAt)` where `roomToken` is a server-issued room-scoped JWT. A follow-up task T-v0.6-B01b is filed to rename message types on both sides.
 - **Acceptance:**
   - TS declarations compile (`npx tsc --project packages/shared-js/tsconfig.json --noEmit`).
   - Dart types compile in `apps/frontend/`.
@@ -343,7 +343,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 **T-v0.6-B01b** (DONE) · Rename bridge auth message to `startMatch`
 - **Req:** AR-3 · **Size:** S · **Deps:** T-v0.6-B01
-- **Context:** [system-design § 2.2 revision](system-design.md#22-shellgame-bridge-contract); spec changed 2026-04-24 to pass a room-scoped token instead of a Firebase idToken across the bridge.
+- **Context:** [system-design § 2.2 revision](system-design.md#22-shellgame-bridge-contract); spec changed 2026-04-24 to pass a room-scoped token instead of an app session token across the bridge.
 - **Inputs:** `packages/shared-js/src/bridge.d.ts`, `packages/shared-js/src/bridge.ts`, `apps/frontend/lib/bridge/bridge_messages.dart`.
 - **Outputs:** `SET_AUTH_TOKEN` → `START_MATCH`; `SetAuthTokenMessage` → `StartMatchMessage` with payload `{ roomToken: string, expiresAt: number }` (drop `userId` — it's inside the token). Update both TS and Dart sides. Update the name-parity test.
 - **Implementation Notes:** This is a breaking change for any caller — but the only current callers are `GameBridge.onSetAuthToken` (rename to `onStartMatch`) and `SyncClient` (rename `setAuthToken(token)` to `startMatch(roomToken)`). Keep payloads minimal: the roomToken is self-describing.
@@ -383,11 +383,11 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 2.2 and § 2.3](system-design.md#22-shellgame-bridge-contract).
 - **Inputs:** Bridge transport from B02/B03, room token from matchmaking endpoint (D09).
 - **Outputs:** Dart helper in `apps/frontend/lib/bridge/` exposing `sendStartMatch(roomToken, expiresAt)`. Called exactly once per match, after shell receives 200 from `/matchmaking/join` (or `/matchmaking/resume`).
-- **Implementation Notes:** Emits a single message. Never emits the roomToken value into logs (log only `expiresAt` + a short hash prefix for correlation). The Firebase idToken MUST NOT be passed to this helper or across the bridge at all.
+- **Implementation Notes:** Emits a single message. Never emits the roomToken value into logs (log only `expiresAt` + a short hash prefix for correlation). The app session token MUST NOT be passed to this helper or across the bridge at all.
 - **Acceptance:**
   - Unit test: emission carries `{ roomToken, expiresAt }`.
   - Log inspection: token value not present in any log.
-  - Type test: passing a Firebase-style token shape (with `userId` field) is rejected at compile time.
+  - Type test: passing an app-session-token shape (with `userId` field) is rejected at compile time.
 
 ---
 
@@ -418,7 +418,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `packages/game-view/src/net/SyncClient.ts`, bridge JS adapter.
 - **Outputs:** `SyncClient` accepts a token from the bridge and sets `auth: { token }` on `io(...)`.
-- **Implementation Notes:** If no token has arrived yet, queue the connect attempt until `setAuthToken`/`startMatch` fires. Do not connect anonymously. **Spec revision (2026-04-24):** The token received here is now a **room token** (D11), not a Firebase idToken. The code change is invariant to this — the token is opaque to `SyncClient`. A follow-up in T-v0.6-B01b renames the bridge handler from `setAuthToken` to `startMatch` for clarity.
+- **Implementation Notes:** If no token has arrived yet, queue the connect attempt until `setAuthToken`/`startMatch` fires. Do not connect anonymously. **Spec revision (2026-04-24):** The token received here is now a **room token** (D11), not an app session token. The code change is invariant to this — the token is opaque to `SyncClient`. A follow-up in T-v0.6-B01b renames the bridge handler from `setAuthToken` to `startMatch` for clarity.
 - **Acceptance:**
   - Unit test: connect is deferred until token is set. ✅
   - Integration: socket handshake includes the token. ✅
@@ -474,74 +474,72 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 2.2 and § 8 "Failure modes"](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** All bridge pieces.
 - **Outputs:** `apps/frontend/integration_test/bridge_contract_test.dart` that drives the full sequence: `ready` → `setAuthToken` → start match → `matchEnded`. Plus a token-refresh variant: stale token → `authTokenRejected` → `setAuthToken` → resume.
-- **Implementation Notes:** Uses a stub server fixture (no real Firebase). Asserts message names + payloads match B01 contract exactly.
+- **Implementation Notes:** Uses a stub server fixture with local signed tokens. Asserts message names + payloads match B01 contract exactly.
 - **Acceptance:**
   - Integration test passes in CI on Flutter Web target.
   - Fails deterministically if a new message type is added without updating B01.
 
 ---
 
-### Sub-track C — Identity provider (Firebase Auth)
+### Sub-track C — Identity providers
 
 ---
 
-**T-v0.6-C01** (TODO) · Firebase project + providers
+**T-v0.6-C01** (DONE) · Backend local accounts
 - **Req:** AR-2 · **Size:** S · **Deps:** —
 - **Context:** [requirement § AR-2](requirement.md#3-identity--account-requirements); [system-design § 2.3](system-design.md#23-identity-data-flow).
-- **Inputs:** Firebase console access.
-- **Outputs:** Firebase project created; Apple + Google providers enabled; service-account key stored in a secret store (not in repo). `apps/frontend/firebase_options.dart` generated via `flutterfire configure`.
-- **Implementation Notes:** One project for dev, separate for prod (landed in v1.0). Disable email/password provider explicitly per AR-2.
+- **Inputs:** Backend auth endpoints and `LocalSessionSigner`.
+- **Outputs:** Register/login flow issuing backend session tokens; frontend stores the session and uses it for HTTP calls.
+- **Implementation Notes:** This is the target auth path. Keep tokens backend-issued and locally verifiable.
 - **Acceptance:**
-  - `firebase_options.dart` compiles into `apps/frontend/`.
-  - Console shows both providers enabled, email/password disabled.
+  - Register/login returns `{ userId, sessionToken, expiresAt }`.
+  - Matchmaking/account HTTP calls accept the session token.
 
 ---
 
-**T-v0.6-C02** (TODO) · iOS bundle id + Sign-in-with-Apple capability
+**T-v0.6-C02** (REMOVED) · Apple Sign-In capability
 - **Req:** AR-2 · **Size:** S · **Deps:** T-v0.6-C01, T-v0.6-H03
 - **Context:** App Store Guideline 4.8 per [planning § 5](planning.md#5-risks--how-each-milestone-mitigates-them).
-- **Inputs:** Xcode project under `apps/frontend/ios/`, Firebase config.
-- **Outputs:** Apple capabilities file includes Sign in with Apple; `Info.plist` bundle id matches Firebase iOS app.
-- **Implementation Notes:** Required for Apple provider to work on device. Simulator is insufficient for final validation.
+- **Inputs:** Xcode project under `apps/frontend/ios/`.
+- **Outputs:** None for the current target.
+- **Implementation Notes:** Apple Sign-In is only reconsidered if Google OAuth is offered on iOS and store review requires parity.
 - **Acceptance:**
-  - Xcode build with signing succeeds.
-  - Physical-device smoke: Apple provider presents the native sheet.
+  - No Apple auth dependency remains in the Flutter app.
 
 ---
 
-**T-v0.6-C03** (DONE) · Apple Sign-In plugin
+**T-v0.6-C03** (REMOVED) · Apple Sign-In plugin
 - **Req:** AR-2 · **Size:** M · **Deps:** T-v0.6-C02
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
-- **Inputs:** `sign_in_with_apple` Flutter plugin.
-- **Outputs:** `apps/frontend/lib/services/apple_sign_in.dart` returning a provider credential.
-- **Implementation Notes:** Guard on platform — Apple provider on Web uses the browser redirect flow. Handle "cancelled by user" cleanly.
+- **Inputs:** None.
+- **Outputs:** Removed plugin and service files.
+- **Implementation Notes:** Re-add only if a later store-compliance decision requires it.
 - **Acceptance:**
-  - Device test returns a credential on success.
-  - Cancellation returns a known error type, not an exception.
+  - Dependency scan shows no Apple auth plugin.
 
 ---
 
-**T-v0.6-C04** (DONE) · Google Sign-In plugin
+**T-v0.6-C04** (OPTIONAL) · Google OAuth credential collection
 - **Req:** AR-2 · **Size:** M · **Deps:** T-v0.6-C01
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `google_sign_in` plugin.
 - **Outputs:** `apps/frontend/lib/services/google_sign_in.dart` returning a provider credential.
-- **Implementation Notes:** Configure OAuth client IDs for iOS, Android, Web via Firebase console.
+- **Implementation Notes:** Configure native/web OAuth client IDs directly with Google. Do not add a third-party identity backend.
 - **Acceptance:**
   - Each target returns a credential on successful sign-in.
   - Cancellation returns a known error type.
 
 ---
 
-**T-v0.6-C05** (DONE) · Exchange credential for Firebase id_token
+**T-v0.6-C05** (TODO) · Exchange Google credential for app session
 - **Req:** AR-2, AR-3 · **Size:** M · **Deps:** T-v0.6-C03, T-v0.6-C04
 - **Context:** [system-design § 2.3 step 3](system-design.md#23-identity-data-flow).
-- **Inputs:** `firebase_auth` plugin; credentials from C03/C04.
-- **Outputs:** `apps/frontend/lib/services/auth_service.dart` with `signInWithApple()` and `signInWithGoogle()` returning `{idToken, userId, expiresAt}`.
-- **Implementation Notes:** `expiresAt` is derived from Firebase claim parsing (standard `exp` field).
+- **Inputs:** Google OAuth credential from C04.
+- **Outputs:** Backend exchange endpoint returning the same `{sessionToken, userId, expiresAt}` shape as local login.
+- **Implementation Notes:** Keep Google OAuth optional. The frontend should not treat a provider credential as the app session token.
 - **Acceptance:**
-  - Unit test mocks Firebase and asserts returned shape.
-  - Device test: signed-in user has a decodable JWT with matching userId.
+  - Unit test mocks provider verification and asserts returned app-session shape.
+  - Existing local login path remains unchanged.
 
 ---
 
@@ -582,12 +580,12 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-D01** (DONE) · Firebase idToken verification middleware
+**T-v0.6-D01** (DONE) · App session-token verification middleware
 - **Req:** AR-3, MR-7(v) · **Size:** M · **Deps:** —
 - **Context:** [system-design § 2.3 and § 8 "Security posture"](system-design.md#8-cross-cutting-concerns).
-- **Inputs:** `firebase-admin` npm package.
+- **Inputs:** `LocalSessionSigner`.
 - **Outputs:** `apps/backend/src/AuthMiddleware.ts` exporting `verifyToken(token) → {userId, claims}` with caching.
-- **Implementation Notes:** Use `firebase-admin/auth` `verifyIdToken`. Cache verified results for TTL from `exp - now` or at most 5 min. **Scope note (2026-04-24):** This middleware verifies **Firebase idTokens** and is used by the HTTP matchmaking endpoints (D09/D10). Socket handshakes verify **room tokens** via D11/D12 instead; they do NOT call `verifyIdToken` per connect.
+- **Implementation Notes:** Verify backend-issued session tokens locally. Cache verified results for TTL from `exp - now` or at most 5 min. Socket handshakes verify **room tokens** via D11/D12 instead; they do not use app session tokens per connect.
 - **Acceptance:**
   - Unit test: valid, expired, and tampered tokens produce correct outcomes.
   - Cache test: repeat verification within TTL returns from cache.
@@ -598,8 +596,8 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Req:** AR-1, MR-7(v) · **Size:** S · **Deps:** T-v0.6-D11
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** `apps/backend/src/server.ts`, RoomTokenSigner from D11.
-- **Outputs:** Socket.IO `use` middleware that (a) extracts `socket.handshake.auth.token` as a room token, (b) verifies its HMAC signature locally (no Firebase call), (c) checks `exp > now`, (d) confirms the room still exists and the user slot matches, (e) attaches `{roomId, userId, slot}` to `socket.data`, (f) joins the socket to `io.to(roomId)` atomically.
-- **Implementation Notes:** Do NOT call `firebase-admin` here — the Firebase idToken was already verified when D09 signed this room token. Pull token from `socket.handshake.auth.token`. On rejection emit `connect_error` with a machine-readable reason (`no_token`, `invalid_token`, `expired_token`, `room_closed`).
+- **Outputs:** Socket.IO `use` middleware that (a) extracts `socket.handshake.auth.token` as a room token, (b) verifies its HMAC signature locally, (c) checks `exp > now`, (d) confirms the room still exists and the user slot matches, (e) attaches `{roomId, userId, slot}` to `socket.data`, (f) joins the socket to `io.to(roomId)` atomically.
+- **Implementation Notes:** Do not verify app session tokens in the socket handshake — the session was already verified when D09 signed this room token. Pull token from `socket.handshake.auth.token`. On rejection emit `connect_error` with a machine-readable reason (`no_token`, `invalid_token`, `expired_token`, `room_closed`).
 - **Acceptance:**
   - Integration test: connecting without a token fails with `no_token`.
   - Connecting with a tampered token fails with `invalid_token`.
@@ -636,7 +634,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Outputs:** LRU or TTL map keyed by token hash; verify-once per 5 min window.
 - **Implementation Notes:** Do not key by the raw token — hash it (SHA-256) to avoid retaining tokens longer than necessary.
 - **Acceptance:**
-  - Unit test: second verify within TTL does not call `verifyIdToken`.
+  - Unit test: second verify within TTL does not re-run token verification.
 
 ---
 
@@ -667,7 +665,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 8 security posture](system-design.md#8-cross-cutting-concerns).
 - **Inputs:** `AuthMiddleware`.
 - **Outputs:** Tests under `apps/backend/src/__tests__/auth.test.ts`.
-- **Implementation Notes:** Use signed fixture tokens with a fake Admin SDK.
+- **Implementation Notes:** Use signed fixture tokens and a test-only external verifier hook for invalid/expired edge cases.
 - **Acceptance:**
   - `be` test suite includes at least: valid / expired / tampered / missing-claim cases. All green.
 
@@ -677,12 +675,12 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Req:** AR-1, AR-3, MR-1 · **Size:** M · **Deps:** T-v0.6-D01, T-v0.6-D11
 - **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint); [§ 4.4](system-design.md#44-matchmaking-with-bot-fallback-mr-1).
 - **Inputs:** `apps/backend/src/server.ts`, `AuthMiddleware` (D01), `WaitingQueue`, `RoomManager`, `BotManager`, `RoomTokenSigner` (D11).
-- **Outputs:** Express-style HTTP route (or Socket.IO engine's HTTP upgrade) at `POST /matchmaking/join`. Verifies `Authorization: Bearer <firebaseIdToken>` via D01 → `userId`. Enqueues into `WaitingQueue`. Long-polls up to `BOT_WAIT_MS` (5 s). Pairs with a waiting human if one is present; otherwise falls back to bot via `BotManager`. Creates a `Room` and signs a room token via D11. Responds with `{ roomToken, expiresAt, mode, opponent? }`.
+- **Outputs:** Express-style HTTP route (or Socket.IO engine's HTTP upgrade) at `POST /matchmaking/join`. Verifies `Authorization: Bearer <sessionToken>` via D01 → `userId`. Enqueues into `WaitingQueue`. Long-polls up to `BOT_WAIT_MS` (5 s). Pairs with a waiting human if one is present; otherwise falls back to bot via `BotManager`. Creates a `Room` and signs a room token via D11. Responds with `{ roomToken, expiresAt, mode, opponent? }`.
 - **Implementation Notes:** Use Node's built-in `http` server the Socket.IO instance is already attached to — route HTTP requests via a `request` listener. JSON body parsing kept manual (no express added). AR-7: reject with 409 if the userId already has an active room (unless the endpoint is called as resume — that's D10). Do not hold the HTTP request past `BOT_WAIT_MS` + a small buffer.
 - **Acceptance:**
   - Unit test: two concurrent requests with matching mode pair up; response contains a signed room token for each.
   - Unit test: single request with no opponent gets a bot match after `BOT_WAIT_MS`.
-  - Unit test: missing or invalid idToken returns 401.
+  - Unit test: missing or invalid session token returns 401.
   - Unit test: userId with an active room gets 409.
 
 ---
@@ -691,7 +689,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Req:** AR-3, MR-6 · **Size:** S · **Deps:** T-v0.6-D09, T-v0.6-D11
 - **Context:** [system-design § 2.4](system-design.md#24-matchmaking-endpoint).
 - **Inputs:** `RoomManager`, `RoomTokenSigner` (D11), `AuthMiddleware` (D01).
-- **Outputs:** `POST /matchmaking/resume` with body `{ roomId }`. Verifies idToken, confirms userId is a slot in the room, signs a fresh room token for that slot, responds `{ roomToken, expiresAt }`.
+- **Outputs:** `POST /matchmaking/resume` with body `{ roomId }`. Verifies session token, confirms userId is a slot in the room, signs a fresh room token for that slot, responds `{ roomToken, expiresAt }`.
 - **Implementation Notes:** Does NOT reset the match state — the board/moves/clocks are unchanged. Returns 410 Gone if the room is closed or its rejoin window has passed.
 - **Acceptance:**
   - Unit test: valid resume returns a new room token for the same roomId/slot.
@@ -757,7 +755,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Context:** [system-design § 6 durable-state notes](system-design.md#6-deployment-topology-v10).
 - **Inputs:** Migrator from E01.
 - **Outputs:** `apps/backend/migrations/001_users.sql` (or framework-equivalent) creating `users(user_id PK, display_name TEXT, avatar_url TEXT, provider TEXT, created_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ NULL)`.
-- **Implementation Notes:** `user_id` is the Firebase uid (string). Index on `provider`.
+- **Implementation Notes:** `user_id` is the backend account id (string). Index on `provider`.
 - **Acceptance:**
   - Migration runs up and down cleanly against the local DB.
 
@@ -803,7 +801,7 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 - **Outputs:** On match end (any FR-7 trigger), insert a row with the match fields.
 - **Implementation Notes:** Single-statement insert; use the room's `matchId` (generate on match_start if not already present). Measure duration from match_start to match_end server-side.
 - **Acceptance:**
-  - Integration: a complete match yields one row with correct outcome, scores, duration.
+  - Integration: a complete match yields one row with correct outcome and duration. Legacy score columns may be zero until removed by a later migration.
 
 ---
 
@@ -866,14 +864,14 @@ Before starting v0.6: pin the [§ Open values](requirement.md#open-values) gatin
 
 ---
 
-**T-v0.6-F04** (DONE) · Revoke Firebase user
+**T-v0.6-F04** (REMOVED) · External provider account revocation
 - **Req:** AR-4, AR-5 · **Size:** S · **Deps:** T-v0.6-F01
 - **Context:** [requirement § AR-4/AR-5](requirement.md#3-identity--account-requirements).
-- **Inputs:** `firebase-admin` Auth API.
-- **Outputs:** Call `auth().deleteUser(uid)` after DB commit succeeds.
-- **Implementation Notes:** If this call fails, log and retry async; DB changes already committed.
+- **Inputs:** None for local-account auth.
+- **Outputs:** None for the current target.
+- **Implementation Notes:** Account deletion is complete after backend user deletion plus match-history anonymisation. If Google OAuth account linking is added later, unlink provider metadata without deleting the user's Google account.
 - **Acceptance:**
-  - Integration: after deletion, Firebase shows no user for that uid.
+  - Tests assert deletion returns `{ deleted }` only and does not call an external auth SDK.
 
 ---
 
@@ -1259,13 +1257,13 @@ Each H-task acceptance: artifact exists and is linked from `apps/frontend/docs/a
 
 ---
 
-**T-v1.0-05** (TODO) · Production Firebase Auth config
+**T-v1.0-05** (TODO) · Production auth config
 - **Req:** AR-2 · **Size:** S · **Deps:** —
 - **Context:** [system-design § 7 identity](system-design.md#7-technology-stack).
-- **Inputs:** Firebase prod project.
-- **Outputs:** Prod project with Apple + Google providers; OAuth client IDs for all targets.
+- **Inputs:** Backend session-token secret and optional Google OAuth client IDs.
+- **Outputs:** Production session-token secret configured; optional OAuth exchange credentials configured if Google sign-in is enabled.
 - **Acceptance:**
-  - Prod shell can sign in via both providers.
+  - Prod shell can register/login and call authenticated endpoints.
 
 ---
 
@@ -1444,7 +1442,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track A — Protocol contract and fixtures
 
-**T-v0.9-A01** (TODO) · Board-delta protocol fixtures
+**T-v0.9-A01** (DONE) · Board-delta protocol fixtures
 - **Req:** MR-2, MR-3, MR-6, MR-8, MR-9, NFR-6 · **Size:** M · **Deps:** —
 - **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol); [system-design § 4](system-design.md#4-runtime-flows).
 - **Inputs:** `packages/shared-js/src/protocol.ts`, current backend socket tests, current Flutter model conventions.
@@ -1453,10 +1451,10 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Acceptance:**
   - Fixture set includes match start, accepted move with generated tiles, swap fizzle, no-legal-move board replacement, and rejoin.
   - Fixture validation asserts board arrays are 1D row-major and length equals `width * height`.
-  - Fixture validation asserts `generatedTiles` order is columns left-to-right and top-to-bottom within each column after gravity.
+  - Fixture validation asserts `generatedTiles` order is columns left-to-right and top-to-bottom within each column after each cascade's gravity, concatenated chronologically for multi-cascade moves.
   - Fixture validation fails if `seed`, `originalSeed`, or `rngState` is present in client-visible online payloads.
 
-**T-v0.9-A02** (TODO) · Dart protocol DTOs
+**T-v0.9-A02** (DONE) · Dart protocol DTOs
 - **Req:** MR-3, MR-6, MR-9 · **Size:** S · **Deps:** T-v0.9-A01
 - **Context:** [flutter-native-migration § Flutter Game Core](flutter-native-migration.md#7-flutter-game-core).
 - **Inputs:** Fixtures from A01; `apps/frontend/lib/models/` if still used.
@@ -1468,7 +1466,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track B — Pure Dart game_core
 
-**T-v0.9-B01** (TODO) · Dart board model and generator
+**T-v0.9-B01** (DONE) · Dart board model and generator
 - **Req:** FR-1, FR-3, NFR-5 · **Size:** M · **Deps:** T-v0.9-A01
 - **Context:** [flutter-native-migration § Target package layout](flutter-native-migration.md#target-package-layout).
 - **Inputs:** Legacy TypeScript engine tests as behaviour reference.
@@ -1477,7 +1475,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Acceptance:**
   - Tests cover board creation, valid tile values, injected generator repeatability, and no initial accidental matches if that invariant is retained.
 
-**T-v0.9-B02** (TODO) · Dart judge: swaps, matches, gravity, refill
+**T-v0.9-B02** (DONE) · Dart judge: swaps, matches, gravity, refill
 - **Req:** FR-2, FR-3, FR-4, NFR-5 · **Size:** M · **Deps:** T-v0.9-B01
 - **Context:** [requirement § Functional requirements](requirement.md#1-functional-requirements--gameplay--modes).
 - **Inputs:** `apps/frontend/lib/game_core/` from B01; legacy `MatchEngine` tests.
@@ -1488,7 +1486,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - Competitive session code can consume the same steps without exposing or rendering a point score.
   - A no-match adjacent swap returns a fizzle result rather than a protocol/input error.
 
-**T-v0.9-B03** (TODO) · No-legal-move detection and board replacement
+**T-v0.9-B03** (DONE) · No-legal-move detection and board replacement
 - **Req:** MR-9, NFR-5 · **Size:** S · **Deps:** T-v0.9-B02
 - **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
 - **Inputs:** Dart judge from B02.
@@ -1498,7 +1496,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - Tests include at least one board with legal moves and one board with none.
   - Replacement creates a playable board and reports `reason: no_legal_moves`.
 
-**T-v0.9-B04** (TODO) · Local bot and player-state effects
+**T-v0.9-B04** (PARTIAL) · Local bot and player-state effects
 - **Req:** FR-4, FR-6, CR-1, CR-6, CR-9 · **Size:** M · **Deps:** T-v0.9-B02
 - **Context:** [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
 - **Inputs:** Legacy bot behaviour and character/stat helpers.
@@ -1510,7 +1508,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track C — Flutter game UI and local modes
 
-**T-v0.9-C01** (TODO) · Flutter board renderer and input controller
+**T-v0.9-C01** (PARTIAL) · Flutter board renderer and input controller
 - **Req:** FR-2, NFR-1, NFR-2, NFR-8, NFR-9 · **Size:** M · **Deps:** T-v0.9-B02
 - **Context:** [system-design § 3](system-design.md#3-layered-component-view).
 - **Inputs:** `apps/frontend/lib/screens/`, current theme, Dart `game_core`.
@@ -1520,7 +1518,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - Widget tests cover selecting/swapping by tap and keyboard.
   - Reduced-motion mode skips or shortens nonessential movement while preserving state updates.
 
-**T-v0.9-C02** (TODO) · Practice mode: score-only endless local session
+**T-v0.9-C02** (DONE) · Practice mode: score-only endless local session
 - **Req:** FR-5, NFR-5 · **Size:** M · **Deps:** T-v0.9-B03, T-v0.9-C01
 - **Context:** [requirement § FR-5](requirement.md#1-functional-requirements--gameplay--modes); [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
 - **Inputs:** Home/mode flow, character selection, Dart judge/generator.
@@ -1531,18 +1529,19 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - Score updates after cascades.
   - Leaving returns to the home flow without showing a result screen.
 
-**T-v0.9-C03** (TODO) · Local vs Bot session
+**T-v0.9-C03** (PARTIAL) · Local vs Bot session
 - **Req:** FR-5, FR-6, FR-7, NFR-5 · **Size:** M · **Deps:** T-v0.9-B04, T-v0.9-C01
 - **Context:** [flutter-native-migration § Authority model](flutter-native-migration.md#authority-model-by-mode).
 - **Inputs:** Dart bot, Dart judge, existing result screen.
 - **Outputs:** `apps/frontend/lib/screens/bot_game_screen.dart` and local bot session controller.
 - **Implementation Notes:** No gameplay socket. The local judge/generator owns board state for both human and bot turns.
+- **Status:** Native `PveGameScreen` now routes from character select, uses the local Dart judge/generator, and is score-free. Remaining work: extract a reusable board controller/renderer, add stronger bot strategy, player-state effects, animations, and local end conditions.
 - **Acceptance:**
   - vs Bot can be completed offline.
   - Bot turns animate through the same board UI as human moves.
   - End result is produced locally.
 
-**T-v0.9-C04** (TODO) · Board replacement notification UI
+**T-v0.9-C04** (PARTIAL) · Board replacement notification UI
 - **Req:** MR-9, NFR-9 · **Size:** S · **Deps:** T-v0.9-C01
 - **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
 - **Inputs:** Board renderer/session controllers.
@@ -1553,22 +1552,24 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track D — Online Flutter client
 
-**T-v0.9-D01** (TODO) · Dart Socket.IO online client
+**T-v0.9-D01** (PARTIAL) · Dart Socket.IO online client
 - **Req:** MR-1, MR-3, MR-6, AR-3 · **Size:** M · **Deps:** T-v0.9-A02
 - **Context:** [system-design § 2.3](system-design.md#23-identity-data-flow).
 - **Inputs:** Current matchmaking services, room token flow, Dart protocol DTOs.
 - **Outputs:** `apps/frontend/lib/net/online_game_client.dart` plus tests/mocks.
 - **Implementation Notes:** The Flutter client attaches the server-issued room token directly to the socket handshake. The app session token remains HTTP-only. No WebView bridge participates.
+- **Status:** `apps/frontend/lib/net/board_delta_socket_client.dart` adds the native Socket.IO transport with typed board-delta streams and move/forfeit emits. Remaining work: token refresh/reconnect/auth rejection handling and broader integration tests against a live backend.
 - **Acceptance:**
   - Client emits moves/forfeits and handles match start, move resolved, board replaced, rejoin, game over, auth rejection.
   - Reconnect uses the current room-token refresh/resume path without exposing seed data.
 
-**T-v0.9-D02** (TODO) · Online Flutter session integration
+**T-v0.9-D02** (PARTIAL) · Online Flutter session integration
 - **Req:** FR-8, MR-2, MR-3, MR-6, MR-9, NFR-6 · **Size:** M · **Deps:** T-v0.9-C01, T-v0.9-C04, T-v0.9-D01, T-v0.9-E02
 - **Context:** [system-design § 4.2](system-design.md#42-online-vs-human-move).
 - **Inputs:** `online_game_client.dart`, board renderer, backend board-delta protocol.
 - **Outputs:** `apps/frontend/lib/screens/online_game_screen.dart` and online session controller.
 - **Implementation Notes:** The online controller must render only server-authored board state. It may animate predicted selection/recoil locally, but accepted board changes come from `match_found`, `move_resolved`, and `board_replaced`.
+- **Status:** `OnlineGameScreen` now joins/resumes through matchmaking, opens the native Socket.IO board-delta connection, renders `match_found` flat boards, submits moves, applies `move_resolved` final cascade board/version, and handles `board_replaced` with the no-move notification. Remaining work: animation, clock/result handling, reconnect hardening, and removing legacy seed fields once backend compatibility is dropped.
 - **Acceptance:**
   - `match_found` flat board table displays without local regeneration.
   - `move_resolved.generatedTiles` animates and updates the board version.
@@ -1577,7 +1578,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track E — Backend board authority
 
-**T-v0.9-E01** (TODO) · Server room state without shared seed payloads
+**T-v0.9-E01** (PARTIAL) · Server room state without shared seed payloads
 - **Req:** MR-2, MR-3, MR-6, NFR-5 · **Size:** M · **Deps:** T-v0.9-A01
 - **Context:** [system-design § 4.2](system-design.md#42-online-vs-human-move).
 - **Inputs:** `apps/backend/src/RoomManager.ts`, `MatchEngineService.ts`, protocol types.
@@ -1587,7 +1588,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - `match_found` and rejoin include flat board table/dimensions/version and no seed fields.
   - Backend tests assert room snapshots preserve board version, player states, active player, and clocks.
 
-**T-v0.9-E02** (TODO) · Server move_resolved generated-tile arrays
+**T-v0.9-E02** (DONE) · Server move_resolved generated-tile arrays
 - **Req:** MR-3, MR-8, NFR-6 · **Size:** M · **Deps:** T-v0.9-E01
 - **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol).
 - **Inputs:** Backend judge cascade/refill code.
@@ -1597,7 +1598,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
   - Accepted move emits generated tiles sufficient for a client to reconstruct the final board.
   - Test fails if every normal move sends a full board snapshot as the primary refill mechanism.
 
-**T-v0.9-E03** (TODO) · Server no-legal-move full board replacement
+**T-v0.9-E03** (PARTIAL) · Server no-legal-move full board replacement
 - **Req:** MR-9 · **Size:** M · **Deps:** T-v0.9-E02
 - **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
 - **Inputs:** Backend judge/legal move detection.
@@ -1606,16 +1607,17 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Acceptance:**
   - Forced no-move board emits one replacement event.
   - Replacement board has at least one legal move.
-  - Scores/player states are preserved unless the game rules explicitly changed them before replacement.
+  - Player states are preserved unless the game rules explicitly changed them before replacement.
 
 ### Sub-track F — Retire legacy runtime path
 
-**T-v0.9-F01** (TODO) · Remove game-view bootstrap from Flutter routes
+**T-v0.9-F01** (PARTIAL) · Remove game-view bootstrap from Flutter routes
 - **Req:** NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-C02, T-v0.9-C03, T-v0.9-D02
 - **Context:** [flutter-native-migration § Migration plan](flutter-native-migration.md#migration-plan-step-by-step).
 - **Inputs:** `apps/frontend/lib/router.dart`, bridge services, game-view bootstrap services.
 - **Outputs:** Flutter routing/service changes that point all modes to native Flutter screens; obsolete bridge/bootstrap code removed or isolated as legacy.
 - **Implementation Notes:** Do not delete `packages/game-view` until CI/build references are removed and parity tests pass.
+- **Status:** Practice, vs Bot, and vs Human character-select routes now enter Flutter-native screens. The legacy `/match` route, bridge/bootstrap services, and `packages/game-view` remain for compatibility and old tests until parity cleanup.
 - **Acceptance:**
   - Practice, vs Bot, and vs Human route to Flutter-native gameplay.
   - No runtime path loads a WebView/iframe for gameplay.

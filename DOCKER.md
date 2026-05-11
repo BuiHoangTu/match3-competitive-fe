@@ -1,8 +1,8 @@
 # Docker Setup — spare-PC / VM deployment
 
 `docker compose up` brings up a fully playable Match-3 stack on a single host.
-**No Firebase, Apple, or Google account required** — the stack ships with
-local-account auth (username + password) that runs end-to-end.
+The stack ships with local-account auth (username + password) that runs
+end-to-end. No external account provider is required for local Docker use.
 
 ## Quick Start
 
@@ -93,18 +93,18 @@ For TLS, run a reverse proxy (nginx, Caddy, traefik) in front of ports 8080
 and 3001. The backend ports must remain reachable from the user's browser
 because the embedded game opens a Socket.IO connection directly.
 
-## Enabling Apple + Google SSO later
+## Enabling Google OAuth later
 
-Local accounts and SSO **coexist** — the same userId space serves both. To
-turn SSO on:
+Local accounts and Google OAuth can coexist — the same userId space serves
+both. To turn Google OAuth on:
 
 1. Complete [ops/v1-launch-checklist.md § 1](ops/v1-launch-checklist.md) (paid
-   developer accounts, Firebase project, OAuth client IDs).
-2. Generate `apps/frontend/firebase_options.dart` via `flutterfire configure`.
-3. Set `GOOGLE_APPLICATION_CREDENTIALS` for the backend.
-4. Replace the SSO "Under development" snackbar in `apps/frontend/lib/router.dart` with
-   actual provider calls (T-v0.6-C03/C04 hooks already exist in `apps/frontend/lib/services/`).
-5. Rebuild + redeploy.
+   developer accounts if needed, OAuth client IDs).
+2. Add a backend exchange endpoint that verifies Google provider credentials
+   and returns the normal app session-token shape.
+3. Replace the SSO "Under development" snackbar in `apps/frontend/lib/router.dart`
+   with the Google provider call and exchange response.
+4. Rebuild + redeploy.
 
 ## Debugging
 

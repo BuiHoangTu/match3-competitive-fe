@@ -97,7 +97,7 @@ move_resolved {
 
 `ResolvedStepWire` is animation-first data: cleared cells, falling movements, per-step stat snapshots, and refill destinations. `GeneratedTileWire[]` is a flat list and the only source of newly generated symbols on the client for that move. The client must not invent refill symbols.
 
-Refill order is deterministic: after gravity settles, scan columns left-to-right (`col = 0..width-1`) and, within each column, fill empty cells top-to-bottom (`row = 0..height-1`). The server emits `generatedTiles` in exactly that order. The client consumes the list in order and may either trust each item’s explicit `{ row, col, tile }` destination or assert that the destination matches the deterministic scan. If the order or destination does not match, the client treats the packet as a reconciliation error.
+Refill order is deterministic: after each cascade's gravity settles, scan columns left-to-right (`col = 0..width-1`) and, within each column, fill empty cells top-to-bottom (`row = 0..height-1`). The server emits `generatedTiles` in exactly that order for each cascade, concatenating multi-cascade refill streams chronologically. The client consumes the list in order and may either trust each item’s explicit `{ row, col, tile }` destination or assert that each cascade's destinations match the deterministic scan. If the order or destination does not match, the client treats the packet as a reconciliation error.
 
 The server may include a `boardHash` for cheap client reconciliation. Full final board snapshots should be avoided on every move unless debugging or recovery requires them.
 
@@ -159,6 +159,13 @@ The new match UI is Flutter-native:
 - Update protocol tests so clients cannot accidentally rely on seed replay.
 
 ## 10. Migration Plan
+
+Current implementation status: steps 1-3 are implemented; step 4 has a native
+local PvE shell with first-legal-move bot behaviour; step 5 has a typed native
+Socket.IO board-delta client; step 7 has an initial online Flutter screen that
+renders server-authored flat boards and handles `move_resolved` /
+`board_replaced`. Steps 6 and 8 remain partial because legacy seed/bridge fields
+are still present for compatibility until the old runtime path is retired.
 
 1. **Document and freeze target protocol.**
    Update `requirement.md`, `system-design.md`, `CLAUDE.md`, and `implementation-plan.md`. Add protocol fixtures for board packets before code changes.

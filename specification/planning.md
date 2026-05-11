@@ -159,7 +159,7 @@ Versions are cumulative: v0.3 includes everything from v0.1 and v0.2.
 - Legacy embedding of the existing Phaser/Vite build as the game view — WKWebView on iOS, WebView on Android, `HtmlElementView` (iframe) on Flutter Web. This is intentionally retired in v0.9.
 - Legacy narrow shell→game bridge: room token on match start, platform lifecycle events (foreground/background/pause/resume), and match-end notifications. No gameplay data crosses the bridge. This bridge is removed in v0.9.
 - Server changes: auth-token verification middleware on the Socket.IO handshake, `users` table, `match_history` table, rejoin token keyed by userId.
-- Local account auth configured; optional Google OAuth may be added without Firebase.
+- Local account auth configured; optional Google OAuth may be added through backend exchange.
 - Published privacy policy and ToS.
 - App Store and Play Store submissions (closed beta tracks).
 
@@ -293,7 +293,7 @@ One person must cover:
 - Flutter rendering and animation to a production level.
 - Node.js + WebSocket backend.
 - **Flutter + Dart** (app targeting iOS, Android, Web; pure Dart `game_core`; platform lifecycle).
-- **Identity integration** (local backend sessions; optional Google OAuth exchange without Firebase).
+- **Identity integration** (local backend sessions; optional Google OAuth exchange through backend exchange).
 - **Relational database basics** (schema for users + match history, migrations, backups).
 - Enough design sense to pick a clean tile palette and layout.
 
@@ -346,7 +346,7 @@ With this split, v0.4 networking and v0.3/v0.7 client polish can run in parallel
 - **Network code written before engine is stable** — prevented by the authority-first principle: local Dart `game_core` and protocol fixtures land before online Flutter integration in v0.9.
 - **Accessibility retrofit pain** — mitigated by pulling NFR-7 (colour independence) and NFR-8 (mouse/touch input abstractions) forward into v0.2, rather than deferring them to v0.7. The formal audit is done against the final Flutter shell in v0.7, not against the interim Vite UI, so there is no rework.
 - **App Store rejection (Guideline 4.2 "Minimum Functionality")** — mitigated by Flutter-native gameplay, account deletion screen, and platform-native settings rather than being a thin WebView wrapper. A short store-review pass with a specialist is budgeted at v1.0.
-- **Apple Sign-In compliance (Guideline 4.8)** — if Google Sign-In is offered on iOS, Apple Sign-In may also be required. The current target keeps Google OAuth optional and removes Firebase from the auth architecture.
+- **Apple Sign-In compliance (Guideline 4.8)** — if Google Sign-In is offered on iOS, Apple Sign-In may also be required. The current target keeps Google OAuth optional and keeps auth backend-issued.
 - **Flutter + Phaser split complexity** — the current bridge/WebView/iframe split has produced build and runtime friction. v0.9 mitigates it by removing the embedded runtime and keeping gameplay, lifecycle, and socket handling inside Flutter.
 - **Flutter Web cold-load budget** — CanvasKit plus gameplay assets can still threaten NFR-12(b), but v0.9 removes the second Phaser/Vite bundle from the critical path.
 - **Room-token/socket correctness** — once the bridge is removed, token refresh and Socket.IO reconnect live in one Flutter process. Covered by v0.9 online-client and rejoin tests.

@@ -582,7 +582,7 @@ flowchart LR
 | Local game library | Pure Dart `game_core` | Local Practice/vs Bot judge, board generation, no-move detection, bot AI, and event models. No Flutter imports. |
 | Legacy embedded game view | Phaser 3.88 + TypeScript 5.8 + Vite 6 | Present during migration only; removed before v0.9 is complete. |
 | Backend | Node.js + Socket.IO 4.7 | Server-authoritative online flat board table, generated tiles, clocks, and player states. Socket.IO handles reconnection plumbing that [MR-6](requirement.md#2-multiplayer--networking-requirements) needs. |
-| Identity | Local backend session tokens; optional future Google OAuth exchange | Firebase is not part of the target auth architecture. Google OAuth, if added, should exchange provider tokens with our backend for the same local session-token shape. |
+| Identity | Local backend session tokens; optional future Google OAuth exchange | Google OAuth, if added, should exchange provider tokens with our backend for the same local session-token shape. |
 | Persistence | Managed Postgres (production); SQLite acceptable for closed beta | Users + match history are small, well-structured, relational. No document-store fit. |
 | Tests | Vitest (backend); Flutter `flutter_test` + integration tests | Backend protocol/judge tests; Dart game-core tests; Flutter widget/animation tests; protocol fixture parity tests. |
 
@@ -624,7 +624,7 @@ These values shape architecture only when they move materially (e.g. a 16×16 gr
 - Concurrent-match target — blocks v1.0 load-test design and VM sizing.
 - Account deletion grace period (immediate vs 30-day soft-delete) — affects the [AR-4](requirement.md#3-identity--account-requirements) integration test and the shape of the tombstoning scheme.
 - Minimum iOS / Android versions — affects Flutter plugin compatibility and QA matrix in v0.7.
-- Optional Google OAuth exchange — if added, provider tokens should be exchanged for the existing backend session-token shape. Do not add Firebase back to the target architecture.
+- Optional Google OAuth exchange — if added, provider tokens should be exchanged for the existing backend session-token shape. Keep app sessions backend-issued.
 
 ---
 
