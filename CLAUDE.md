@@ -14,7 +14,7 @@ Specs live under [specification/](specification/):
 - [implementation-plan.md](specification/implementation-plan.md) — agent-executable tasks
 - [flutter-native-migration.md](specification/flutter-native-migration.md) — v0.9 migration plan from Phaser embed to Flutter-native gameplay
 
-Current branch target: **v0.9 Flutter-native gameplay migration**. Do not start coding this migration until the design docs have been reviewed. The legacy Phaser/WebView path is still present in the repository, but the target product is a full Flutter client with a pure Dart game library and server-authored board-delta protocol for online vs Human.
+Current branch target: **v0.9 Flutter-native gameplay migration**. The reviewed target product is a full Flutter client with a pure Dart game library and server-authored board-delta protocol for online vs Human. The old Flutter WebView/iframe bridge is no longer part of runtime routing or product Docker builds; `packages/game-view/` is historical reference only unless a task explicitly says to patch legacy code.
 
 ## Repository Layout
 
@@ -23,7 +23,7 @@ apps/
   backend/         — Node.js + Socket.IO server (Postgres-backed)
   frontend/        — Flutter app (mobile + web). Target home for game UI, game_core, and online client.
 packages/
-  game-view/       — Legacy Phaser + TypeScript game client. Remove from runtime in v0.9.
+  game-view/       — Historical Phaser + TypeScript game client reference; non-runtime.
   shared-js/       — Pure TS shared by backend and legacy code; backend protocol/character helpers remain here.
 ```
 
@@ -82,7 +82,7 @@ Target v0.9 layers:
 4. **Dart online client** (`apps/frontend/lib/net/`) owns Socket.IO connection, room-token handshake, typed protocol DTOs, rejoin/resume, and event streams for online vs Human.
 5. **Backend** (`apps/backend/`) owns online vs Human authority: room lifecycle, flat board table, dimensions, board version, generated replacement tiles, no-legal-move board replacement, validation, clocks/stamina, player states, and match end.
 6. **TypeScript shared/backend support** (`packages/shared-js/`) remains for backend protocol, character helpers, and legacy compatibility during migration.
-7. **Legacy Phaser game view** (`packages/game-view/`) remains only until v0.9 parity is complete. Do not add new product features there unless a task explicitly says it is a legacy compatibility patch.
+7. **Historical Phaser game view** (`packages/game-view/`) is non-runtime reference. Do not add new product features there unless a task explicitly says it is a legacy compatibility patch.
 
 ## Key Constraints
 
@@ -124,11 +124,11 @@ The older Phaser implementation used `packages/shared-js` engine code, `packages
 | Layer | Technology | Status |
 |---|---|---|
 | Flutter app + game UI | Flutter + Dart | target runtime |
-| Local game library | Pure Dart under `apps/frontend/lib/game_core/` | v0.9 planned |
-| Online client | Dart Socket.IO client under `apps/frontend/lib/net/` | v0.9 planned |
+| Local game library | Pure Dart under `apps/frontend/lib/game_core/` | v0.9 active |
+| Online client | Dart Socket.IO client under `apps/frontend/lib/net/` | v0.9 active |
 | Backend | Node.js, Socket.IO 4.7, ts-node | current; v0.9 protocol changes planned |
 | Backend/shared TS support | `packages/shared-js` | current |
-| Legacy embedded game view | Phaser 3.88, TypeScript 5.8, Vite 6 | remove from runtime in v0.9 |
+| Historical embedded game view | Phaser 3.88, TypeScript 5.8, Vite 6 | non-runtime reference |
 | Unit tests | Flutter tests, Vitest backend/shared tests | current |
 | Identity | Local session token flow; optional future Google OAuth exchange; room token on Socket.IO handshake | current |
 | Persistence | Postgres — `users`, `match_history`, `user_progress` | current |

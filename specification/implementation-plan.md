@@ -81,7 +81,7 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
 | v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
 | v0.8 Characters | PARTIAL | Foundations shipped: F01 character registry, F02 extra-turn/scaling helpers, F03 user_progress store/migration. S01 shell picker is partially wired. Pending: backend character start, skills, fizzle, XP/level-up, HUD skill UI. |
-| v0.9 Flutter-native gameplay | TODO | Architecture pivot documented. Implement after human review of [flutter-native-migration.md](flutter-native-migration.md). No gameplay code migration has started in this branch. |
+| v0.9 Flutter-native gameplay | PARTIAL | Native Practice, local vs Bot shell, online board-delta screen, backend generated-tile protocol, and runtime bridge removal are in progress. Remaining: backend seed-field cleanup, richer bot/player-state effects, animations/reconnect/result hardening, and regression closeout. |
 
 ---
 
@@ -1436,7 +1436,7 @@ Single new milestone. Two foundation tasks gate the rest; integration follows in
 
 ---
 
-## v0.9 — Flutter-native game client + board-delta protocol  *(TODO)*
+## v0.9 — Flutter-native game client + board-delta protocol  *(PARTIAL)*
 
 This milestone replaces the embedded Phaser runtime with Flutter-native gameplay and changes online board sync from seed replay to server-authored flat board tables / generated-tile deltas. Competitive modes have no point score. Read [flutter-native-migration.md](flutter-native-migration.md) before starting any task in this section.
 
@@ -1611,23 +1611,24 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 
 ### Sub-track F — Retire legacy runtime path
 
-**T-v0.9-F01** (PARTIAL) · Remove game-view bootstrap from Flutter routes
+**T-v0.9-F01** (DONE) · Remove game-view bootstrap from Flutter routes
 - **Req:** NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-C02, T-v0.9-C03, T-v0.9-D02
 - **Context:** [flutter-native-migration § Migration plan](flutter-native-migration.md#migration-plan-step-by-step).
 - **Inputs:** `apps/frontend/lib/router.dart`, bridge services, game-view bootstrap services.
 - **Outputs:** Flutter routing/service changes that point all modes to native Flutter screens; obsolete bridge/bootstrap code removed or isolated as legacy.
 - **Implementation Notes:** Do not delete `packages/game-view` until CI/build references are removed and parity tests pass.
-- **Status:** Practice, vs Bot, and vs Human character-select routes now enter Flutter-native screens. The legacy `/match` route, bridge/bootstrap services, and `packages/game-view` remain for compatibility and old tests until parity cleanup.
+- **Status:** Practice, vs Bot, and vs Human character-select routes enter Flutter-native screens. The legacy `/match` route, bridge/bootstrap services, `MatchSessionLauncher`, `GameViewHandle`, and WebView dependency were removed from the Flutter app. `packages/game-view` remains as historical non-runtime reference.
 - **Acceptance:**
   - Practice, vs Bot, and vs Human route to Flutter-native gameplay.
   - No runtime path loads a WebView/iframe for gameplay.
 
-**T-v0.9-F02** (TODO) · Docker/CI/build cleanup
+**T-v0.9-F02** (DONE) · Docker/CI/build cleanup
 - **Req:** NFR-11, NFR-12 · **Size:** M · **Deps:** T-v0.9-F01
 - **Context:** [system-design § 6](system-design.md#6-deployment-topology-v10).
 - **Inputs:** `docker-compose.yml`, Dockerfiles, package scripts, CI docs.
 - **Outputs:** Build pipeline updates that no longer build or serve `packages/game-view` for the product runtime.
 - **Implementation Notes:** Keep backend/shared-js builds intact. If `packages/game-view` remains temporarily for archive/reference, mark it explicitly non-runtime.
+- **Status:** `apps/frontend/Dockerfile` builds only Flutter Web, `nginx.conf` serves only `/`, `docker-compose.yml` no longer passes game-view build args, `ops/test` no longer copies/tests game-view, and root npm workspaces exclude `packages/game-view`.
 - **Acceptance:**
   - Docker build succeeds without requiring the Phaser/Vite product bundle.
   - Flutter Web/native builds run gameplay without a second embedded bundle.

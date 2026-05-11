@@ -4,9 +4,9 @@ State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the p
 
 ## What's done in code before the v0.9 pivot
 
-- **403 tests** green via Docker: shared-js 39, game-view 35, backend 148
-  (81 unit + 67 integration + 4 DATABASE_URL-skipped), frontend 181.
-- Legacy bridge contract + transports + integration test (TS + Dart parity guards). This runtime path is retired in v0.9.
+- Docker npm tests now cover active shared-js + backend suites only; the
+  historical game-view suite is no longer part of required product checks.
+- Legacy bridge contract/transports were removed from the Flutter runtime path in v0.9.
 - Identity flow: handshake room-token verification, HTTP `/matchmaking/{join,resume}`, `/account/delete`, `/user/history`.
 - Local-account auth (username + password) — coexists with future SSO.
 - Persistence: `users`, `match_history`, deletion + tombstone, DB-outage buffering.
@@ -20,7 +20,7 @@ State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the p
 | Protocol | Online vs Human payloads use flat board/dimensions/version, generated tile arrays with deterministic refill order, and `board_replaced`; no client-visible seed replay or competitive score fields. |
 | Flutter local modes | Practice is Flutter-native, score-only, endless until leave; vs Bot is local with Dart judge/generator and no point score. |
 | Flutter online mode | Flutter Socket.IO client consumes room tokens directly and renders only server-authored board state. |
-| Legacy removal | No runtime route loads Phaser through WebView/iframe; Docker/CI no longer require the game-view bundle for product builds. |
+| Legacy removal | DONE for runtime/build: no runtime route loads Phaser through WebView/iframe; Docker/CI no longer require the game-view bundle for product builds. |
 | Regression | Practice, vs Bot, online two-client match, no-legal-move replacement, rejoin, reduced motion, keyboard, Docker build, and platform smoke tests recorded. |
 
 ## Gating actions remaining

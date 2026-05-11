@@ -1,6 +1,6 @@
 # Flutter-Native Game Client Migration
 
-Status: proposed on 2026-05-11. This document is the review checklist for replacing the current Flutter-shell-plus-Phaser embed with a full Flutter game client and a pure Dart game library.
+Status: implementation in progress on 2026-05-11. This document is the review checklist for replacing the current Flutter-shell-plus-Phaser embed with a full Flutter game client and a pure Dart game library.
 
 ## 1. Decision
 
@@ -39,7 +39,7 @@ apps/
       net/                 Dart Socket.IO client wrappers for online matches
       screens/             Sign-in, home, character select, match, result, account
 packages/
-  game-view/               legacy Phaser client; delete after migration
+  game-view/               historical Phaser client reference; non-runtime
   shared-js/               backend TS support only after migration, then shrink/rename later
 ```
 
@@ -160,12 +160,12 @@ The new match UI is Flutter-native:
 
 ## 10. Migration Plan
 
-Current implementation status: steps 1-3 are implemented; step 4 has a native
-local PvE shell with first-legal-move bot behaviour; step 5 has a typed native
-Socket.IO board-delta client; step 7 has an initial online Flutter screen that
-renders server-authored flat boards and handles `move_resolved` /
-`board_replaced`. Steps 6 and 8 remain partial because legacy seed/bridge fields
-are still present for compatibility until the old runtime path is retired.
+Current implementation status: steps 1-5 and 8-9 are implemented for the active
+runtime. Step 6 is partial because backend room internals and some transitional
+tests still retain private/legacy seed and grid fields while client-visible
+board-delta payloads are being tightened. Step 7 has an initial online Flutter
+screen that renders server-authored flat boards and handles `move_resolved` /
+`board_replaced`; animation, reconnect hardening, and result handling remain.
 
 1. **Document and freeze target protocol.**
    Update `requirement.md`, `system-design.md`, `CLAUDE.md`, and `implementation-plan.md`. Add protocol fixtures for board packets before code changes.
@@ -190,9 +190,11 @@ are still present for compatibility until the old runtime path is retired.
 
 8. **Retire Phaser bridge path.**
    Delete or quarantine `packages/game-view`, bridge transports, `GameViewHandle`, iframe/WebView bootstrap, and nginx `/game/` packaging once Flutter online play is green.
+   Current code status: Flutter bridge transports, `GameViewHandle`, `MatchSessionLauncher`, `/match`, WebView dependency, and nginx `/game/` packaging are removed from the active Flutter/runtime path. `packages/game-view/` remains in the repo only as historical reference.
 
 9. **Update Docker and CI.**
    Remove game-view build stage from frontend Dockerfile, remove npm game-view tests from required checks, add Flutter game-core/widget/integration tests.
+   Current code status: frontend Docker builds only the Flutter Web app, the test Docker image runs active shared-js/backend suites, and npm workspaces no longer include `packages/game-view`.
 
 10. **Regression matrix.**
    Verify Practice endless mode, local vs Bot, online two-client shared board, no-legal-move replacement notification, rejoin board snapshot, token refresh, account deletion, and production Docker build.
