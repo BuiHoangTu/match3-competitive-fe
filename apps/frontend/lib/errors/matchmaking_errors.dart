@@ -11,7 +11,7 @@ sealed class MatchmakingError implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
-/// 401 — the Firebase idToken was rejected. Shell should refresh + retry,
+/// 401 — the app session token was rejected. Shell should refresh + retry,
 /// or route to sign-in if refresh also fails.
 class MatchmakingAuthRejected extends MatchmakingError {
   const MatchmakingAuthRejected(super.message);

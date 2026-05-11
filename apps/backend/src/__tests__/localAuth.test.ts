@@ -202,7 +202,7 @@ describe("AuthMiddleware accepts a local session token", () => {
     await expect(verifyToken(null)).rejects.toBeInstanceOf(AuthError);
   });
 
-  it("verifyToken throws when neither local nor Firebase recognise the token", async () => {
+  it("verifyToken throws when neither local nor test verifier recognises the token", async () => {
     // Three-part string that isn't a valid HS256 JWT signed with our secret.
     await expect(verifyToken("aaa.bbb.ccc")).rejects.toBeInstanceOf(AuthError);
   });
@@ -355,7 +355,7 @@ describe("POST /auth/login", () => {
 });
 
 describe("session token works against /matchmaking/join", () => {
-  it("verifies through verifyToken without Firebase", async () => {
+  it("verifies through verifyToken without external auth", async () => {
     const store = new InMemoryLocalAccountStore();
     await withTestServer(async (port) => {
       const reg = await postJson(port, "/auth/register", {

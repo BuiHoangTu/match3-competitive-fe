@@ -7,7 +7,7 @@
 -- Up Migration
 
 CREATE TABLE IF NOT EXISTS user_progress (
-  -- Same identifier used throughout the system (Firebase UID or local:* id).
+  -- Same app account identifier used throughout the system.
   user_id              TEXT        PRIMARY KEY
                                    REFERENCES users(user_id) ON DELETE CASCADE,
   -- Accumulated experience points. Never negative.

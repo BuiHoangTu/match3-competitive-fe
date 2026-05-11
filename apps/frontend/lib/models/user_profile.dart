@@ -1,6 +1,6 @@
 // Typed user profile passed to screens that display signed-in user info.
-// Populated by the auth service (T-v0.6-C05). The shell UI depends only on
-// this value object — never on firebase_auth types directly.
+// Populated by the auth service. The shell UI depends only on this value
+// object, not provider-specific SDK types.
 
 /// Immutable snapshot of the currently signed-in user's display data.
 class UserProfile {

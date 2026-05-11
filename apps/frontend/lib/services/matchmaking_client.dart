@@ -6,9 +6,9 @@
 /// - POST /matchmaking/join   — find an opponent, receive a room token
 /// - POST /matchmaking/resume — reissue a token for an existing slot
 ///
-/// Auth: Firebase idToken in `Authorization: Bearer <idToken>` header. The
-/// idToken **never** crosses the shell/game bridge (AR-3) — this client is
-/// the only place the idToken meets the network.
+/// Auth: app session token in `Authorization: Bearer <token>` header. The
+/// session token never crosses the shell/game bridge (AR-3); online gameplay
+/// sockets use room tokens instead.
 library;
 
 import 'dart:async';
@@ -96,14 +96,14 @@ class MatchmakingClient {
   /// Throws [MatchmakingAuthRejected] on 401, [MatchmakingActiveRoom] on 409,
   /// [MatchmakingBadRequest] on 400, [MatchmakingTransportError] otherwise.
   Future<MatchmakingResult> join({
-    required String idToken,
+    required String sessionToken,
     required MatchmakingMode mode,
     String characterId = 'cat',
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/join');
     return _send(
       uri: uri,
-      idToken: idToken,
+      sessionToken: sessionToken,
       body: {
         'mode': mode.wire,
         'characterId': characterId,
@@ -117,13 +117,13 @@ class MatchmakingClient {
   /// Throws [MatchmakingAuthRejected] on 401, [MatchmakingForbidden] on 403,
   /// [MatchmakingRoomGone] on 410.
   Future<MatchmakingResult> resume({
-    required String idToken,
+    required String sessionToken,
     required String roomId,
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/resume');
     return _send(
       uri: uri,
-      idToken: idToken,
+      sessionToken: sessionToken,
       body: {'roomId': roomId},
     );
   }
@@ -145,14 +145,14 @@ class MatchmakingClient {
   /// The caller's responsibility: on transport error, treat as "no active
   /// session" and proceed with the local launch (be permissive when offline).
   Future<ActiveSession?> getActiveSession({
-    required String idToken,
+    required String sessionToken,
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/status');
     late http.Response response;
     try {
       response = await _get(uri, headers: {
         'Accept': 'application/json',
-        'Authorization': 'Bearer $idToken',
+        'Authorization': 'Bearer $sessionToken',
       });
     } on Exception catch (e) {
       throw MatchmakingTransportError('Network error: $e');
@@ -187,7 +187,7 @@ class MatchmakingClient {
 
   Future<MatchmakingResult> _send({
     required Uri uri,
-    required String idToken,
+    required String sessionToken,
     required Map<String, Object?> body,
   }) async {
     late http.Response response;
@@ -196,7 +196,7 @@ class MatchmakingClient {
         uri,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
+          'Authorization': 'Bearer $sessionToken',
         },
         body: jsonEncode(body),
       );

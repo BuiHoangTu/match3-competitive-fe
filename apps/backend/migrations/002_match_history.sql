@@ -8,7 +8,7 @@
 CREATE TABLE IF NOT EXISTS match_history (
   -- Server-generated UUID, created at match_start (RoomManager).
   match_id    TEXT        PRIMARY KEY,
-  -- Firebase UIDs for each player slot. Set to a tombstone after account deletion.
+  -- App account ids for each player slot. Set to a tombstone after account deletion.
   -- Nullable to allow anonymous / bot opponents (p2_user_id = NULL for a bot match
   -- where we do not persist the bot identity).
   p1_user_id  TEXT,

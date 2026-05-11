@@ -2,15 +2,15 @@
  * T-v0.6-D09, D10 — HTTP integration tests for /matchmaking/join, /resume,
  * and /matchmaking/status.
  *
- * Uses the in-process createMatch3Server() factory. Mocks the Firebase Admin
- * verifyIdToken via setVerifyIdTokenImpl so no Firebase project is required.
+ * Uses the in-process createMatch3Server() factory. Mocks the local session verifier
+ * externalTokenVerifier via setExternalTokenVerifierForTests so no external auth provider is required.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startServer, type ServerHandle } from "../server";
 import {
-  setVerifyIdTokenImpl,
-  resetVerifyIdTokenImpl,
+  setExternalTokenVerifierForTests,
+  resetExternalTokenVerifierForTests,
   clearTokenCache,
 } from "../AuthMiddleware";
 import { verify as verifyRoomToken } from "../RoomTokenSigner";
@@ -90,17 +90,17 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    // Mock Firebase: any non-empty token becomes `user:<token>`; "BAD" fails.
-    setVerifyIdTokenImpl(async (token: string) => {
+    // Mock session verification: any non-empty token becomes `user:<token>`; "BAD" fails.
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
       if (token.startsWith("EXPIRED")) throw new Error("Token expired");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     handle = await startServer(0);
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });
@@ -196,15 +196,15 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     handle = await startServer(0);
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });
@@ -261,15 +261,15 @@ describe("GET /matchmaking/status", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     handle = await startServer(0);
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });

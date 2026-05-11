@@ -191,8 +191,6 @@ export function startServer(port: number, opts: ServerOptions = {}): Promise<Ser
  *                  ephemeral / in-memory mode (data lost on restart).
  *   SESSION_TOKEN_SECRET — HMAC secret for local session tokens.
  *   ROOM_TOKEN_SECRET    — HMAC secret for room tokens.
- *   FIREBASE_PROJECT_ID + GOOGLE_APPLICATION_CREDENTIALS — optional;
- *                  enables Apple/Google SSO once configured.
  */
 async function bootstrap(): Promise<void> {
   const { initSessionSecret } = await import("./LocalSessionSigner");

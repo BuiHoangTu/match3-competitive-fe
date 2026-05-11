@@ -1,8 +1,8 @@
 /// T-v0.6-F06 · Shell account HTTP client
 ///
 /// Single endpoint:
-///   POST /account/delete — anonymise match_history + delete users row +
-///                           revoke Firebase user. Auth: Firebase idToken.
+///   POST /account/delete — anonymise match_history + delete users row.
+///                           Auth: app session token.
 ///
 /// On success the shell signs out and routes back to /sign-in.
 library;
@@ -20,7 +20,7 @@ sealed class AccountDeleteError implements Exception {
   String toString() => 'AccountDeleteError($message)';
 }
 
-/// 401 — Firebase idToken invalid or expired.
+/// 401 — app session token invalid or expired.
 class AccountDeleteAuthRejected extends AccountDeleteError {
   const AccountDeleteAuthRejected(super.message);
 }
@@ -64,7 +64,7 @@ class AccountClient {
   /// Resolves on 200 (account fully deleted or already-deleted idempotent
   /// path). Throws on auth, active-match, or transport errors per the typed
   /// error hierarchy.
-  Future<void> delete({required String idToken}) async {
+  Future<void> delete({required String sessionToken}) async {
     final uri = Uri.parse('$baseUrl/account/delete');
     late http.Response response;
     try {
@@ -72,7 +72,7 @@ class AccountClient {
         uri,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
+          'Authorization': 'Bearer $sessionToken',
         },
         body: jsonEncode(const <String, Object?>{}),
       );
@@ -84,7 +84,7 @@ class AccountClient {
     if (status == 200) return;
 
     if (status == 401) {
-      throw const AccountDeleteAuthRejected('idToken rejected by server');
+      throw const AccountDeleteAuthRejected('sessionToken rejected by server');
     }
     if (status == 409) {
       throw const AccountDeleteActiveMatch(

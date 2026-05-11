@@ -10,8 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startServer, type ServerHandle } from "../server";
 import {
-  setVerifyIdTokenImpl,
-  resetVerifyIdTokenImpl,
+  setExternalTokenVerifierForTests,
+  resetExternalTokenVerifierForTests,
   clearTokenCache,
 } from "../AuthMiddleware";
 import {
@@ -52,9 +52,9 @@ describe("GET /user/history (T-v0.6-E08)", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
@@ -64,7 +64,7 @@ describe("GET /user/history (T-v0.6-E08)", () => {
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });
@@ -150,9 +150,9 @@ describe("POST /account/delete (T-v0.6-F01)", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
@@ -162,7 +162,7 @@ describe("POST /account/delete (T-v0.6-F01)", () => {
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });
@@ -236,9 +236,9 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
 
   beforeEach(async () => {
     clearTokenCache();
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       if (token === "BAD") throw new Error("invalid");
-      return { uid: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
+      return { userId: `user:${token}`, exp: Math.floor(Date.now() / 1000) + 3600 };
     });
     userStore = new InMemoryUserStore();
     matchHistoryStore = new InMemoryMatchHistoryStore();
@@ -248,7 +248,7 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
   });
 
   afterEach(async () => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
     await handle.close();
   });

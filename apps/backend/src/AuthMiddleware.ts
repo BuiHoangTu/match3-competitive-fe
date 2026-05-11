@@ -4,13 +4,8 @@
  * T-v0.6-D05 · In-memory token cache
  * T-v0.6-D06 · Emit auth_token_rejected on stale/invalid token mid-session
  *
- * Uses firebase-admin/auth verifyIdToken. Caches results keyed by SHA-256 of
- * the raw token. TTL = min(exp - now, TOKEN_CACHE_MAX_TTL_MS).
- *
- * NOTE: firebase-admin requires initialisation before use. Production deployments
- * must call `initializeApp()` with a service-account credential before this
- * module is imported. Tests can mock the module or initialise with
- * `initializeApp({ projectId: 'test' })` before calling verifyToken.
+ * Uses local backend session tokens. Caches results keyed by SHA-256 of the raw
+ * token. TTL = min(exp - now, TOKEN_CACHE_MAX_TTL_MS).
  */
 
 import { createHash } from "crypto";
@@ -30,33 +25,24 @@ interface CacheEntry {
   tokenExpSec: number;
 }
 
-/** Lazy-loaded verifyIdToken function to allow test mocking. */
-type VerifyIdTokenFn = (token: string) => Promise<{ uid: string; exp: number }>;
-
-/** Injectable verifier — defaults to real firebase-admin; overridden in tests. */
-let _verifyIdToken: VerifyIdTokenFn | null = null;
-
-/**
- * Override the verifyIdToken implementation. Call this in tests to avoid
- * hitting the real Firebase Admin SDK.
- */
-export function setVerifyIdTokenImpl(fn: VerifyIdTokenFn): void {
-  _verifyIdToken = fn;
-}
-
-/**
- * Reset to the real firebase-admin implementation. Useful after tests.
- */
-export function resetVerifyIdTokenImpl(): void {
-  _verifyIdToken = null;
-}
-
 /** SHA-256 hash of token string → CacheEntry. */
 const tokenCache = new Map<string, CacheEntry>();
+
+type ExternalTokenVerifier = (token: string) => Promise<{ userId: string; exp?: number }>;
+
+let externalTokenVerifierForTests: ExternalTokenVerifier | null = null;
 
 /** Clear the entire token cache (useful between tests). */
 export function clearTokenCache(): void {
   tokenCache.clear();
+}
+
+export function setExternalTokenVerifierForTests(verifier: ExternalTokenVerifier): void {
+  externalTokenVerifierForTests = verifier;
+}
+
+export function resetExternalTokenVerifierForTests(): void {
+  externalTokenVerifierForTests = null;
 }
 
 function hashToken(token: string): string {
@@ -74,22 +60,6 @@ function evictExpired(): void {
     if (entry.expiresAtMs <= now) {
       tokenCache.delete(key);
     }
-  }
-}
-
-async function getVerifier(): Promise<VerifyIdTokenFn | null> {
-  if (_verifyIdToken) return _verifyIdToken;
-  // Lazy-load real firebase-admin/auth to allow test mocking without importing.
-  // Local-account deploys may not have firebase-admin initialised — return
-  // null in that case so the caller can decide whether to reject.
-  try {
-    const { getAuth } = await import("firebase-admin/auth");
-    // Probe: getAuth() throws if no app initialised. We catch that here and
-    // return null to signal "Firebase auth unavailable in this deployment".
-    getAuth();
-    return (token: string) => getAuth().verifyIdToken(token);
-  } catch {
-    return null;
   }
 }
 
@@ -141,44 +111,35 @@ export async function verifyToken(token: string | undefined | null): Promise<Ver
     return { userId: localResult.userId, tokenExpSec };
   }
 
-  // Fall back to Firebase verification, if available.
-  const verifier = await getVerifier();
-  if (!verifier) {
-    throw new AuthError(
-      AUTH_INVALID_TOKEN,
-      "Token not a valid local session and Firebase auth unavailable"
-    );
-  }
+  if (externalTokenVerifierForTests) {
+    try {
+      const result = await externalTokenVerifierForTests(token);
+      if (!result.userId) {
+        throw new AuthError(AUTH_INVALID_TOKEN, "Token missing user id");
+      }
 
-  let decoded: { uid: string; exp: number };
-  try {
-    decoded = await verifier(token);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/expired|exp/i.test(msg)) {
-      throw new AuthError(AUTH_EXPIRED, `Token expired: ${msg}`);
+      const tokenExpSec = result.exp ?? Math.floor((nowMs() + TOKEN_CACHE_MAX_TTL_MS) / 1000);
+      const tokenExpMs = tokenExpSec * 1000;
+      const ttlMs = Math.min(tokenExpMs - nowMs(), TOKEN_CACHE_MAX_TTL_MS);
+      if (ttlMs <= 0) throw new AuthError(AUTH_EXPIRED, "Token already expired");
+
+      tokenCache.set(hash, {
+        userId: result.userId,
+        expiresAtMs: nowMs() + ttlMs,
+        tokenExpSec,
+      });
+      return { userId: result.userId, tokenExpSec };
+    } catch (err) {
+      if (err instanceof AuthError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.toLowerCase().includes("expired")) {
+        throw new AuthError(AUTH_EXPIRED, message);
+      }
+      throw new AuthError(AUTH_INVALID_TOKEN, message);
     }
-    throw new AuthError(AUTH_INVALID_TOKEN, `Token invalid: ${msg}`);
   }
 
-  if (!decoded.uid) {
-    throw new AuthError(AUTH_INVALID_TOKEN, "Token missing uid claim");
-  }
-
-  const tokenExpMs = decoded.exp * 1000;
-  const ttlMs = Math.min(tokenExpMs - nowMs(), TOKEN_CACHE_MAX_TTL_MS);
-  if (ttlMs <= 0) {
-    throw new AuthError(AUTH_EXPIRED, "Token already expired");
-  }
-
-  const entry: CacheEntry = {
-    userId: decoded.uid,
-    expiresAtMs: nowMs() + ttlMs,
-    tokenExpSec: decoded.exp,
-  };
-  tokenCache.set(hash, entry);
-
-  return { userId: decoded.uid, tokenExpSec: decoded.exp };
+  throw new AuthError(AUTH_INVALID_TOKEN, "Token not a valid local session");
 }
 
 /** Structured error thrown by {@link verifyToken}. */

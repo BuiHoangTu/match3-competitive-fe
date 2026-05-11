@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@match3/shared-js": "*",
-    "firebase-admin": "^13.8.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.12.0",
     "socket.io": "^4.7.5"

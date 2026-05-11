@@ -5,8 +5,7 @@
  *   sub  — userId
  *   exp  — expiry (seconds since epoch, standard JWT claim)
  *   iat  — issued-at (seconds since epoch)
- *   kind — "session" (custom claim so AuthMiddleware can distinguish local
- *          sessions from Firebase id-tokens)
+ *   kind — "session" (custom claim so AuthMiddleware can identify app sessions)
  *
  * The Flutter client reads `expiresAt` as epoch ms; signSession returns that
  * in ms and verifySession returns exp in ms — both callers expect ms.

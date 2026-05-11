@@ -20,7 +20,7 @@ import '../models/user_profile.dart';
 /// Account settings screen.
 ///
 /// Accepts [profile] for display and [onDeleteAccountConfirmed] as the
-/// deletion handler stub. The actual Firebase account deletion is wired by
+/// deletion handler stub. The actual account deletion is wired by
 /// the auth agent in sub-track F (T-v0.6-F06).
 class AccountScreen extends StatelessWidget {
   const AccountScreen({

@@ -23,7 +23,6 @@ ARG BACKEND_URL=http://localhost:3001
 WORKDIR /app
 COPY apps/frontend/ apps/frontend/
 WORKDIR /app/apps/frontend
-RUN if [ ! -f firebase_options.dart ] && [ -f firebase_options.dart.example ]; then cp firebase_options.dart.example firebase_options.dart; fi
 RUN flutter pub get
 # GAME_URL is omitted: the bundle defaults to the relative path `/game/`,
 # served by the same nginx alongside the shell.

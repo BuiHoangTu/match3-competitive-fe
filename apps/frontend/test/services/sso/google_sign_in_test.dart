@@ -1,11 +1,11 @@
 /// Unit tests for [google_sign_in_service.dart].
 ///
 /// These tests focus on:
-///   1. Stub mode: getGoogleCredential() returns a non-null OAuthCredential.
+///   1. Stub mode: getGoogleCredential() returns non-null GoogleOAuthTokens.
 ///   2. Cancellation contract: a null return from GoogleSignIn.signIn()
 ///      propagates as null (no throw).
 ///   3. AuthProviderError wrapping: unexpected plugin errors become typed.
-///   4. The stub credential uses the Google provider ID.
+///   4. The stub token is JWT-shaped.
 ///
 /// Tests that exercise the real Google picker are integration tests
 /// (I-track, device required).
@@ -26,7 +26,7 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('getGoogleCredential() in stub mode', () {
-    test('returns non-null OAuthCredential in stub mode', () async {
+    test('returns non-null GoogleOAuthTokens in stub mode', () async {
       final credential = await getGoogleCredential();
       expect(credential, isNotNull,
           reason: 'Stub mode must return a credential, not null');
@@ -35,10 +35,11 @@ void main() {
             ? 'Run with --dart-define=AUTH_MODE=stub'
             : null);
 
-    test('returned credential has providerId google.com', () async {
+    test('returned token is JWT-shaped', () async {
       final credential = await getGoogleCredential();
       expect(credential, isNotNull);
-      expect(credential!.providerId, equals('google.com'));
+      expect(credential!.idToken.split('.'), hasLength(3));
+      expect(credential.accessToken, equals('stub-access-token'));
     },
         skip: const String.fromEnvironment('AUTH_MODE') != 'stub'
             ? 'Run with --dart-define=AUTH_MODE=stub'
@@ -100,8 +101,7 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('error wrapping (real path, no AUTH_MODE=stub)', () {
-    test(
-        'a generic plugin exception is wrapped into AuthProviderError',
+    test('a generic plugin exception is wrapped into AuthProviderError',
         () async {
       expect(
         () => getGoogleCredential(
@@ -184,9 +184,8 @@ class _CancellingGoogleSignIn implements GoogleSignIn {
   List<String> get scopes => const ['email', 'profile'];
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError(
-          '_CancellingGoogleSignIn.${invocation.memberName} not implemented');
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '_CancellingGoogleSignIn.${invocation.memberName} not implemented');
 }
 
 /// A [GoogleSignIn]-like class whose [signIn] throws [error].
@@ -204,7 +203,6 @@ class _FailingGoogleSignIn implements GoogleSignIn {
   List<String> get scopes => const ['email', 'profile'];
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError(
-          '_FailingGoogleSignIn.${invocation.memberName} not implemented');
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
+      '_FailingGoogleSignIn.${invocation.memberName} not implemented');
 }

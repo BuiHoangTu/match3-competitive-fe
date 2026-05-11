@@ -427,9 +427,6 @@ async function handleAccountDelete(
     const result = await deleteAccount(userId, {
       userStore: deps.persistence.userStore,
       matchHistoryStore: deps.persistence.matchHistoryStore,
-      // firebase-admin is optional; the HTTP layer doesn't wire it here so
-      // that unit tests don't need a Firebase project. Production deployments
-      // should pass a firebaseAuth reference through a higher-level factory.
     });
     if (result.deleted) {
       // T-v1.0-09: count successful deletions only.
@@ -437,7 +434,6 @@ async function handleAccountDelete(
     }
     sendJson(res, 200, {
       deleted: result.deleted,
-      firebaseRevoked: result.firebaseRevoked,
     });
   } catch (err) {
     console.error("[account_deletion] failed:", (err as Error).message);

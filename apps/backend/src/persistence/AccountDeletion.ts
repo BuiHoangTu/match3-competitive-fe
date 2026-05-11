@@ -5,11 +5,6 @@
  *   F02: anonymise match_history rows (tombstone userId in p1/p2 slots)
  *   F03: hard-delete the users row
  *
- * After commit:
- *   F04: call firebase-admin auth().deleteUser(uid) — best-effort; if it
- *        fails the DB changes are already committed. Failure is logged;
- *        a retry loop schedules one more attempt after 60 s.
- *
  * Tombstone format: "TOMBSTONE_<first-8-chars-of-SHA-256(userId)>"
  * The hash is irreversible — you cannot recover the original userId from it.
  *
@@ -27,13 +22,6 @@ export interface DeleteAccountDeps {
   userStore: UserStore;
   matchHistoryStore: MatchHistoryStore;
   /**
-   * Optional Firebase auth() reference. If omitted, the Firebase revocation
-   * step (F04) is skipped (useful in unit tests without a Firebase project).
-   */
-  firebaseAuth?: {
-    deleteUser(uid: string): Promise<void>;
-  };
-  /**
    * Optional Postgres pool client factory (defaults to getPool().connect()).
    * Injected in integration tests to pin the connection to a transaction.
    */
@@ -43,8 +31,6 @@ export interface DeleteAccountDeps {
 export interface DeleteAccountResult {
   /** true = row was found and deleted; false = row was already gone (idempotent). */
   deleted: boolean;
-  /** Firebase revocation outcome — null when firebaseAuth not provided. */
-  firebaseRevoked: boolean | null;
 }
 
 /** Derive a deterministic, irreversible tombstone tag from a userId. */
@@ -85,13 +71,7 @@ export async function deleteAccount(
     deleted = await _memDeleteAccount(userId, tombstone, deps);
   }
 
-  // F04: Firebase revocation — best-effort after DB commit.
-  let firebaseRevoked: boolean | null = null;
-  if (deps.firebaseAuth) {
-    firebaseRevoked = await _revokeFirebase(userId, deps.firebaseAuth);
-  }
-
-  return { deleted, firebaseRevoked };
+  return { deleted };
 }
 
 async function _pgDeleteAccount(
@@ -141,29 +121,4 @@ async function _memDeleteAccount(
   const row = await deps.userStore.findById(userId);
   await deps.userStore.delete(userId);
   return row !== null;
-}
-
-async function _revokeFirebase(
-  userId: string,
-  auth: { deleteUser(uid: string): Promise<void> }
-): Promise<boolean> {
-  try {
-    await auth.deleteUser(userId);
-    return true;
-  } catch (err) {
-    console.error(
-      `[account_deletion] Firebase deleteUser(${userId}) failed — scheduling retry:`,
-      (err as Error).message
-    );
-    // Best-effort single retry after 60 s.
-    setTimeout(() => {
-      auth.deleteUser(userId).catch((retryErr: unknown) => {
-        console.error(
-          `[account_deletion] Firebase deleteUser retry failed for ${userId}:`,
-          (retryErr as Error).message
-        );
-      });
-    }, 60_000);
-    return false;
-  }
 }

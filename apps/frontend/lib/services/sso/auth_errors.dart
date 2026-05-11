@@ -2,7 +2,7 @@
 ///
 /// The service never throws raw exceptions — it either returns null (for
 /// cancellation) or throws one of these typed classes so callers can
-/// pattern-match without depending on Firebase error codes.
+/// pattern-match without depending on provider plugin error codes.
 ///
 /// All classes extend [AuthError], which extends [Error] (not [Exception])
 /// because these represent programming-domain failures, not expected
@@ -19,7 +19,7 @@ sealed class AuthError extends Error {
   String toString() => '$runtimeType: $message${cause != null ? ' (caused by: $cause)' : ''}';
 }
 
-/// The device had no network connection (or Firebase was unreachable) when
+/// The device had no network connection when
 /// sign-in or token refresh was attempted.
 final class AuthNetworkError extends AuthError {
   AuthNetworkError([String message = 'No network connection during auth', Object? cause])
@@ -40,11 +40,10 @@ final class AuthProviderError extends AuthError {
   });
 }
 
-/// Firebase rejected a credential that was presented to it (e.g. the nonce did
-/// not match, or the token was already used).
+/// The backend rejected a provider credential that was presented to it.
 final class AuthInvalidCredentialError extends AuthError {
   AuthInvalidCredentialError([
-    String message = 'Firebase rejected the sign-in credential',
+    String message = 'The sign-in credential was rejected',
     Object? cause,
   ]) : super(message, cause: cause);
 }

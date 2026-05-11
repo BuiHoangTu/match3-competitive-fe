@@ -2,15 +2,15 @@
  * T-v0.6-D07 · Reject tokenless sockets (unit test)
  * T-v0.6-D08 · Server-side auth unit tests
  *
- * Tests AuthMiddleware.verifyToken with a fake Admin SDK mock.
+ * Tests AuthMiddleware.verifyToken with a fake external verifier hook.
  * Also tests that D07 enforces token presence on Socket.IO handshake.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   verifyToken,
-  setVerifyIdTokenImpl,
-  resetVerifyIdTokenImpl,
+  setExternalTokenVerifierForTests,
+  resetExternalTokenVerifierForTests,
   clearTokenCache,
   AuthError,
 } from "../AuthMiddleware";
@@ -22,14 +22,14 @@ import type { AddressInfo } from "net";
 // ── D08: verifyToken unit tests ───────────────────────────────────────────────
 
 function makeVerifier(opts: {
-  uid?: string;
+  userId?: string;
   exp?: number;
   throws?: string;
 }) {
   return async (_token: string) => {
     if (opts.throws) throw new Error(opts.throws);
     return {
-      uid: opts.uid ?? "user-abc",
+      userId: opts.userId ?? "user-abc",
       exp: opts.exp ?? Math.floor(Date.now() / 1000) + 3600,
     };
   };
@@ -41,34 +41,34 @@ describe("AuthMiddleware.verifyToken (T-v0.6-D08)", () => {
   });
 
   afterEach(() => {
-    resetVerifyIdTokenImpl();
+    resetExternalTokenVerifierForTests();
     clearTokenCache();
   });
 
   it("valid token: returns userId and tokenExpSec", async () => {
     const expSec = Math.floor(Date.now() / 1000) + 3600;
-    setVerifyIdTokenImpl(makeVerifier({ uid: "user-123", exp: expSec }));
+    setExternalTokenVerifierForTests(makeVerifier({ userId: "user-123", exp: expSec }));
     const result = await verifyToken("valid-token");
     expect(result.userId).toBe("user-123");
     expect(result.tokenExpSec).toBe(expSec);
   });
 
   it("expired token: throws AuthError with AUTH_EXPIRED code", async () => {
-    setVerifyIdTokenImpl(makeVerifier({ throws: "Token expired" }));
+    setExternalTokenVerifierForTests(makeVerifier({ throws: "Token expired" }));
     await expect(verifyToken("expired-token")).rejects.toSatisfy(
       (e: unknown) => e instanceof AuthError && (e as AuthError).code === AUTH_EXPIRED
     );
   });
 
   it("tampered/invalid token: throws AuthError with AUTH_INVALID_TOKEN code", async () => {
-    setVerifyIdTokenImpl(makeVerifier({ throws: "signature mismatch" }));
+    setExternalTokenVerifierForTests(makeVerifier({ throws: "signature mismatch" }));
     await expect(verifyToken("tampered-token")).rejects.toSatisfy(
       (e: unknown) => e instanceof AuthError && (e as AuthError).code === AUTH_INVALID_TOKEN
     );
   });
 
   it("missing token (null): throws AuthError with AUTH_MISSING_TOKEN code", async () => {
-    setVerifyIdTokenImpl(makeVerifier({ uid: "irrelevant" }));
+    setExternalTokenVerifierForTests(makeVerifier({ userId: "irrelevant" }));
     await expect(verifyToken(null)).rejects.toSatisfy(
       (e: unknown) => e instanceof AuthError && (e as AuthError).code === AUTH_MISSING_TOKEN
     );
@@ -80,34 +80,34 @@ describe("AuthMiddleware.verifyToken (T-v0.6-D08)", () => {
     );
   });
 
-  it("token with missing uid claim: throws AuthError with AUTH_INVALID_TOKEN", async () => {
-    setVerifyIdTokenImpl(async () => ({ uid: "", exp: Math.floor(Date.now() / 1000) + 3600 }));
-    await expect(verifyToken("no-uid-token")).rejects.toSatisfy(
+  it("token with missing userId claim: throws AuthError with AUTH_INVALID_TOKEN", async () => {
+    setExternalTokenVerifierForTests(async () => ({ userId: "", exp: Math.floor(Date.now() / 1000) + 3600 }));
+    await expect(verifyToken("no-userId-token")).rejects.toSatisfy(
       (e: unknown) => e instanceof AuthError && (e as AuthError).code === AUTH_INVALID_TOKEN
     );
   });
 
-  it("second verify within TTL hits cache (does not call verifyIdToken again)", async () => {
+  it("second verify within TTL hits cache (does not call externalTokenVerifier again)", async () => {
     let callCount = 0;
     const expSec = Math.floor(Date.now() / 1000) + 3600;
-    setVerifyIdTokenImpl(async () => {
+    setExternalTokenVerifierForTests(async () => {
       callCount++;
-      return { uid: "user-cached", exp: expSec };
+      return { userId: "user-cached", exp: expSec };
     });
 
     await verifyToken("my-token");
     await verifyToken("my-token");
 
-    // The second call must use the cache — verifyIdToken called exactly once.
+    // The second call must use the cache — externalTokenVerifier called exactly once.
     expect(callCount).toBe(1);
   });
 
   it("different tokens result in separate cache entries", async () => {
     let callCount = 0;
     const expSec = Math.floor(Date.now() / 1000) + 3600;
-    setVerifyIdTokenImpl(async (token: string) => {
+    setExternalTokenVerifierForTests(async (token: string) => {
       callCount++;
-      return { uid: `user-${token}`, exp: expSec };
+      return { userId: `user-${token}`, exp: expSec };
     });
 
     const r1 = await verifyToken("token-A");
@@ -119,7 +119,7 @@ describe("AuthMiddleware.verifyToken (T-v0.6-D08)", () => {
 
   it("already-expired token (exp in past) throws AUTH_EXPIRED without caching", async () => {
     const pastExp = Math.floor(Date.now() / 1000) - 10; // 10 s ago
-    setVerifyIdTokenImpl(async () => ({ uid: "user-x", exp: pastExp }));
+    setExternalTokenVerifierForTests(async () => ({ userId: "user-x", exp: pastExp }));
     await expect(verifyToken("stale-token")).rejects.toSatisfy(
       (e: unknown) => e instanceof AuthError && (e as AuthError).code === AUTH_EXPIRED
     );

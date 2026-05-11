@@ -1,7 +1,7 @@
 /// T-Local-05 · LocalAuthService — username/password auth.
 ///
 /// Implements [AuthStateInterface] (defined in router.dart) so the router can
-/// consume it interchangeably with FirebaseAuthService when SSO ships.
+/// consume it without depending on a specific auth provider.
 ///
 /// Talks to the backend endpoints:
 ///   POST /auth/register {username, email?, password} → 201 {sessionToken, userId, expiresAt}

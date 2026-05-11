@@ -1,12 +1,12 @@
 -- Migration 001: users table
--- Stores authenticated user profiles. user_id is the Firebase UID (string).
+-- Stores authenticated user profiles. user_id is the app account id (string).
 -- No email stored — data-minimisation principle (AR-6).
 -- deleted_at supports soft-delete for GDPR flows (F-track, T-v0.6-F03).
 
 -- Up Migration
 
 CREATE TABLE IF NOT EXISTS users (
-  -- Firebase UID — authoritative identity from the Auth provider.
+  -- App account id — authoritative identity from the auth layer.
   user_id      TEXT        PRIMARY KEY,
   -- Display name from OAuth provider (e.g. "Jane D."). Not unique.
   display_name TEXT        NOT NULL DEFAULT '',

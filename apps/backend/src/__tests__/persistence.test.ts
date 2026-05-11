@@ -258,8 +258,7 @@ describe("deleteAccount (T-v0.6-F01..F03)", () => {
     expect(matchHistoryStore.rows.get("m2")?.p2UserId).toBe(expectedTombstone);
     expect(matchHistoryStore.rows.get("m2")?.p1UserId).toBe("charlie");
 
-    // firebase not configured — revoked should be null.
-    expect(result.firebaseRevoked).toBeNull();
+    expect(result).toEqual({ deleted: true });
   });
 
   it("second deleteAccount call is a no-op (idempotent)", async () => {
@@ -274,46 +273,6 @@ describe("deleteAccount (T-v0.6-F01..F03)", () => {
     // Second call: no row found, deleted = false.
     expect(result2.deleted).toBe(false);
     // No throw.
-  });
-
-  it("F04: calls firebaseAuth.deleteUser after DB commit", async () => {
-    const userStore = new InMemoryUserStore();
-    const matchHistoryStore = new InMemoryMatchHistoryStore();
-    await userStore.upsert({ userId: "carol" });
-
-    let deletedUid: string | null = null;
-    const firebaseAuth = {
-      async deleteUser(uid: string) {
-        deletedUid = uid;
-      },
-    };
-
-    const result = await deleteAccount("carol", { userStore, matchHistoryStore, firebaseAuth });
-
-    expect(result.deleted).toBe(true);
-    expect(result.firebaseRevoked).toBe(true);
-    expect(deletedUid).toBe("carol");
-  });
-
-  it("F04: Firebase failure is non-fatal; DB changes committed", async () => {
-    const userStore = new InMemoryUserStore();
-    const matchHistoryStore = new InMemoryMatchHistoryStore();
-    await userStore.upsert({ userId: "dave" });
-
-    const firebaseAuth = {
-      async deleteUser(_uid: string) {
-        throw new Error("Firebase unavailable");
-      },
-    };
-
-    const result = await deleteAccount("dave", { userStore, matchHistoryStore, firebaseAuth });
-
-    // DB deletion succeeded.
-    expect(result.deleted).toBe(true);
-    // Firebase failed but didn't throw.
-    expect(result.firebaseRevoked).toBe(false);
-    // User row still deleted from DB.
-    expect(userStore.rows.has("dave")).toBe(false);
   });
 
   it("tombstoneFor produces a deterministic irreversible string", () => {

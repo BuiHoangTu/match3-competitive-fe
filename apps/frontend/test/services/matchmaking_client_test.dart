@@ -40,7 +40,7 @@ void main() {
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       final result = await client.join(
-        idToken: 'id-alice',
+        sessionToken: 'session-alice',
         mode: MatchmakingMode.turnBased,
       );
       expect(result.roomToken, 'room.jwt.abc');
@@ -60,7 +60,7 @@ void main() {
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       final result = await client.join(
-        idToken: 'id-alice',
+        sessionToken: 'session-alice',
         mode: MatchmakingMode.pve,
       );
       expect(result.opponent, isNull);
@@ -75,7 +75,7 @@ void main() {
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       final result = await client.join(
-        idToken: 'id-alice',
+        sessionToken: 'session-alice',
         mode: MatchmakingMode.turnBased,
       );
       expect(result.opponent?.isBot, true);
@@ -85,7 +85,7 @@ void main() {
       final stub = _Stub(status: 401, body: {'code': 'AUTH_INVALID_TOKEN'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       expect(
-        () => client.join(idToken: 'bad', mode: MatchmakingMode.turnBased),
+        () => client.join(sessionToken: 'bad', mode: MatchmakingMode.turnBased),
         throwsA(isA<MatchmakingAuthRejected>()),
       );
     });
@@ -97,7 +97,8 @@ void main() {
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       try {
-        await client.join(idToken: 'alice', mode: MatchmakingMode.turnBased);
+        await client.join(
+            sessionToken: 'alice', mode: MatchmakingMode.turnBased);
         fail('expected throw');
       } on MatchmakingActiveRoom catch (e) {
         expect(e.roomId, 'existing-room-xyz');
@@ -108,7 +109,8 @@ void main() {
       final stub = _Stub(status: 400, body: {'code': 'BAD_MODE'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       expect(
-        () => client.join(idToken: 'alice', mode: MatchmakingMode.turnBased),
+        () =>
+            client.join(sessionToken: 'alice', mode: MatchmakingMode.turnBased),
         throwsA(isA<MatchmakingBadRequest>()),
       );
     });
@@ -117,7 +119,8 @@ void main() {
       final stub = _Stub(status: 500, body: 'oops');
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       expect(
-        () => client.join(idToken: 'alice', mode: MatchmakingMode.turnBased),
+        () =>
+            client.join(sessionToken: 'alice', mode: MatchmakingMode.turnBased),
         throwsA(isA<MatchmakingTransportError>()),
       );
     });
@@ -128,7 +131,8 @@ void main() {
         postFn: (_, {headers, body}) => throw const _FakeSocketException(),
       );
       expect(
-        () => client.join(idToken: 'alice', mode: MatchmakingMode.turnBased),
+        () =>
+            client.join(sessionToken: 'alice', mode: MatchmakingMode.turnBased),
         throwsA(isA<MatchmakingTransportError>()),
       );
     });
@@ -143,7 +147,7 @@ void main() {
         'opponent': {'userId': 'user-bob'},
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
-      final result = await client.resume(idToken: 'alice', roomId: 'r1');
+      final result = await client.resume(sessionToken: 'alice', roomId: 'r1');
       expect(result.roomToken, 'room.jwt.refresh');
     });
 
@@ -151,7 +155,7 @@ void main() {
       final stub = _Stub(status: 410, body: {'code': 'ROOM_GONE'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       expect(
-        () => client.resume(idToken: 'alice', roomId: 'r1'),
+        () => client.resume(sessionToken: 'alice', roomId: 'r1'),
         throwsA(isA<MatchmakingRoomGone>()),
       );
     });
@@ -160,7 +164,7 @@ void main() {
       final stub = _Stub(status: 403, body: {'code': 'NOT_A_SLOT'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       expect(
-        () => client.resume(idToken: 'alice', roomId: 'r1'),
+        () => client.resume(sessionToken: 'alice', roomId: 'r1'),
         throwsA(isA<MatchmakingForbidden>()),
       );
     });
@@ -179,7 +183,7 @@ void main() {
           200,
         ),
       );
-      final session = await client.getActiveSession(idToken: 'alice');
+      final session = await client.getActiveSession(sessionToken: 'alice');
       expect(session, isNotNull);
       expect(session!.mode, 'turn_based');
       expect(session.roomId, 'room-123');
@@ -191,7 +195,7 @@ void main() {
         getFn: (url, {headers}) async =>
             http.Response(jsonEncode({'active': false}), 200),
       );
-      final session = await client.getActiveSession(idToken: 'alice');
+      final session = await client.getActiveSession(sessionToken: 'alice');
       expect(session, isNull);
     });
 
@@ -204,7 +208,7 @@ void main() {
         ),
       );
       expect(
-        () => client.getActiveSession(idToken: 'bad'),
+        () => client.getActiveSession(sessionToken: 'bad'),
         throwsA(isA<MatchmakingAuthRejected>()),
       );
     });
@@ -215,7 +219,7 @@ void main() {
         getFn: (url, {headers}) async => http.Response('boom', 500),
       );
       expect(
-        () => client.getActiveSession(idToken: 'alice'),
+        () => client.getActiveSession(sessionToken: 'alice'),
         throwsA(isA<MatchmakingTransportError>()),
       );
     });
@@ -226,7 +230,7 @@ void main() {
         getFn: (url, {headers}) => throw const _FakeSocketException(),
       );
       expect(
-        () => client.getActiveSession(idToken: 'alice'),
+        () => client.getActiveSession(sessionToken: 'alice'),
         throwsA(isA<MatchmakingTransportError>()),
       );
     });
@@ -240,7 +244,7 @@ void main() {
           return http.Response(jsonEncode({'active': false}), 200);
         },
       );
-      await client.getActiveSession(idToken: 'XYZ');
+      await client.getActiveSession(sessionToken: 'XYZ');
       expect(capturedHeaders?['Authorization'], 'Bearer XYZ');
     });
   });
@@ -267,7 +271,7 @@ void main() {
         },
       );
       await client.join(
-        idToken: 'XYZ',
+        sessionToken: 'XYZ',
         mode: MatchmakingMode.pve,
         characterId: 'cat',
       );

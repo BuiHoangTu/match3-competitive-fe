@@ -13,7 +13,7 @@ void main() {
         baseUrl: 'http://test',
         postFn: (uri, {headers, body}) async => http.Response('{}', 200),
       );
-      await client.delete(idToken: 'tok');
+      await client.delete(sessionToken: 'tok');
     });
 
     test('401 throws AccountDeleteAuthRejected', () async {
@@ -22,7 +22,7 @@ void main() {
         postFn: (uri, {headers, body}) async => http.Response('unauth', 401),
       );
       expect(
-        () => client.delete(idToken: 'bad'),
+        () => client.delete(sessionToken: 'bad'),
         throwsA(isA<AccountDeleteAuthRejected>()),
       );
     });
@@ -33,7 +33,7 @@ void main() {
         postFn: (uri, {headers, body}) async => http.Response('active', 409),
       );
       expect(
-        () => client.delete(idToken: 'tok'),
+        () => client.delete(sessionToken: 'tok'),
         throwsA(isA<AccountDeleteActiveMatch>()),
       );
     });
@@ -44,7 +44,7 @@ void main() {
         postFn: (uri, {headers, body}) async => http.Response('boom', 500),
       );
       expect(
-        () => client.delete(idToken: 'tok'),
+        () => client.delete(sessionToken: 'tok'),
         throwsA(isA<AccountDeleteTransportError>()),
       );
     });
@@ -57,7 +57,7 @@ void main() {
         },
       );
       expect(
-        () => client.delete(idToken: 'tok'),
+        () => client.delete(sessionToken: 'tok'),
         throwsA(isA<AccountDeleteTransportError>()),
       );
     });
@@ -71,7 +71,7 @@ void main() {
           return http.Response('{}', 200);
         },
       );
-      await client.delete(idToken: 'abcdef');
+      await client.delete(sessionToken: 'abcdef');
       expect(capturedHeaders?['Authorization'], equals('Bearer abcdef'));
       expect(capturedHeaders?['Content-Type'], equals('application/json'));
     });
