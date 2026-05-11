@@ -16,19 +16,15 @@ register with any username + password, and play.
 
 | Endpoint | What |
 |---|---|
-| http://localhost:8080/ | Flutter shell |
-| http://localhost:8080/game/ | Embedded Phaser bundle (same origin as the shell — postMessage and Socket.IO behave) |
+| http://localhost:8080/ | Flutter Web app |
 | http://localhost:3001/healthz | Backend health probe |
 
 The first time, `docker compose build` takes ~5 min (Flutter SDK pull). After
 that, `docker compose up` boots in under 30 seconds.
 
-Three containers run: `postgres`, `backend`, `shell`. The shell container's
-nginx serves both the Flutter app at `/` and the Phaser bundle at `/game/`,
-so the iframe stays same-origin and there's nothing to plumb between hosts.
-
-For standalone Phaser dev iteration outside Docker, run `npm run dev` in
-`packages/game-view/` — that gives you http://localhost:5173 with hot-reload.
+Three containers run: `postgres`, `backend`, `frontend`. The frontend
+container's nginx serves the Flutter Web app at `/`; the in-match game UI is
+Flutter-native and connects to the backend directly.
 
 ## What's wired
 
@@ -49,14 +45,12 @@ For standalone Phaser dev iteration outside Docker, run `npm run dev` in
 |---------|------|---------|------------|
 | `postgres` | 5433 | Database | PostgreSQL 16 (Alpine) |
 | `backend` | 3001 | Socket.IO + matchmaking | Node.js 20 + Express |
-| `frontend` | 5173 | Standalone Phaser game | Vite + nginx |
-| `shell` | 8080 | Flutter web shell + embedded game | Flutter + nginx |
+| `frontend` | 8080 | Flutter Web app | Flutter + nginx |
 
 ## Architecture
 
-The `shell` service serves both the Flutter shell and the embedded Phaser game from the **same origin** (required for `postMessage` bridge):
-- `/` → Flutter shell (from `shell/build/web/`)
-- `/game/` → Phaser game (from `packages/game-view/dist/`)
+The `frontend` service serves the Flutter Web app from `/`. The old embedded
+game route is no longer part of the product runtime.
 
 ## Configuration
 
@@ -68,7 +62,6 @@ Environment variables (set in `docker-compose.yml` or `.env`):
 | `ROOM_TOKEN_SECRET` | dev placeholder | Replace in any non-local deployment with `openssl rand -hex 32` |
 | `SESSION_TOKEN_SECRET` | dev placeholder | Same — `openssl rand -hex 32` |
 | `BACKEND_URL` (build arg) | `http://localhost:3001` | Backend URL baked into the Flutter Web build |
-| `VITE_BACKEND_URL` (build arg) | `http://localhost:3001` | Same backend URL baked into the embedded Phaser build |
 | `GOOGLE_APPLICATION_CREDENTIALS` | unset | Optional; only needed when SSO is enabled |
 
 ## Deploying on a remote host
@@ -82,16 +75,15 @@ cd match3-competitive
 export ROOM_TOKEN_SECRET=$(openssl rand -hex 32)
 export SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
 
-# Build with the host's public URL baked into the bundles
+# Build with the host's public URL baked into the Flutter Web bundle
 docker compose build \
-  --build-arg BACKEND_URL=https://your-host.example.com:3001 \
-  --build-arg VITE_BACKEND_URL=https://your-host.example.com:3001
+  --build-arg BACKEND_URL=https://your-host.example.com:3001
 docker compose up -d
 ```
 
 For TLS, run a reverse proxy (nginx, Caddy, traefik) in front of ports 8080
 and 3001. The backend ports must remain reachable from the user's browser
-because the embedded game opens a Socket.IO connection directly.
+because the Flutter client opens a Socket.IO connection directly.
 
 ## Enabling Google OAuth later
 

@@ -3,7 +3,6 @@
   "private": true,
   "workspaces": [
     "packages/shared-js",
-    "packages/game-view",
     "apps/backend"
   ]
 }

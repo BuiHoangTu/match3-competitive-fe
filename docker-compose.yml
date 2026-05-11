@@ -1,7 +1,5 @@
-# Three services. The shell container serves both the Flutter Web app and
-# the embedded Phaser bundle from the same origin (`/` and `/game/`), so
-# postMessage between shell ↔ game and the Socket.IO handshake from the
-# game iframe to the backend stay simple.
+# Three services. The frontend container serves the Flutter Web app; gameplay
+# is Flutter-native and connects to the backend directly over Socket.IO.
 #
 # Local development only — never expose the placeholder secrets in prod.
 
@@ -55,10 +53,9 @@ services:
       context: .
       dockerfile: apps/frontend/Dockerfile
       args:
-        # Backend origin baked into the shell + game bundles. Override when
+        # Backend origin baked into the Flutter Web bundle. Override when
         # deploying behind a different domain.
         BACKEND_URL: http://localhost:3001
-        VITE_BACKEND_URL: http://localhost:3001
     ports:
       - "8080:80"
     cpus: 2.0
