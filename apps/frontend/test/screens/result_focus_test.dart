@@ -7,8 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/models/match_result.dart';
-import '../../lib/screens/result_screen.dart';
+import 'package:shell/models/match_result.dart';
+import 'package:shell/screens/result_screen.dart';
 
 Widget _buildSubject({
   MatchOutcome outcome = MatchOutcome.win,
@@ -31,6 +31,25 @@ void main() {
     testWidgets('play_again_button renders', (tester) async {
       await tester.pumpWidget(_buildSubject());
       expect(find.byKey(const Key('play_again_button')), findsOneWidget);
+    });
+
+    testWidgets('competitive result hides point scores', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: ResultScreen(
+          result: const MatchResult(
+            outcome: MatchOutcome.win,
+            selfScore: 0,
+            opponentScore: 0,
+            showScores: false,
+          ),
+          onPlayAgainPressed: () {},
+        ),
+      ));
+
+      expect(
+          find.byKey(const Key('competitive_result_summary')), findsOneWidget);
+      expect(find.byKey(const Key('self_score')), findsNothing);
+      expect(find.byKey(const Key('opponent_score')), findsNothing);
     });
 
     testWidgets('Tab×1 → Enter activates Play Again button (order 1)',

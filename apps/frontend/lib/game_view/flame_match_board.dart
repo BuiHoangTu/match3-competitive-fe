@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flame/components.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../game_core/board.dart';
 
@@ -234,11 +235,38 @@ class _BoardHitTargets extends StatefulWidget {
 }
 
 class _BoardHitTargetsState extends State<_BoardHitTargets> {
+  late final FocusNode _focusNode;
   Offset _dragDelta = Offset.zero;
   BoardPosition? _dragStart;
+  BoardPosition _keyboardCursor = const BoardPosition(0, 0);
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode(debugLabel: 'match_board_keyboard');
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _requestKeyboardFocus());
+  }
+
+  @override
+  void didUpdateWidget(covariant _BoardHitTargets oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _clampKeyboardCursor();
+    if (oldWidget.disabled && !widget.disabled) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _requestKeyboardFocus());
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
 
   void _handleTap(int row, int col) {
     if (widget.disabled) return;
+    _requestKeyboardFocus();
     final pos = BoardPosition(row, col);
     final selected = widget.selected;
     if (selected == null) {
@@ -267,6 +295,7 @@ class _BoardHitTargetsState extends State<_BoardHitTargets> {
   }
 
   void _handlePanStart(int row, int col) {
+    _requestKeyboardFocus();
     _dragDelta = Offset.zero;
     _dragStart = BoardPosition(row, col);
   }
@@ -358,47 +387,112 @@ class _BoardHitTargetsState extends State<_BoardHitTargets> {
     );
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _moveKeyboardCursor(0, -1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _moveKeyboardCursor(0, 1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      _moveKeyboardCursor(-1, 0);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      _moveKeyboardCursor(1, 0);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.space) {
+      _handleTap(_keyboardCursor.row, _keyboardCursor.col);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _moveKeyboardCursor(int dRow, int dCol) {
+    if (widget.disabled) return;
+    setState(() {
+      _keyboardCursor = BoardPosition(
+        (_keyboardCursor.row + dRow).clamp(0, widget.board.height - 1).toInt(),
+        (_keyboardCursor.col + dCol).clamp(0, widget.board.width - 1).toInt(),
+      );
+    });
+  }
+
+  void _clampKeyboardCursor() {
+    final next = BoardPosition(
+      _keyboardCursor.row.clamp(0, widget.board.height - 1).toInt(),
+      _keyboardCursor.col.clamp(0, widget.board.width - 1).toInt(),
+    );
+    if (next != _keyboardCursor) {
+      _keyboardCursor = next;
+    }
+  }
+
+  void _requestKeyboardFocus() {
+    if (!mounted || widget.disabled) return;
+    _focusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(14),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: widget.board.width,
-        mainAxisSpacing: 5,
-        crossAxisSpacing: 5,
+    return Focus(
+      autofocus: true,
+      focusNode: _focusNode,
+      onKeyEvent: _handleKeyEvent,
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(14),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: widget.board.width,
+          mainAxisSpacing: 5,
+          crossAxisSpacing: 5,
+        ),
+        itemCount: widget.board.width * widget.board.height,
+        itemBuilder: (context, index) {
+          final row = index ~/ widget.board.width;
+          final col = index % widget.board.width;
+          final tile = widget.board.tileAt(row, col);
+          final isCursor = _keyboardCursor == BoardPosition(row, col);
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final cellExtent = constraints.maxWidth + _hitTargetSpacing;
+              return Semantics(
+                button: true,
+                label: 'Tile ${tile + 1}',
+                selected: widget.selected == BoardPosition(row, col),
+                enabled: !widget.disabled,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: isCursor
+                        ? Border.all(color: Colors.white, width: 2)
+                        : null,
+                  ),
+                  child: GestureDetector(
+                    key: Key('${widget.tileKeyPrefix}_tile_${row}_$col'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.disabled ? null : () => _handleTap(row, col),
+                    onPanStart: widget.disabled
+                        ? null
+                        : (_) => _handlePanStart(row, col),
+                    onPanUpdate: widget.disabled
+                        ? null
+                        : (details) => _handlePanUpdate(details, cellExtent),
+                    onPanEnd: widget.disabled
+                        ? null
+                        : (details) => _handlePanEnd(details, cellExtent),
+                    onPanCancel: widget.disabled ? null : _handlePanCancel,
+                  ),
+                ),
+              );
+            },
+          );
+        },
       ),
-      itemCount: widget.board.width * widget.board.height,
-      itemBuilder: (context, index) {
-        final row = index ~/ widget.board.width;
-        final col = index % widget.board.width;
-        final tile = widget.board.tileAt(row, col);
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final cellExtent = constraints.maxWidth + _hitTargetSpacing;
-            return Semantics(
-              button: true,
-              label: 'Tile ${tile + 1}',
-              selected: widget.selected == BoardPosition(row, col),
-              enabled: !widget.disabled,
-              child: GestureDetector(
-                key: Key('${widget.tileKeyPrefix}_tile_${row}_$col'),
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.disabled ? null : () => _handleTap(row, col),
-                onPanStart:
-                    widget.disabled ? null : (_) => _handlePanStart(row, col),
-                onPanUpdate: widget.disabled
-                    ? null
-                    : (details) => _handlePanUpdate(details, cellExtent),
-                onPanEnd: widget.disabled
-                    ? null
-                    : (details) => _handlePanEnd(details, cellExtent),
-                onPanCancel: widget.disabled ? null : _handlePanCancel,
-              ),
-            );
-          },
-        );
-      },
     );
   }
 }

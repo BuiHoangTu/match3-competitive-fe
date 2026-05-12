@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../errors/matchmaking_errors.dart';
 import '../game_core/board.dart';
 import '../game_view/flame_match_board.dart';
+import '../models/match_result.dart';
 import '../models/matchmaking_result.dart';
 import '../net/board_delta_socket_client.dart';
 import '../net/protocol.dart';
@@ -22,6 +23,7 @@ class OnlineGameScreen extends StatefulWidget {
     required this.characterId,
     required this.matchmaking,
     required this.onLeave,
+    this.onMatchComplete,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
   });
 
@@ -31,6 +33,7 @@ class OnlineGameScreen extends StatefulWidget {
   final String characterId;
   final MatchmakingClient matchmaking;
   final VoidCallback onLeave;
+  final ValueChanged<MatchResult>? onMatchComplete;
   final BoardDeltaConnectionFactory connectionFactory;
 
   @override
@@ -44,6 +47,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   GameBoard? _board;
   String? _roomId;
   String? _myPlayerId;
+  String? _opponentPlayerId;
   String? _activePlayerId;
   int? _boardVersion;
   BoardPosition? _selected;
@@ -52,6 +56,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   bool _boardAnimating = false;
   bool _pendingMove = false;
   bool _loading = true;
+  bool _matchCompleteReported = false;
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
@@ -107,6 +112,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         setState(() {
           _roomId = dto.roomId;
           _myPlayerId = dto.myPlayerId;
+          _opponentPlayerId = dto.opponentId;
           _activePlayerId = dto.activePlayerId;
           _boardVersion = dto.boardVersion;
           _playerStates = dto.playerStates;
@@ -136,11 +142,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
           _pendingMove = false;
           _selected = null;
-          _notice = dto.steps.isEmpty
+          _notice = dto.steps.isEmpty && dto.playerId == _myPlayerId
               ? 'No match'
-              : dto.playerId == _myPlayerId
-                  ? null
-                  : 'Opponent moved';
+              : null;
         });
       }))
       ..add(connection.turnChanged.listen((dto) {
@@ -178,6 +182,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         });
       }))
       ..add(connection.gameOver.listen((dto) {
+        final result = _resultFromGameOver(dto);
         setState(() {
           _playerStates =
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
@@ -188,6 +193,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _status = _gameOverText(dto);
           _notice = _status;
         });
+        _reportMatchComplete(result);
       }))
       ..add(connection.errors.listen((message) {
         developer.log(message, name: 'board_delta_socket');
@@ -273,6 +279,22 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _activePlayerId != null &&
       _myPlayerId == _activePlayerId;
 
+  PlayerStateDto? get _myState =>
+      _myPlayerId == null ? null : _playerStates[_myPlayerId];
+
+  PlayerStateDto? get _opponentState {
+    final explicitId = _opponentPlayerId;
+    if (explicitId != null && _playerStates.containsKey(explicitId)) {
+      return _playerStates[explicitId];
+    }
+    final myId = _myPlayerId;
+    if (myId == null) return null;
+    for (final entry in _playerStates.entries) {
+      if (entry.key != myId) return entry.value;
+    }
+    return null;
+  }
+
   void _showFatal(String message) {
     if (!mounted) return;
     setState(() {
@@ -311,6 +333,29 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   String _gameOverText(GameOverDto dto) {
     if (dto.loserId == null) return 'Draw';
     return dto.loserId == _myPlayerId ? 'Defeat' : 'Victory';
+  }
+
+  MatchResult _resultFromGameOver(GameOverDto dto) {
+    final outcome = dto.loserId == null
+        ? MatchOutcome.draw
+        : dto.loserId == _myPlayerId
+            ? MatchOutcome.loss
+            : MatchOutcome.win;
+    return MatchResult(
+      outcome: outcome,
+      selfScore: 0,
+      opponentScore: 0,
+      showScores: false,
+    );
+  }
+
+  void _reportMatchComplete(MatchResult result) {
+    if (_matchCompleteReported) return;
+    _matchCompleteReported = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onMatchComplete?.call(result);
+    });
   }
 
   void _handleSelectionChanged(BoardPosition? selected) {
@@ -431,9 +476,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                 children: [
                   _NoticeBanner(notice: _notice),
                   _HudRow(
-                    myState:
-                        _myPlayerId == null ? null : _playerStates[_myPlayerId],
+                    myState: _myState,
+                    opponentState: _opponentState,
                     boardVersion: _boardVersion,
+                    isMyTurn: _isMyTurn,
                   ),
                   Expanded(
                     child: Center(
@@ -527,35 +573,202 @@ class _NoticeBanner extends StatelessWidget {
 }
 
 class _HudRow extends StatelessWidget {
-  const _HudRow({required this.myState, required this.boardVersion});
+  const _HudRow({
+    required this.myState,
+    required this.opponentState,
+    required this.boardVersion,
+    required this.isMyTurn,
+  });
 
   final PlayerStateDto? myState;
+  final PlayerStateDto? opponentState;
   final int? boardVersion;
+  final bool isMyTurn;
 
   @override
   Widget build(BuildContext context) {
-    final state = myState;
     final theme = Theme.of(context);
-    final label = state == null
-        ? 'HP --'
-        : 'HP ${state.health}/${state.maxHealth}   Mana ${state.mana}/${state.maxMana}';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 560;
+          final panels = [
+            _PlayerStatePanel(
               key: const Key('online_player_state'),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+              label: 'You',
+              state: myState,
+              active: isMyTurn,
             ),
+            _PlayerStatePanel(
+              key: const Key('online_opponent_state'),
+              label: 'Opp',
+              state: opponentState,
+              active: !isMyTurn,
+            ),
+          ];
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (compact)
+                ...panels.map(
+                  (panel) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: panel,
+                  ),
+                )
+              else
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < panels.length; i++) ...[
+                      Expanded(child: panels[i]),
+                      if (i == 0) const SizedBox(width: 12),
+                    ],
+                  ],
+                ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Board ${boardVersion ?? '-'}',
+                  key: const Key('online_board_version'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PlayerStatePanel extends StatelessWidget {
+  const _PlayerStatePanel({
+    super.key,
+    required this.label,
+    required this.state,
+    required this.active,
+  });
+
+  final String label;
+  final PlayerStateDto? state;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final state = this.state;
+    final titleStyle = theme.textTheme.labelLarge?.copyWith(
+      fontWeight: FontWeight.w700,
+      color: active ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+    );
+
+    return Semantics(
+      label: '$label combat stats',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: active
+                ? theme.colorScheme.primary
+                : theme.colorScheme.outlineVariant,
           ),
-          Text(
-            'Board ${boardVersion ?? '-'}',
-            key: const Key('online_board_version'),
-            style: theme.textTheme.bodySmall,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: state == null
+              ? Text('$label  HP --', style: titleStyle)
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            active ? '$label (turn)' : label,
+                            style: titleStyle,
+                          ),
+                        ),
+                        Text(
+                          'Lv ${state.lv}  Atk ${state.atk}',
+                          style: theme.textTheme.labelMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    _StatLine(
+                      label: 'HP',
+                      value: state.health,
+                      max: state.maxHealth,
+                      color: Colors.redAccent,
+                    ),
+                    _StatLine(
+                      label: 'Stamina',
+                      value: (state.stamina / 1000).ceil(),
+                      max: (state.maxStamina / 1000).ceil(),
+                      color: Colors.orangeAccent,
+                      suffix: 's',
+                    ),
+                    _StatLine(
+                      label: 'Mana',
+                      value: state.mana,
+                      max: state.maxMana,
+                      color: Colors.lightBlueAccent,
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatLine extends StatelessWidget {
+  const _StatLine({
+    required this.label,
+    required this.value,
+    required this.max,
+    required this.color,
+    this.suffix = '',
+  });
+
+  final String label;
+  final int value;
+  final int max;
+  final Color color;
+  final String suffix;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final denominator = max <= 0 ? 1 : max;
+    final progress = (value / denominator).clamp(0.0, 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(label, style: theme.textTheme.labelSmall),
+              ),
+              Text(
+                '$value$suffix/$max$suffix',
+                style: theme.textTheme.labelSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          LinearProgressIndicator(
+            value: progress,
+            minHeight: 6,
+            color: color,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
           ),
         ],
       ),

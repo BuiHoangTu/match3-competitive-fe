@@ -1,7 +1,8 @@
 // T-v0.6-A07 — Native result screen
 // T-v0.7-01 — Keyboard focus + tab order
 //
-// Displays WIN / LOSE / DRAW after a match, with self and opponent scores.
+// Displays WIN / LOSE / DRAW after a match. Score rows are hidden for
+// competitive modes that do not expose point scores.
 // Receives data from the `matchEnded` bridge message (T-v0.6-B09) via
 // the typed [MatchResult] model.
 //
@@ -66,31 +67,43 @@ class ResultScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 32),
 
-                  // Score card
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 20,
-                      ),
-                      child: Column(
-                        children: [
-                          _ScoreRow(
-                            label: 'Your score',
-                            score: result.selfScore,
-                            key: const Key('self_score'),
-                          ),
-                          const Divider(height: 24),
-                          _ScoreRow(
-                            label: 'Opponent score',
-                            score: result.opponentScore,
-                            key: const Key('opponent_score'),
-                          ),
-                        ],
+                  if (result.showScores) ...[
+                    // Score card
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 20,
+                        ),
+                        child: Column(
+                          children: [
+                            _ScoreRow(
+                              label: 'Your score',
+                              score: result.selfScore,
+                              key: const Key('self_score'),
+                            ),
+                            const Divider(height: 24),
+                            _ScoreRow(
+                              label: 'Opponent score',
+                              score: result.opponentScore,
+                              key: const Key('opponent_score'),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 40),
+                    const SizedBox(height: 40),
+                  ] else ...[
+                    Text(
+                      'Match complete',
+                      key: const Key('competitive_result_summary'),
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                  ],
 
                   // Play again — focus order 1
                   FocusTraversalOrder(

@@ -514,6 +514,8 @@ GoRouter createRouter({
               matchmaking: mm,
               connectionFactory: boardDeltaConnectionFactory,
               onLeave: () => context.goNamed(Routes.home),
+              onMatchComplete: (result) =>
+                  context.goNamed(Routes.result, extra: result),
             ),
           );
         },

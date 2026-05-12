@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:shell/models/match_result.dart';
 import 'package:shell/net/board_delta_socket_client.dart';
 import 'package:shell/net/protocol.dart';
 import 'package:shell/screens/online_game_screen.dart';
@@ -128,6 +130,11 @@ void main() {
     expect(find.byKey(const Key('online_status')), findsOneWidget);
     expect(find.text('Your turn'), findsOneWidget);
     expect(find.byKey(const Key('online_tile_2_1')), findsOneWidget);
+    expect(find.byKey(const Key('online_player_state')), findsOneWidget);
+    expect(find.byKey(const Key('online_opponent_state')), findsOneWidget);
+    expect(find.text('You (turn)'), findsOneWidget);
+    expect(find.text('Opp'), findsOneWidget);
+    expect(find.text('300s/300s'), findsNWidgets(2));
     expect(find.textContaining('Score'), findsNothing);
 
     await tester.tap(find.byKey(const Key('online_tile_2_1')));
@@ -290,6 +297,98 @@ void main() {
     expect(find.text('Board 2'), findsOneWidget);
   });
 
+  testWidgets('online screen does not show a banner for opponent moves',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final payload = Map<String, dynamic>.from(_payload('move_resolved'))
+      ..['playerId'] = 'player-b';
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(find.text('Opponent moved'), findsNothing);
+    expect(find.byKey(const Key('online_notice')), findsNothing);
+    expect(find.text('Board 2'), findsOneWidget);
+  });
+
+  testWidgets('online screen reports score-free result on game over',
+      (tester) async {
+    final fake = _FakeConnection();
+    MatchResult? completed;
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+        onMatchComplete: (result) => completed = result,
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.gameOverController.add(GameOverDto.fromJson({
+      'loserId': 'player-b',
+      'loserReason': 'hp',
+      'playerStates': _payload('match_found')['playerStates'],
+    }));
+    await tester.pump();
+    await tester.pump();
+
+    expect(completed?.outcome, MatchOutcome.win);
+    expect(completed?.showScores, isFalse);
+    expect(completed?.selfScore, 0);
+    expect(completed?.opponentScore, 0);
+  });
+
   testWidgets('online screen submits a swap by dragging between tiles',
       (tester) async {
     final fake = _FakeConnection();
@@ -335,6 +434,55 @@ void main() {
       'c1': 1,
       'r2': 2,
       'c2': 2,
+    });
+  });
+
+  testWidgets('online screen submits a swap with keyboard input',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(fake.submittedMove, {
+      'roomId': 'room-1',
+      'r1': 0,
+      'c1': 0,
+      'r2': 0,
+      'c2': 1,
     });
   });
 

@@ -12,9 +12,11 @@ class MatchResult {
     required this.outcome,
     required this.selfScore,
     required this.opponentScore,
+    this.showScores = true,
   });
 
   final MatchOutcome outcome;
   final int selfScore;
   final int opponentScore;
+  final bool showScores;
 }
