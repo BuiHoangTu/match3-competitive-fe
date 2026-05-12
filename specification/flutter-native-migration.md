@@ -10,7 +10,7 @@ The game rules move into a pure Dart library used by the Flutter UI for local mo
 
 ## 2. Goals
 
-- Remove Phaser, Vite, WebView/iframe embedding, and the shell/game bridge from the runtime product.
+- Remove Phaser, Vite, WebView/iframe embedding, and the shell/game bridge from the runtime product. Which was in /packages/game-view
 - Build the in-match board, HUD, skill controls, result flow, and notifications as Flutter widgets/custom painters.
 - Stop sharing seeds with clients. Online clients receive the server's current board table and explicit board-delta packets.
 - Add a no-legal-move board replacement path with a visible client notification.
