@@ -104,7 +104,14 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     _socket.on('game_over', (data) {
       _decode(data, (json) => _gameOver.add(GameOverDto.fromJson(json)));
     });
-    _socket.on('connect_error', (data) => _errors.add('connect_error: $data'));
+    _socket.on('connect_error', (data) {
+      final message = data.toString();
+      if (message.contains('ACCOUNT_IN_USE')) {
+        _errors.add('This account is playing from a different device.');
+        return;
+      }
+      _errors.add('connect_error: $data');
+    });
     _socket.on('error', (data) => _errors.add('socket_error: $data'));
   }
 

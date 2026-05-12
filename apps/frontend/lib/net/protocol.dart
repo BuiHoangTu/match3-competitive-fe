@@ -1,5 +1,7 @@
 library;
 
+import '../game_core/board.dart';
+
 class PlayerStateDto {
   const PlayerStateDto({
     required this.stamina,
@@ -26,45 +28,40 @@ class PlayerStateDto {
   final int atk;
 
   factory PlayerStateDto.fromJson(Map<String, dynamic> json) => PlayerStateDto(
-        stamina: json['stamina'] as int,
-        maxStamina: json['maxStamina'] as int,
-        health: json['health'] as int,
-        maxHealth: json['maxHealth'] as int,
-        mana: json['mana'] as int,
-        maxMana: json['maxMana'] as int,
-        lv: json['lv'] as int,
-        exp: json['exp'] as int,
-        expToNext: json['expToNext'] as int,
-        atk: json['atk'] as int,
+        stamina: _readInt(json, 'stamina'),
+        maxStamina: _readInt(json, 'maxStamina'),
+        health: _readInt(json, 'health'),
+        maxHealth: _readInt(json, 'maxHealth'),
+        mana: _readInt(json, 'mana'),
+        maxMana: _readInt(json, 'maxMana'),
+        lv: _readInt(json, 'lv'),
+        exp: _readInt(json, 'exp'),
+        expToNext: _readInt(json, 'expToNext'),
+        atk: _readInt(json, 'atk'),
       );
 }
 
 class FlatBoardDto {
   const FlatBoardDto({
-    required this.width,
-    required this.height,
     required this.boardVersion,
     required this.board,
   });
 
-  final int width;
-  final int height;
+  int get width => defaultBoardWidth;
+  int get height => defaultBoardHeight;
   final int boardVersion;
   final List<int> board;
 
   factory FlatBoardDto.fromJson(Map<String, dynamic> json) {
-    final width = json['width'] as int;
-    final height = json['height'] as int;
-    final board = (json['board'] as List<dynamic>).cast<int>();
-    if (board.length != width * height) {
+    final board = _readIntList(json, 'board');
+    if (board.length != defaultBoardWidth * defaultBoardHeight) {
       throw FormatException(
-        'Flat board length ${board.length} does not match $width x $height',
+        'Flat board length ${board.length} does not match agreed '
+        '$defaultBoardWidth x $defaultBoardHeight board',
       );
     }
     return FlatBoardDto(
-      width: width,
-      height: height,
-      boardVersion: json['boardVersion'] as int,
+      boardVersion: _readInt(json, 'boardVersion'),
       board: List.unmodifiable(board),
     );
   }
@@ -83,16 +80,14 @@ class GeneratedTileDto {
 
   factory GeneratedTileDto.fromJson(Map<String, dynamic> json) =>
       GeneratedTileDto(
-        row: json['row'] as int,
-        col: json['col'] as int,
-        tile: json['tile'] as int,
+        row: _readInt(json, 'row'),
+        col: _readInt(json, 'col'),
+        tile: _readInt(json, 'tile'),
       );
 }
 
 class BoardDeltaMatchFoundDto extends FlatBoardDto {
   BoardDeltaMatchFoundDto({
-    required super.width,
-    required super.height,
     required super.boardVersion,
     required super.board,
     required this.roomId,
@@ -113,8 +108,6 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
   factory BoardDeltaMatchFoundDto.fromJson(Map<String, dynamic> json) {
     final board = FlatBoardDto.fromJson(json);
     return BoardDeltaMatchFoundDto(
-      width: board.width,
-      height: board.height,
       boardVersion: board.boardVersion,
       board: board.board,
       roomId: json['roomId'] as String,
@@ -129,8 +122,6 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
 
 class BoardReplacedDto extends FlatBoardDto {
   BoardReplacedDto({
-    required super.width,
-    required super.height,
     required super.boardVersion,
     required super.board,
     required this.reason,
@@ -143,8 +134,6 @@ class BoardReplacedDto extends FlatBoardDto {
   factory BoardReplacedDto.fromJson(Map<String, dynamic> json) {
     final board = FlatBoardDto.fromJson(json);
     return BoardReplacedDto(
-      width: board.width,
-      height: board.height,
       boardVersion: board.boardVersion,
       board: board.board,
       reason: json['reason'] as String,
@@ -185,12 +174,12 @@ class MoveResolvedDto {
         .toList(growable: false);
 
     return MoveResolvedDto(
-      boardVersion: json['boardVersion'] as int,
+      boardVersion: _readInt(json, 'boardVersion'),
       playerId: json['playerId'] as String,
-      r1: json['r1'] as int,
-      c1: json['c1'] as int,
-      r2: json['r2'] as int,
-      c2: json['c2'] as int,
+      r1: _readInt(json, 'r1'),
+      c1: _readInt(json, 'c1'),
+      r2: _readInt(json, 'r2'),
+      c2: _readInt(json, 'c2'),
       steps: steps,
       generatedTiles: generatedTiles,
       playerStates: _parsePlayerStates(json['playerStates']),
@@ -200,21 +189,54 @@ class MoveResolvedDto {
 
 class ResolvedStepDto {
   const ResolvedStepDto({
+    required this.matchedCells,
+    required this.movements,
     required this.newTilePositions,
+    required this.afterGravity,
     required this.afterRefill,
+    required this.playerStatesAfter,
   });
 
+  final List<BoardCellDto> matchedCells;
+  final List<TileMovementDto> movements;
   final List<BoardCellDto> newTilePositions;
+  final List<List<int>> afterGravity;
   final List<List<int>> afterRefill;
+  final Map<String, PlayerStateDto> playerStatesAfter;
 
   factory ResolvedStepDto.fromJson(Map<String, dynamic> json) {
     return ResolvedStepDto(
+      matchedCells: _parseCellPairs(json['matchedCells']),
+      movements: (json['movements'] as List<dynamic>? ?? const [])
+          .map((raw) => TileMovementDto.fromJson(raw as Map<String, dynamic>))
+          .toList(growable: false),
       newTilePositions: (json['newTilePositions'] as List<dynamic>)
           .map((raw) => BoardCellDto.fromJson(raw as Map<String, dynamic>))
           .toList(growable: false),
+      afterGravity: _parseGrid(json['afterGravity']),
       afterRefill: _parseGrid(json['afterRefill']),
+      playerStatesAfter: _parsePlayerStates(json['playerStatesAfter']),
     );
   }
+}
+
+class TileMovementDto {
+  const TileMovementDto({
+    required this.col,
+    required this.fromRow,
+    required this.toRow,
+  });
+
+  final int col;
+  final int fromRow;
+  final int toRow;
+
+  factory TileMovementDto.fromJson(Map<String, dynamic> json) =>
+      TileMovementDto(
+        col: _readInt(json, 'col'),
+        fromRow: _readInt(json, 'fromRow'),
+        toRow: _readInt(json, 'toRow'),
+      );
 }
 
 class BoardCellDto {
@@ -224,8 +246,8 @@ class BoardCellDto {
   final int col;
 
   factory BoardCellDto.fromJson(Map<String, dynamic> json) => BoardCellDto(
-        row: json['row'] as int,
-        col: json['col'] as int,
+        row: _readInt(json, 'row'),
+        col: _readInt(json, 'col'),
       );
 }
 
@@ -282,10 +304,46 @@ Map<String, PlayerStateDto> _parsePlayerStates(Object? raw) {
   ));
 }
 
+List<BoardCellDto> _parseCellPairs(Object? raw) {
+  if (raw == null) return const [];
+  return List<BoardCellDto>.unmodifiable((raw as List<dynamic>).map((cell) {
+    final pair = cell as List<dynamic>;
+    if (pair.length != 2) {
+      throw const FormatException('matchedCells entry must have row and col');
+    }
+    return BoardCellDto(
+      row: _readIntValue(pair[0]),
+      col: _readIntValue(pair[1]),
+    );
+  }));
+}
+
 List<List<int>> _parseGrid(Object? raw) {
   final rows = raw as List<dynamic>;
   return List<List<int>>.unmodifiable(
-    rows.map(
-        (row) => List<int>.unmodifiable((row as List<dynamic>).cast<int>())),
+    rows.map((row) => List<int>.unmodifiable(
+          (row as List<dynamic>).map(_readIntValue),
+        )),
   );
+}
+
+int _readInt(Map<String, dynamic> json, String key) {
+  if (!json.containsKey(key) || json[key] == null) {
+    throw FormatException('Missing required integer field "$key"');
+  }
+  return _readIntValue(json[key]);
+}
+
+int _readIntValue(Object? value) {
+  if (value is int) return value;
+  if (value is num && value % 1 == 0) return value.toInt();
+  throw FormatException('Expected integer, got ${value.runtimeType}');
+}
+
+List<int> _readIntList(Map<String, dynamic> json, String key) {
+  final raw = json[key];
+  if (raw is! List<dynamic>) {
+    throw FormatException('Missing required integer array "$key"');
+  }
+  return raw.map(_readIntValue).toList(growable: false);
 }

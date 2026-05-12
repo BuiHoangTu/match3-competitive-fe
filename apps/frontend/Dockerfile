@@ -1,12 +1,15 @@
 # Builds the Flutter Web client. Gameplay is Flutter-native; the legacy
 # embedded game bundle is no longer packaged into this image.
 
+# Dependencies download
 FROM ghcr.io/cirruslabs/flutter:stable AS shell-builder
-ARG BACKEND_URL=http://localhost:3001
-WORKDIR /app
-COPY apps/frontend/ apps/frontend/
 WORKDIR /app/apps/frontend
+COPY apps/frontend/pubspec.yaml apps/frontend/pubspec.lock ./
 RUN flutter pub get
+
+# source code build
+ARG BACKEND_URL=http://localhost:3001
+COPY apps/frontend/ ./
 RUN flutter build web --base-href / \
     --pwa-strategy=none \
     --dart-define=BACKEND_URL=${BACKEND_URL}

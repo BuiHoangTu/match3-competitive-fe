@@ -20,6 +20,17 @@ void main() {
     expect(find.textContaining('LOSE'), findsNothing);
 
     await tester.tap(find.byTooltip('Leave match'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Leave match?'), findsOneWidget);
+    expect(
+      find.text(
+          'Leaving now counts as a loss. Are you sure you want to leave?'),
+      findsOneWidget,
+    );
+    expect(left, isFalse);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Leave match'));
+    await tester.pump(const Duration(milliseconds: 250));
     expect(left, isTrue);
   });
 }

@@ -6,6 +6,7 @@ import '../game_core/board.dart';
 import '../game_core/generator.dart';
 import '../game_core/judge.dart';
 import '../game_core/legal_moves.dart';
+import '../game_view/flame_match_board.dart';
 
 class PracticeGameScreen extends StatefulWidget {
   const PracticeGameScreen({
@@ -29,16 +30,12 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
   late final TileGenerator _generator;
   late GameBoard _board;
   BoardPosition? _selected;
+  BoardMoveAnimation? _boardAnimation;
+  int _boardAnimationId = 0;
+  bool _boardAnimating = false;
+  bool _replaceAfterAnimation = false;
   int _score = 0;
   String? _notice;
-
-  static const _tileColors = <Color>[
-    Color(0xFF2F80ED),
-    Color(0xFF27AE60),
-    Color(0xFFF2C94C),
-    Color(0xFFEB5757),
-    Color(0xFF9B51E0),
-  ];
 
   @override
   void initState() {
@@ -51,6 +48,7 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
   }
 
   void _handleTileTap(int row, int col) {
+    if (_boardAnimating) return;
     final selected = _selected;
     if (selected == null) {
       setState(() => _selected = BoardPosition(row, col));
@@ -67,12 +65,22 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
       return;
     }
 
+    _resolveSwap(selected.row, selected.col, row, col);
+  }
+
+  void _handleTileSwap(int r1, int c1, int r2, int c2) {
+    if (_boardAnimating) return;
+    if (!_board.isAdjacent(r1, c1, r2, c2)) return;
+    _resolveSwap(r1, c1, r2, c2);
+  }
+
+  void _resolveSwap(int r1, int c1, int r2, int c2) {
     final result = widget.judge.resolveSwap(
       board: _board,
-      r1: selected.row,
-      c1: selected.col,
-      r2: row,
-      c2: col,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
       generator: _generator,
     );
 
@@ -82,12 +90,94 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
       if (!result.accepted) return;
       if (result.fizzle) {
         _notice = 'No match';
+        _boardAnimation = _swapRecoilAnimation(r1: r1, c1: c1, r2: r2, c2: c2);
+        _boardAnimating = true;
         return;
       }
+      final shouldReplace =
+          !hasLegalMove(result.finalBoard, judge: widget.judge);
       _board = result.finalBoard;
+      _boardAnimation = _animationFromResolution(
+        r1: r1,
+        c1: c1,
+        r2: r2,
+        c2: c2,
+        result: result,
+      );
+      _boardAnimating = _boardAnimation != null;
+      _replaceAfterAnimation = shouldReplace;
       _score += result.scoreDelta;
+    });
+  }
 
-      if (!hasLegalMove(_board, judge: widget.judge)) {
+  BoardMoveAnimation _swapRecoilAnimation({
+    required int r1,
+    required int c1,
+    required int r2,
+    required int c2,
+  }) {
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
+      finalBoard: _board,
+      steps: const [],
+      revert: true,
+    );
+  }
+
+  BoardMoveAnimation? _animationFromResolution({
+    required int r1,
+    required int c1,
+    required int r2,
+    required int c2,
+    required MoveResolution result,
+  }) {
+    if (result.steps.isEmpty) return null;
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
+      finalBoard: result.finalBoard,
+      steps: [
+        for (final step in result.steps)
+          BoardCascadeAnimationStep(
+            matchedCells: [
+              for (final group in step.matches) ...group.cells,
+            ],
+            movements: [
+              for (final movement in step.movements)
+                BoardTileMovement(
+                  col: movement.col,
+                  fromRow: movement.fromRow,
+                  toRow: movement.toRow,
+                ),
+            ],
+            generatedTiles: [
+              for (final generated in step.generatedTiles)
+                BoardGeneratedTile(
+                  row: generated.row,
+                  col: generated.col,
+                  tile: generated.tile,
+                ),
+            ],
+            afterRefill: step.afterRefill,
+          ),
+      ],
+    );
+  }
+
+  void _handleBoardAnimationComplete() {
+    if (!mounted) return;
+    setState(() {
+      _boardAnimation = null;
+      _boardAnimating = false;
+      if (_replaceAfterAnimation) {
+        _replaceAfterAnimation = false;
         _board = replaceBoardWithLegalMove(
           generator: _generator,
           judge: widget.judge,
@@ -154,74 +244,21 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
                   aspectRatio: 1,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: _board.width,
-                        mainAxisSpacing: 6,
-                        crossAxisSpacing: 6,
-                      ),
-                      itemCount: _board.width * _board.height,
-                      itemBuilder: (context, index) {
-                        final row = index ~/ _board.width;
-                        final col = index % _board.width;
-                        return _TileButton(
-                          key: Key('practice_tile_${row}_$col'),
-                          tile: _board.tileAt(row, col),
-                          selected: _selected == BoardPosition(row, col),
-                          color: _tileColors[
-                              _board.tileAt(row, col) % _tileColors.length],
-                          onPressed: () => _handleTileTap(row, col),
-                        );
-                      },
+                    child: FlameMatchBoard(
+                      board: _board,
+                      selected: _selected,
+                      disabled: _boardAnimating,
+                      animation: _boardAnimation,
+                      onAnimationComplete: _handleBoardAnimationComplete,
+                      tileKeyPrefix: 'practice',
+                      onTileTap: _handleTileTap,
+                      onTileSwap: _handleTileSwap,
                     ),
                   ),
                 ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TileButton extends StatelessWidget {
-  const _TileButton({
-    super.key,
-    required this.tile,
-    required this.selected,
-    required this.color,
-    required this.onPressed,
-  });
-
-  final int tile;
-  final bool selected;
-  final Color color;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      label: 'Tile ${tile + 1}',
-      selected: selected,
-      child: Material(
-        color: selected ? theme.colorScheme.outline : color,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onPressed,
-          child: Center(
-            child: Text(
-              '${tile + 1}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
         ),
       ),
     );

@@ -24,6 +24,11 @@ class MatchmakingActiveRoom extends MatchmakingError {
   final String roomId;
 }
 
+/// 409 — same account is already active or queued from another client.
+class MatchmakingAccountInUse extends MatchmakingError {
+  const MatchmakingAccountInUse(super.message);
+}
+
 /// 410 Gone — the room the caller tried to resume is closed or expired.
 class MatchmakingRoomGone extends MatchmakingError {
   const MatchmakingRoomGone(super.message);

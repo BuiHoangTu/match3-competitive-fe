@@ -6,6 +6,7 @@ import '../game_core/board.dart';
 import '../game_core/generator.dart';
 import '../game_core/judge.dart';
 import '../game_core/legal_moves.dart';
+import '../game_view/flame_match_board.dart';
 
 class PveGameScreen extends StatefulWidget {
   const PveGameScreen({
@@ -29,16 +30,13 @@ class _PveGameScreenState extends State<PveGameScreen> {
   late final TileGenerator _generator;
   late GameBoard _board;
   BoardPosition? _selected;
+  BoardMoveAnimation? _boardAnimation;
+  int _boardAnimationId = 0;
+  bool _boardAnimating = false;
+  bool _pendingBotTurn = false;
+  bool _replaceAfterAnimation = false;
   bool _botThinking = false;
   String? _notice;
-
-  static const _tileColors = <Color>[
-    Color(0xFF2F80ED),
-    Color(0xFF27AE60),
-    Color(0xFFF2C94C),
-    Color(0xFFEB5757),
-    Color(0xFF9B51E0),
-  ];
 
   @override
   void initState() {
@@ -51,7 +49,7 @@ class _PveGameScreenState extends State<PveGameScreen> {
   }
 
   void _handleTileTap(int row, int col) {
-    if (_botThinking) return;
+    if (_botThinking || _boardAnimating) return;
     final selected = _selected;
     if (selected == null) {
       setState(() => _selected = BoardPosition(row, col));
@@ -66,12 +64,23 @@ class _PveGameScreenState extends State<PveGameScreen> {
       return;
     }
 
+    _resolveHumanSwap(selected.row, selected.col, row, col);
+  }
+
+  void _handleTileSwap(int r1, int c1, int r2, int c2) {
+    if (_botThinking || _boardAnimating || !_board.isAdjacent(r1, c1, r2, c2)) {
+      return;
+    }
+    _resolveHumanSwap(r1, c1, r2, c2);
+  }
+
+  void _resolveHumanSwap(int r1, int c1, int r2, int c2) {
     final result = widget.judge.resolveSwap(
       board: _board,
-      r1: selected.row,
-      c1: selected.col,
-      r2: row,
-      c2: col,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
       generator: _generator,
     );
     setState(() {
@@ -80,15 +89,49 @@ class _PveGameScreenState extends State<PveGameScreen> {
       if (!result.accepted) return;
       if (result.fizzle) {
         _notice = 'No match';
+        _pendingBotTurn = false;
+        _botThinking = false;
+        _boardAnimation = _swapRecoilAnimation(r1: r1, c1: c1, r2: r2, c2: c2);
+        _boardAnimating = true;
         return;
       }
-      final settled = _settleBoard(result.finalBoard);
-      _board = settled.board;
+      final shouldReplace =
+          !hasLegalMove(result.finalBoard, judge: widget.judge);
+      _board = result.finalBoard;
+      _boardAnimation = _animationFromResolution(
+        r1: r1,
+        c1: c1,
+        r2: r2,
+        c2: c2,
+        result: result,
+      );
+      _boardAnimating = _boardAnimation != null;
       _botThinking = true;
-      _notice =
-          settled.replaced ? 'No moves available. Board swapped.' : 'Bot turn';
+      _pendingBotTurn = true;
+      _replaceAfterAnimation = shouldReplace;
+      _notice = null;
     });
-    Future<void>.delayed(const Duration(milliseconds: 250), _playBotTurn);
+    if (!_boardAnimating) {
+      Future<void>.delayed(const Duration(milliseconds: 250), _playBotTurn);
+    }
+  }
+
+  BoardMoveAnimation _swapRecoilAnimation({
+    required int r1,
+    required int c1,
+    required int r2,
+    required int c2,
+  }) {
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
+      finalBoard: _board,
+      steps: const [],
+      revert: true,
+    );
   }
 
   void _playBotTurn() {
@@ -113,26 +156,89 @@ class _PveGameScreenState extends State<PveGameScreen> {
     );
     setState(() {
       if (result.accepted && !result.fizzle) {
-        final settled = _settleBoard(result.finalBoard);
-        _board = settled.board;
-        _notice = settled.replaced
-            ? 'No moves available. Board swapped.'
-            : 'Your turn';
+        final shouldReplace =
+            !hasLegalMove(result.finalBoard, judge: widget.judge);
+        _board = result.finalBoard;
+        _boardAnimation = _animationFromResolution(
+          r1: move.r1,
+          c1: move.c1,
+          r2: move.r2,
+          c2: move.c2,
+          result: result,
+        );
+        _boardAnimating = _boardAnimation != null;
+        _replaceAfterAnimation = shouldReplace;
+        _notice = null;
       } else {
         _notice = 'Your turn';
+        _botThinking = false;
       }
-      _botThinking = false;
     });
   }
 
-  ({GameBoard board, bool replaced}) _settleBoard(GameBoard board) {
-    if (hasLegalMove(board, judge: widget.judge)) {
-      return (board: board, replaced: false);
-    }
-    return (
-      board: _replaceBoard(width: board.width, height: board.height),
-      replaced: true,
+  BoardMoveAnimation? _animationFromResolution({
+    required int r1,
+    required int c1,
+    required int r2,
+    required int c2,
+    required MoveResolution result,
+  }) {
+    if (result.steps.isEmpty) return null;
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
+      finalBoard: result.finalBoard,
+      steps: [
+        for (final step in result.steps)
+          BoardCascadeAnimationStep(
+            matchedCells: [
+              for (final group in step.matches) ...group.cells,
+            ],
+            movements: [
+              for (final movement in step.movements)
+                BoardTileMovement(
+                  col: movement.col,
+                  fromRow: movement.fromRow,
+                  toRow: movement.toRow,
+                ),
+            ],
+            generatedTiles: [
+              for (final generated in step.generatedTiles)
+                BoardGeneratedTile(
+                  row: generated.row,
+                  col: generated.col,
+                  tile: generated.tile,
+                ),
+            ],
+            afterRefill: step.afterRefill,
+          ),
+      ],
     );
+  }
+
+  void _handleBoardAnimationComplete() {
+    if (!mounted) return;
+    setState(() {
+      _boardAnimation = null;
+      _boardAnimating = false;
+      if (_replaceAfterAnimation) {
+        _replaceAfterAnimation = false;
+        _board = _replaceBoard(width: _board.width, height: _board.height);
+        _notice = 'No moves available. Board swapped.';
+      } else {
+        _notice = _pendingBotTurn ? 'Bot turn' : 'Your turn';
+      }
+
+      if (_pendingBotTurn) {
+        _pendingBotTurn = false;
+        Future<void>.delayed(const Duration(milliseconds: 250), _playBotTurn);
+      } else {
+        _botThinking = false;
+      }
+    });
   }
 
   GameBoard _replaceBoard({int? width, int? height}) {
@@ -144,6 +250,35 @@ class _PveGameScreenState extends State<PveGameScreen> {
     ).board;
   }
 
+  Future<void> _leave() async {
+    final confirmed = await _confirmLeaveMatch();
+    if (!confirmed || !mounted) return;
+    widget.onLeave();
+  }
+
+  Future<bool> _confirmLeaveMatch() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Leave match?'),
+            content: const Text(
+              'Leaving now counts as a loss. Are you sure you want to leave?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Stay'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Leave match'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -153,7 +288,7 @@ class _PveGameScreenState extends State<PveGameScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Leave match',
-          onPressed: widget.onLeave,
+          onPressed: _leave,
         ),
         actions: [
           Padding(
@@ -199,74 +334,21 @@ class _PveGameScreenState extends State<PveGameScreen> {
                   aspectRatio: 1,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: _board.width,
-                        mainAxisSpacing: 6,
-                        crossAxisSpacing: 6,
-                      ),
-                      itemCount: _board.width * _board.height,
-                      itemBuilder: (context, index) {
-                        final row = index ~/ _board.width;
-                        final col = index % _board.width;
-                        final tile = _board.tileAt(row, col);
-                        return _TileButton(
-                          key: Key('pve_tile_${row}_$col'),
-                          tile: tile,
-                          selected: _selected == BoardPosition(row, col),
-                          color: _tileColors[tile % _tileColors.length],
-                          onPressed: () => _handleTileTap(row, col),
-                        );
-                      },
+                    child: FlameMatchBoard(
+                      board: _board,
+                      selected: _selected,
+                      disabled: _botThinking || _boardAnimating,
+                      animation: _boardAnimation,
+                      onAnimationComplete: _handleBoardAnimationComplete,
+                      tileKeyPrefix: 'pve',
+                      onTileTap: _handleTileTap,
+                      onTileSwap: _handleTileSwap,
                     ),
                   ),
                 ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TileButton extends StatelessWidget {
-  const _TileButton({
-    super.key,
-    required this.tile,
-    required this.selected,
-    required this.color,
-    required this.onPressed,
-  });
-
-  final int tile;
-  final bool selected;
-  final Color color;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      label: 'Tile ${tile + 1}',
-      selected: selected,
-      child: Material(
-        color: selected ? theme.colorScheme.outline : color,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onPressed,
-          child: Center(
-            child: Text(
-              '${tile + 1}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
         ),
       ),
     );

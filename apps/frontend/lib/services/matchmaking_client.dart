@@ -232,9 +232,19 @@ class MatchmakingClient {
       case 403:
         throw MatchmakingForbidden(decoded['code']?.toString() ?? 'FORBIDDEN');
       case 409:
+        if (decoded['code'] == 'ACCOUNT_IN_USE') {
+          throw MatchmakingAccountInUse(
+            decoded['message']?.toString() ??
+                'This account is playing from a different device',
+          );
+        }
         throw MatchmakingActiveRoom(
           decoded['code']?.toString() ?? 'ACTIVE_ROOM',
           roomId: decoded['roomId']?.toString() ?? '',
+        );
+      case 425:
+        throw const MatchmakingAccountInUse(
+          'This account is already queuing from a different device',
         );
       case 410:
         throw MatchmakingRoomGone(decoded['code']?.toString() ?? 'ROOM_GONE');

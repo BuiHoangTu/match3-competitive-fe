@@ -151,8 +151,58 @@ void main() {
     expect(find.text('Board 2'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Leave match'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Leave match?'), findsOneWidget);
+    expect(
+      find.text(
+          'Leaving now counts as a loss. Are you sure you want to leave?'),
+      findsOneWidget,
+    );
+    expect(fake.forfeited, isFalse);
+    expect(left, isFalse);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Leave match'));
+    await tester.pump(const Duration(milliseconds: 250));
     expect(fake.forfeited, isTrue);
     expect(left, isTrue);
+  });
+
+  testWidgets('online leave confirmation can be cancelled', (tester) async {
+    final fake = _FakeConnection();
+    var left = false;
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () => left = true,
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    await tester.tap(find.byTooltip('Leave match'));
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.tap(find.text('Stay'));
+    await tester.pump(const Duration(milliseconds: 250));
+
+    expect(fake.forfeited, isFalse);
+    expect(left, isFalse);
+    expect(find.text('Leave match?'), findsNothing);
   });
 
   testWidgets('online screen handles full board replacement notice',
@@ -197,5 +247,132 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Board 3'), findsOneWidget);
+  });
+
+  testWidgets('online screen treats empty resolved steps as a swap fizzle',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+    fake.moveResolvedController.add(
+      MoveResolvedDto.fromJson(_payload('swap_fizzle')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(find.text('No match'), findsOneWidget);
+    expect(find.text('Board 2'), findsOneWidget);
+  });
+
+  testWidgets('online screen submits a swap by dragging between tiles',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    await tester.drag(
+      find.byKey(const Key('online_tile_2_1')),
+      const Offset(80, 0),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(fake.submittedMove, {
+      'roomId': 'room-1',
+      'r1': 2,
+      'c1': 1,
+      'r2': 2,
+      'c2': 2,
+    });
+  });
+
+  testWidgets('online screen shows account-in-use popup copy', (tester) async {
+    var left = false;
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'code': 'ACCOUNT_IN_USE',
+          'message': 'This account is playing from a different device',
+        }),
+        409,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) =>
+            _FakeConnection(),
+        onLeave: () => left = true,
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+    await tester.pump();
+
+    expect(find.text('Account in use'), findsOneWidget);
+    expect(
+      find.text('This account is playing from a different device.'),
+      findsWidgets,
+    );
+    await tester.tap(find.text('OK'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(left, isTrue);
   });
 }

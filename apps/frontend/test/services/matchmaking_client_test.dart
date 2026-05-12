@@ -105,6 +105,30 @@ void main() {
       }
     });
 
+    test('409 ACCOUNT_IN_USE throws MatchmakingAccountInUse', () async {
+      final stub = _Stub(status: 409, body: {
+        'code': 'ACCOUNT_IN_USE',
+        'message': 'This account is playing from a different device',
+      });
+      final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
+      expect(
+        () =>
+            client.join(sessionToken: 'alice', mode: MatchmakingMode.turnBased),
+        throwsA(isA<MatchmakingAccountInUse>()),
+      );
+    });
+
+    test('425 legacy duplicate queue response throws MatchmakingAccountInUse',
+        () async {
+      final stub = _Stub(status: 425, body: {'code': 'ALREADY_QUEUED'});
+      final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
+      expect(
+        () =>
+            client.join(sessionToken: 'alice', mode: MatchmakingMode.turnBased),
+        throwsA(isA<MatchmakingAccountInUse>()),
+      );
+    });
+
     test('400 throws MatchmakingBadRequest', () async {
       final stub = _Stub(status: 400, body: {'code': 'BAD_MODE'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);

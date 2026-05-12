@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../errors/matchmaking_errors.dart';
 import '../game_core/board.dart';
+import '../game_view/flame_match_board.dart';
 import '../models/matchmaking_result.dart';
 import '../net/board_delta_socket_client.dart';
 import '../net/protocol.dart';
@@ -46,19 +47,14 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   String? _activePlayerId;
   int? _boardVersion;
   BoardPosition? _selected;
+  BoardMoveAnimation? _boardAnimation;
+  int _boardAnimationId = 0;
+  bool _boardAnimating = false;
   bool _pendingMove = false;
   bool _loading = true;
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
-
-  static const _tileColors = <Color>[
-    Color(0xFF2F80ED),
-    Color(0xFF27AE60),
-    Color(0xFFF2C94C),
-    Color(0xFFEB5757),
-    Color(0xFF9B51E0),
-  ];
 
   @override
   void initState() {
@@ -80,6 +76,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       connection.connect();
     } on MatchmakingAuthRejected {
       _showFatal('Please sign in again.');
+    } on MatchmakingAccountInUse {
+      _showAccountInUse();
     } on MatchmakingError catch (e) {
       _showFatal(e.message);
     } catch (e) {
@@ -117,6 +115,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
             height: dto.height,
             tiles: dto.board,
           );
+          _boardAnimation = null;
+          _boardAnimating = false;
           _loading = false;
           _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
           _notice = null;
@@ -124,14 +124,23 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }))
       ..add(connection.moveResolved.listen((dto) {
         final nextBoard = _boardFromResolved(dto);
+        final animation = nextBoard == null
+            ? null
+            : _animationFromResolvedDto(dto, nextBoard);
         setState(() {
           if (nextBoard != null) _board = nextBoard;
+          _boardAnimation = animation;
+          _boardAnimating = animation != null;
           _boardVersion = dto.boardVersion;
           _playerStates =
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
           _pendingMove = false;
           _selected = null;
-          _notice = dto.playerId == _myPlayerId ? null : 'Opponent moved';
+          _notice = dto.steps.isEmpty
+              ? 'No match'
+              : dto.playerId == _myPlayerId
+                  ? null
+                  : 'Opponent moved';
         });
       }))
       ..add(connection.turnChanged.listen((dto) {
@@ -149,6 +158,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
             height: dto.height,
             tiles: dto.board,
           );
+          _boardAnimation = null;
+          _boardAnimating = false;
           _boardVersion = dto.boardVersion;
           _playerStates =
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
@@ -160,6 +171,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       ..add(connection.moveRejected.listen((dto) {
         setState(() {
           _pendingMove = false;
+          _boardAnimating = false;
+          _boardAnimation = null;
           _selected = null;
           _notice = dto.reason;
         });
@@ -169,6 +182,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _playerStates =
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
           _pendingMove = false;
+          _boardAnimating = false;
+          _boardAnimation = null;
           _selected = null;
           _status = _gameOverText(dto);
           _notice = _status;
@@ -176,13 +191,81 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }))
       ..add(connection.errors.listen((message) {
         developer.log(message, name: 'board_delta_socket');
+        if (message == 'This account is playing from a different device.') {
+          _showAccountInUse();
+          return;
+        }
         setState(() => _notice = message);
       }));
   }
 
   GameBoard? _boardFromResolved(MoveResolvedDto dto) {
-    if (dto.steps.isEmpty) return null;
+    if (dto.steps.isEmpty) return _board;
     return GameBoard.fromRows(dto.steps.last.afterRefill);
+  }
+
+  BoardMoveAnimation _animationFromResolvedDto(
+    MoveResolvedDto dto,
+    GameBoard finalBoard,
+  ) {
+    var generatedIndex = 0;
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: dto.r1,
+      c1: dto.c1,
+      r2: dto.r2,
+      c2: dto.c2,
+      finalBoard: finalBoard,
+      revert: dto.steps.isEmpty,
+      steps: [
+        for (final step in dto.steps)
+          BoardCascadeAnimationStep(
+            matchedCells: [
+              for (final cell in step.matchedCells)
+                BoardPosition(cell.row, cell.col),
+            ],
+            movements: [
+              for (final movement in step.movements)
+                BoardTileMovement(
+                  col: movement.col,
+                  fromRow: movement.fromRow,
+                  toRow: movement.toRow,
+                ),
+            ],
+            generatedTiles: [
+              for (final position in step.newTilePositions)
+                _generatedTileForAnimation(
+                  dto.generatedTiles,
+                  generatedIndex++,
+                  expected: BoardPosition(position.row, position.col),
+                ),
+            ],
+            afterRefill: GameBoard.fromRows(step.afterRefill),
+          ),
+      ],
+    );
+  }
+
+  BoardGeneratedTile _generatedTileForAnimation(
+    List<GeneratedTileDto> generatedTiles,
+    int index, {
+    required BoardPosition expected,
+  }) {
+    if (index >= generatedTiles.length) {
+      throw const FormatException('move_resolved generatedTiles is too short');
+    }
+    final generated = generatedTiles[index];
+    if (generated.row != expected.row || generated.col != expected.col) {
+      throw FormatException(
+        'move_resolved generatedTiles[$index] targets '
+        '(${generated.row},${generated.col}) but expected $expected',
+      );
+    }
+    return BoardGeneratedTile(
+      row: generated.row,
+      col: generated.col,
+      tile: generated.tile,
+    );
   }
 
   bool get _isMyTurn =>
@@ -199,6 +282,32 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     });
   }
 
+  void _showAccountInUse() {
+    const message = 'This account is playing from a different device.';
+    _showFatal(message);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Account in use'),
+          content: const Text(message),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _connection?.dispose();
+                widget.onLeave();
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
   String _gameOverText(GameOverDto dto) {
     if (dto.loserId == null) return 'Draw';
     return dto.loserId == _myPlayerId ? 'Defeat' : 'Victory';
@@ -209,7 +318,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     final roomId = _roomId;
     final connection = _connection;
     if (board == null || roomId == null || connection == null) return;
-    if (_pendingMove) return;
+    if (_pendingMove || _boardAnimating) return;
     if (!_isMyTurn) {
       setState(() => _notice = 'Opponent turn');
       return;
@@ -229,12 +338,33 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       return;
     }
 
+    _submitSwap(selected.row, selected.col, row, col);
+  }
+
+  void _handleTileSwap(int r1, int c1, int r2, int c2) {
+    final board = _board;
+    if (board == null || _boardAnimating || !board.isAdjacent(r1, c1, r2, c2)) {
+      return;
+    }
+    _submitSwap(r1, c1, r2, c2);
+  }
+
+  void _submitSwap(int r1, int c1, int r2, int c2) {
+    final roomId = _roomId;
+    final connection = _connection;
+    if (roomId == null || connection == null) return;
+    if (_pendingMove || _boardAnimating) return;
+    if (!_isMyTurn) {
+      setState(() => _notice = 'Opponent turn');
+      return;
+    }
+
     connection.submitMove(
       roomId: roomId,
-      r1: selected.row,
-      c1: selected.col,
-      r2: row,
-      c2: col,
+      r1: r1,
+      c1: c1,
+      r2: r2,
+      c2: c2,
     );
     setState(() {
       _pendingMove = true;
@@ -243,9 +373,34 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     });
   }
 
-  void _leave() {
+  Future<void> _leave() async {
+    final confirmed = await _confirmLeaveMatch();
+    if (!confirmed || !mounted) return;
     _connection?.forfeit();
     widget.onLeave();
+  }
+
+  Future<bool> _confirmLeaveMatch() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Leave match?'),
+            content: const Text(
+              'Leaving now counts as a loss. Are you sure you want to leave?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Stay'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Leave match'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
@@ -301,28 +456,19 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                         aspectRatio: 1,
                         child: Padding(
                           padding: const EdgeInsets.all(12),
-                          child: GridView.builder(
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: board.width,
-                              mainAxisSpacing: 6,
-                              crossAxisSpacing: 6,
-                            ),
-                            itemCount: board.width * board.height,
-                            itemBuilder: (context, index) {
-                              final row = index ~/ board.width;
-                              final col = index % board.width;
-                              final tile = board.tileAt(row, col);
-                              return _TileButton(
-                                key: Key('online_tile_${row}_$col'),
-                                tile: tile,
-                                selected: _selected == BoardPosition(row, col),
-                                disabled: _pendingMove || !_isMyTurn,
-                                color: _tileColors[tile % _tileColors.length],
-                                onPressed: () => _handleTileTap(row, col),
-                              );
+                          child: FlameMatchBoard(
+                            board: board,
+                            selected: _selected,
+                            disabled:
+                                _pendingMove || _boardAnimating || !_isMyTurn,
+                            animation: _boardAnimation,
+                            onAnimationComplete: () {
+                              if (!mounted) return;
+                              setState(() => _boardAnimating = false);
                             },
+                            tileKeyPrefix: 'online',
+                            onTileTap: _handleTileTap,
+                            onTileSwap: _handleTileSwap,
                           ),
                         ),
                       ),
@@ -426,55 +572,6 @@ class _HudRow extends StatelessWidget {
             style: theme.textTheme.bodySmall,
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _TileButton extends StatelessWidget {
-  const _TileButton({
-    super.key,
-    required this.tile,
-    required this.selected,
-    required this.disabled,
-    required this.color,
-    required this.onPressed,
-  });
-
-  final int tile;
-  final bool selected;
-  final bool disabled;
-  final Color color;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      button: true,
-      label: 'Tile ${tile + 1}',
-      selected: selected,
-      enabled: !disabled,
-      child: Material(
-        color: disabled
-            ? color.withValues(alpha: 0.45)
-            : selected
-                ? theme.colorScheme.outline
-                : color,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: disabled ? null : onPressed,
-          child: Center(
-            child: Text(
-              '${tile + 1}',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
