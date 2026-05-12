@@ -174,6 +174,51 @@ void main() {
     expect(left, isTrue);
   });
 
+  testWidgets('online screen resumes known active room before joining',
+      (tester) async {
+    final fake = _FakeConnection();
+    final postPaths = <String>[];
+    Object? resumeBody;
+    String? connectionToken;
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (url, {headers, body}) async {
+        postPaths.add(url.path);
+        resumeBody = body;
+        return http.Response(
+          jsonEncode({
+            'roomToken': 'resumed-room-token',
+            'expiresAt': 123,
+            'mode': 'turn_based',
+          }),
+          200,
+        );
+      },
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        resumeRoomId: 'room-existing',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) {
+          connectionToken = roomToken;
+          return fake;
+        },
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(postPaths, ['/matchmaking/resume']);
+    expect(resumeBody, jsonEncode({'roomId': 'room-existing'}));
+    expect(connectionToken, 'resumed-room-token');
+    expect(fake.connected, isTrue);
+  });
+
   testWidgets('online leave confirmation can be cancelled', (tester) async {
     final fake = _FakeConnection();
     var left = false;

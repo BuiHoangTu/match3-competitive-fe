@@ -23,6 +23,7 @@ class OnlineGameScreen extends StatefulWidget {
     required this.characterId,
     required this.matchmaking,
     required this.onLeave,
+    this.resumeRoomId,
     this.onMatchComplete,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
   });
@@ -33,6 +34,7 @@ class OnlineGameScreen extends StatefulWidget {
   final String characterId;
   final MatchmakingClient matchmaking;
   final VoidCallback onLeave;
+  final String? resumeRoomId;
   final ValueChanged<MatchResult>? onMatchComplete;
   final BoardDeltaConnectionFactory connectionFactory;
 
@@ -91,6 +93,19 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   }
 
   Future<MatchmakingResult> _joinOrResume() async {
+    final resumeRoomId = widget.resumeRoomId;
+    if (resumeRoomId != null && resumeRoomId.isNotEmpty) {
+      if (mounted) setState(() => _status = 'Reconnecting...');
+      try {
+        return await widget.matchmaking.resume(
+          sessionToken: widget.sessionToken,
+          roomId: resumeRoomId,
+        );
+      } on MatchmakingRoomGone {
+        // The status result was stale. Fall through to a fresh join.
+      }
+    }
+
     try {
       return await widget.matchmaking.join(
         sessionToken: widget.sessionToken,

@@ -383,7 +383,7 @@ describe("session token works against /matchmaking/join", () => {
           body: JSON.stringify({ mode: "pve" }),
         }),
       ]);
-      expect(join.status).toBe(200);
+      expect(join.status).toBe(201);
       const data = await join.json();
       expect(data.roomToken).toMatch(/.+\..+/);
     }, store);

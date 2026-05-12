@@ -515,6 +515,11 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
     expect("height" in reconnectPayload).toBe(false);
     expect("boardGrid" in reconnectPayload).toBe(false);
     expect(reconnectPayload.board).toBeDefined();
+    expect(reconnectPayload.myPlayerId).toBe(rejoinSocket.id);
+    expect(reconnectPayload.playerStates?.[reconnectPayload.myPlayerId]).toBeDefined();
+    expect([reconnectPayload.myPlayerId, reconnectPayload.opponentId]).toContain(
+      reconnectPayload.activePlayerId
+    );
 
     // Flat board snapshot must match the locally-computed result of the accepted moves.
     expect(gridFromFlatBoard(reconnectPayload)).toEqual(currentGrid);

@@ -154,6 +154,35 @@ describe("MatchEngineService", () => {
     expect(snap.scores[P2]).toBe(0);
   });
 
+  it("replacePlayerId preserves turn and player state for reconnect", () => {
+    service.startMatch(ROOM_ID, [P1, P2], SEED, "turn_based");
+    const before = service.getSnapshot(ROOM_ID)!;
+    const reconnected = "player-1-reconnected";
+
+    service.replacePlayerId(ROOM_ID, P1, reconnected);
+
+    const after = service.getSnapshot(ROOM_ID)!;
+    expect(after.activePlayer).toBe(reconnected);
+    expect(after.playerStates[reconnected]).toEqual(before.playerStates[P1]);
+    expect(after.playerStates[P1]).toBeUndefined();
+    expect(after.scores[reconnected]).toBe(before.scores[P1]);
+    expect(after.scores[P1]).toBeUndefined();
+
+    const swap = findMatchingSwap(after.boardGrid);
+    if (!swap) throw new Error("No matching swap on initial board");
+    const rejected: unknown[] = [];
+    service.on("move_rejected", (p) => rejected.push(p));
+    service.submitMove(
+      ROOM_ID,
+      reconnected,
+      swap.r1,
+      swap.c1,
+      swap.r2,
+      swap.c2
+    );
+    expect(rejected).toHaveLength(0);
+  });
+
   // ── submitMove — valid ──────────────────────────────────────────────────────
 
   it("valid move emits move_resolved with correct fields", () => {

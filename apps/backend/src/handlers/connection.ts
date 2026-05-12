@@ -42,6 +42,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
       if (existingRoom && tokenSlot !== undefined) {
         const oldSocketId = existingRoom.players[tokenSlot];
         if (oldSocketId && oldSocketId !== socket.id) {
+          ctx.socketBridge.replacePlayerId(tokenRoomId, oldSocketId, socket.id);
           ctx.roomManager.replacePlayer(oldSocketId, socket.id);
         }
       }

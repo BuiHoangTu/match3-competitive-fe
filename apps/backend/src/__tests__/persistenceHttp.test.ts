@@ -208,7 +208,7 @@ describe("POST /account/delete (T-v0.6-F01)", () => {
       httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice"),
       httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice2"),
     ]);
-    expect(joinR.status).toBe(200);
+    expect(joinR.status).toBe(201);
 
     const r = await httpJson(handle.port, "POST", "/account/delete", {}, "alice");
     expect(r.status).toBe(409);
@@ -264,7 +264,7 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
       }, "alice"),
       httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice2"),
     ]);
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(201);
     expect(userStore.rows.has("user:alice")).toBe(true);
     expect(userStore.rows.get("user:alice")?.displayName).toBe("Alice");
   });
@@ -291,7 +291,7 @@ describe("POST /matchmaking/join upserts user (T-v0.6-E06)", () => {
       }, "alice"),
       httpJson(handle.port, "POST", "/matchmaking/join", { mode: "pve" }, "alice3"),
     ]);
-    expect(secondJoin.status).toBe(200);
+    expect(secondJoin.status).toBe(201);
 
     // alice row updated; alice2 and alice3 are also upserted (no displayName).
     expect(userStore.rows.has("user:alice")).toBe(true);

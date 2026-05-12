@@ -112,7 +112,7 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
       try {
         // 1. Join matchmaking (solo mode for simplicity)
         const joinResp = await postJson(port, "/matchmaking/join", { mode: "pve" }, "alice");
-        expect(joinResp.status).toBe(200);
+        expect(joinResp.status).toBe(201);
         const { roomToken: token1 } = joinResp.body as { roomToken: string; expiresAt: number };
         const payload1 = verifyRoomToken(token1);
         expect(payload1).not.toBeNull();
@@ -198,7 +198,7 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
 
       try {
         const joinResp = await postJson(port, "/matchmaking/join", { mode: "pve" }, "bob");
-        expect(joinResp.status).toBe(200);
+        expect(joinResp.status).toBe(201);
         const { roomToken } = joinResp.body as { roomToken: string };
         const payload = verifyRoomToken(roomToken)!;
         const roomId = payload.roomId;

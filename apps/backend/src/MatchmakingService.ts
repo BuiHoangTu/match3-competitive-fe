@@ -131,7 +131,7 @@ export class MatchmakingService {
     return this.signForSlot(
       room,
       slot as 0 | 1,
-      "turn_based",
+      room.gameMode,
       opponentUserId ? { userId: opponentUserId } : null
     );
   }

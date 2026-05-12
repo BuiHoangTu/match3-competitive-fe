@@ -69,6 +69,16 @@ abstract final class Routes {
   static const terms = 'terms';
 }
 
+class _OnlineMatchLaunch {
+  const _OnlineMatchLaunch({
+    required this.characterId,
+    this.resumeRoomId,
+  });
+
+  final String characterId;
+  final String? resumeRoomId;
+}
+
 // ---------------------------------------------------------------------------
 // Auth state interface
 // ---------------------------------------------------------------------------
@@ -319,7 +329,11 @@ GoRouter createRouter({
               );
 
           // Launches the native Flutter game screen for the selected mode.
-          Future<void> launchGame(BuildContext ctx, String mode) async {
+          Future<void> launchGame(
+            BuildContext ctx,
+            String mode, {
+            String? resumeRoomId,
+          }) async {
             developer.log('Launching game mode=$mode', name: 'router');
             final tok = auth.sessionToken;
             if (tok == null) {
@@ -337,7 +351,13 @@ GoRouter createRouter({
               return;
             }
             if (mode == 'turn_based') {
-              ctx.goNamed(Routes.onlineMatch, extra: characterId);
+              ctx.goNamed(
+                Routes.onlineMatch,
+                extra: _OnlineMatchLaunch(
+                  characterId: characterId,
+                  resumeRoomId: resumeRoomId,
+                ),
+              );
               return;
             }
           }
@@ -346,11 +366,13 @@ GoRouter createRouter({
           // match. Ask the backend; if so, HomeScreen auto-fires the matching
           // mode handler so they land back in the match instead of the lobby.
           // Solo doesn't show up here because practice is fully local.
+          String? autoResumeRoomId;
           Future<String?> autoResumeCheck() async {
             final tok = auth.sessionToken;
             if (tok == null) return null;
             try {
               final session = await mm.getActiveSession(sessionToken: tok);
+              autoResumeRoomId = session?.roomId;
               return session?.mode;
             } catch (_) {
               return null;
@@ -372,7 +394,11 @@ GoRouter createRouter({
               ),
               onAccountPressed: () => context.goNamed(Routes.account),
               onAutoResumeCheck: autoResumeCheck,
-              onAutoResumeModeLaunch: (mode) => launchGame(context, mode),
+              onAutoResumeModeLaunch: (mode) => launchGame(
+                context,
+                mode,
+                resumeRoomId: autoResumeRoomId,
+              ),
             ),
           );
         },
@@ -502,7 +528,12 @@ GoRouter createRouter({
               ),
             );
           }
-          final characterId = state.extra as String? ?? 'cat';
+          final extra = state.extra;
+          final characterId = extra is _OnlineMatchLaunch
+              ? extra.characterId
+              : extra as String? ?? 'cat';
+          final resumeRoomId =
+              extra is _OnlineMatchLaunch ? extra.resumeRoomId : null;
           return _buildPage(
             context,
             state,
@@ -511,6 +542,7 @@ GoRouter createRouter({
               backendUrl: backendUrl,
               mode: MatchmakingMode.turnBased,
               characterId: characterId,
+              resumeRoomId: resumeRoomId,
               matchmaking: mm,
               connectionFactory: boardDeltaConnectionFactory,
               onLeave: () => context.goNamed(Routes.home),

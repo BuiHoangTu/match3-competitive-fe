@@ -31,12 +31,14 @@ void main() {
   const baseUrl = 'http://localhost:3001';
 
   group('MatchmakingClient.join', () {
-    test('200 returns a parsed MatchmakingResult', () async {
-      final stub = _Stub(status: 200, body: {
+    test('201 returns a parsed new MatchmakingResult', () async {
+      final stub = _Stub(status: 201, body: {
         'roomToken': 'room.jwt.abc',
         'expiresAt': 1234567890,
         'mode': 'turn_based',
         'opponent': {'userId': 'user-bob'},
+        'joinKind': 'new',
+        'reconnected': false,
       });
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
       final result = await client.join(
@@ -48,6 +50,8 @@ void main() {
       expect(result.mode, 'turn_based');
       expect(result.opponent?.userId, 'user-bob');
       expect(result.opponent?.isBot, false);
+      expect(result.joinKind, 'new');
+      expect(result.reconnected, false);
     });
 
     test('200 with null opponent (e.g. solo legacy or single-player room)',
@@ -79,6 +83,28 @@ void main() {
         mode: MatchmakingMode.turnBased,
       );
       expect(result.opponent?.isBot, true);
+    });
+
+    test('200 existing active room response is accepted as reconnect',
+        () async {
+      final stub = _Stub(status: 200, body: {
+        'roomToken': 'room.jwt.existing',
+        'expiresAt': 1234567890,
+        'mode': 'pve',
+        'opponent': {'userId': 'user-bob'},
+        'joinKind': 'reconnect',
+        'reconnected': true,
+      });
+      final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
+      final result = await client.join(
+        sessionToken: 'session-alice',
+        mode: MatchmakingMode.turnBased,
+      );
+      expect(result.roomToken, 'room.jwt.existing');
+      expect(result.mode, 'pve');
+      expect(result.opponent?.userId, 'user-bob');
+      expect(result.joinKind, 'reconnect');
+      expect(result.reconnected, true);
     });
 
     test('401 throws MatchmakingAuthRejected', () async {

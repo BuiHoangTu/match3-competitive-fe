@@ -272,6 +272,35 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
   }
 
   /**
+   * Remap a reconnecting player's socket id without resetting authoritative
+   * board/player state.
+   */
+  replacePlayerId(roomId: string, oldPlayerId: string, newPlayerId: string): void {
+    if (oldPlayerId === newPlayerId) return;
+    const state = this.rooms.get(roomId);
+    if (!state) return;
+
+    const index = state.playerIds.indexOf(oldPlayerId);
+    if (index !== -1) {
+      state.playerIds[index] = newPlayerId;
+    }
+
+    if (state.activePlayer === oldPlayerId) {
+      state.activePlayer = newPlayerId;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(state.scores, oldPlayerId)) {
+      state.scores[newPlayerId] = state.scores[oldPlayerId] ?? 0;
+      delete state.scores[oldPlayerId];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(state.playerStates, oldPlayerId)) {
+      state.playerStates[newPlayerId] = state.playerStates[oldPlayerId]!;
+      delete state.playerStates[oldPlayerId];
+    }
+  }
+
+  /**
    * Validate and apply a move. Emits `move_resolved` + `turn_changed` on
    * success, or `move_rejected` on any validation failure.
    */

@@ -90,11 +90,13 @@ class MatchmakingClient {
   }) =>
       http.get(url, headers: headers);
 
-  /// Find a match. Resolves when the backend returns a room token (either
-  /// paired with a human or fallen back to bot).
+  /// Find a match. Resolves when the backend returns a room token: 201 for a
+  /// new room/match, or 200 when reconnecting to an existing active room.
   ///
-  /// Throws [MatchmakingAuthRejected] on 401, [MatchmakingActiveRoom] on 409,
-  /// [MatchmakingBadRequest] on 400, [MatchmakingTransportError] otherwise.
+  /// Throws [MatchmakingAuthRejected] on 401, [MatchmakingBadRequest] on 400,
+  /// [MatchmakingAccountInUse] for duplicate pending joins, and
+  /// [MatchmakingTransportError] otherwise. Older servers may still return
+  /// [MatchmakingActiveRoom] on 409; callers keep a resume fallback for that.
   Future<MatchmakingResult> join({
     required String sessionToken,
     required MatchmakingMode mode,
@@ -216,6 +218,7 @@ class MatchmakingClient {
 
     switch (response.statusCode) {
       case 200:
+      case 201:
         try {
           return MatchmakingResult.fromJson(decoded);
         } catch (e) {

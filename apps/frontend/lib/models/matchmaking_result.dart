@@ -8,6 +8,8 @@ class MatchmakingResult {
     required this.roomToken,
     required this.expiresAt,
     required this.mode,
+    this.joinKind = 'unknown',
+    this.reconnected = false,
     this.opponent,
   });
 
@@ -19,8 +21,17 @@ class MatchmakingResult {
   /// proactive refresh hangs off this.
   final int expiresAt;
 
-  /// Matchmaking mode the caller requested. Echoed back by the server.
+  /// Server room mode. When /join resumes an existing room this may differ
+  /// from the newly requested mode.
   final String mode;
+
+  /// Explicit server outcome for the request: "new", "reconnect", or
+  /// "unknown" for older backend responses.
+  final String joinKind;
+
+  /// True when the server returned an existing room rather than creating or
+  /// matching a fresh one.
+  final bool reconnected;
 
   /// Opponent userId, or null for solo rooms. For bot rooms this is
   /// `"bot:default"`.
@@ -32,6 +43,8 @@ class MatchmakingResult {
       roomToken: json['roomToken'] as String,
       expiresAt: json['expiresAt'] as int,
       mode: json['mode'] as String,
+      joinKind: json['joinKind'] as String? ?? 'unknown',
+      reconnected: json['reconnected'] == true,
       opponent: opponentRaw is Map<String, dynamic>
           ? MatchmakingOpponent.fromJson(opponentRaw)
           : null,

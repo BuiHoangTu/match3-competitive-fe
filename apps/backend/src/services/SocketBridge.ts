@@ -123,6 +123,10 @@ export class SocketBridge {
     this.service.startMatch(roomId, playerIds, originalSeed, gameMode);
   }
 
+  replacePlayerId(roomId: string, oldPlayerId: string, newPlayerId: string): void {
+    this.service.replacePlayerId(roomId, oldPlayerId, newPlayerId);
+  }
+
   // ── Service-event subscribers ─────────────────────────────────────────────
 
   private _subscribeToServiceEvents(): void {

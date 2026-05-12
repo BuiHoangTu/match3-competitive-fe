@@ -22,6 +22,8 @@ interface JoinResponse {
   expiresAt: number;
   mode: string;
   opponent: { userId: string } | null;
+  joinKind?: "new" | "reconnect";
+  reconnected?: boolean;
 }
 
 async function postJson(
@@ -93,10 +95,10 @@ async function pairUsers(
   user2: string,
   mode: "turn_based" | "pve" = "pve"
 ): Promise<JoinResponse> {
-  const [r1] = await Promise.all([
-    postJson(port, "/matchmaking/join", { mode }, user1),
-    postJson(port, "/matchmaking/join", { mode }, user2),
-  ]);
+  const r1Promise = postJson(port, "/matchmaking/join", { mode }, user1);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const r2Promise = postJson(port, "/matchmaking/join", { mode }, user2);
+  const [r1] = await Promise.all([r1Promise, r2Promise]);
   return r1.body as JoinResponse;
 }
 
@@ -148,8 +150,8 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
       postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "alice"),
       postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "bob"),
     ]);
-    expect(r1.status).toBe(200);
-    expect(r2.status).toBe(200);
+    expect(r1.status).toBe(201);
+    expect(r2.status).toBe(201);
     const b1 = r1.body as JoinResponse;
     const b2 = r2.body as JoinResponse;
     const p1 = verifyRoomToken(b1.roomToken)!;
@@ -157,6 +159,8 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(p1.roomId).toBe(p2.roomId);
     expect(b1.opponent?.userId).toBe("user:bob");
     expect(b2.opponent?.userId).toBe("user:alice");
+    expect(b1.joinKind).toBe("new");
+    expect(b1.reconnected).toBe(false);
   });
 
   it("single pve request falls back to bot after BOT_WAIT_MS", async () => {
@@ -166,9 +170,11 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
       { mode: "pve" },
       "alice"
     );
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(201);
     const body = r.body as JoinResponse;
     expect(body.opponent?.userId).toBe("bot:default");
+    expect(body.joinKind).toBe("new");
+    expect(body.reconnected).toBe(false);
     const payload = verifyRoomToken(body.roomToken);
     expect(payload!.userId).toBe("user:alice");
     expect(payload!.slot).toBe(0);
@@ -181,10 +187,12 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
       { mode: "turn_based" },
       "alice"
     );
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(201);
     const body = r.body as JoinResponse;
     expect(body.mode).toBe("turn_based");
     expect(body.opponent?.userId).toBe("bot:default");
+    expect(body.joinKind).toBe("new");
+    expect(body.reconnected).toBe(false);
     const payload = verifyRoomToken(body.roomToken);
     expect(payload!.userId).toBe("user:alice");
     expect(payload!.slot).toBe(0);
@@ -193,17 +201,26 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(room?.boardGrid).toBeDefined();
   }, BOT_WAIT_MS + 2000);
 
-  it("409 when the user already has an active room", async () => {
+  it("returns the existing room when the user already has an active room", async () => {
     // Pair alice+bob instantly so alice has an active room with no wait.
-    await pairUsers(handle.port, "alice", "bob");
-    // Second join attempt for alice must be rejected.
+    const firstJoin = await pairUsers(handle.port, "alice", "bob", "pve");
+    const firstPayload = verifyRoomToken(firstJoin.roomToken)!;
+
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
-    expect(r2.status).toBe(409);
-    expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
+    expect(r2.status).toBe(200);
+    const body = r2.body as JoinResponse;
+    const payload = verifyRoomToken(body.roomToken)!;
+    expect(payload.roomId).toBe(firstPayload.roomId);
+    expect(payload.userId).toBe("user:alice");
+    expect(payload.slot).toBe(0);
+    expect(body.mode).toBe("pve");
+    expect(body.joinKind).toBe("reconnect");
+    expect(body.reconnected).toBe(true);
   });
 
-  it("409 ACCOUNT_IN_USE when the active room slot is connected", async () => {
+  it("returns the existing room even when the active room slot is connected", async () => {
     const firstJoin = await pairUsers(handle.port, "alice", "bob");
+    const firstPayload = verifyRoomToken(firstJoin.roomToken)!;
     const socket = ioClient(`http://localhost:${handle.port}`, {
       transports: ["websocket"],
       forceNew: true,
@@ -213,16 +230,20 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
       await waitForConnect(socket);
 
       const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
-      expect(r2.status).toBe(409);
-      const body = r2.body as { code: string; message: string };
-      expect(body.code).toBe("ACCOUNT_IN_USE");
-      expect(body.message).toContain("different device");
+      expect(r2.status).toBe(200);
+      const body = r2.body as JoinResponse;
+      const payload = verifyRoomToken(body.roomToken)!;
+      expect(payload.roomId).toBe(firstPayload.roomId);
+      expect(payload.userId).toBe("user:alice");
+      expect(payload.slot).toBe(0);
+      expect(body.joinKind).toBe("reconnect");
+      expect(body.reconnected).toBe(true);
     } finally {
       socket.disconnect();
     }
   });
 
-  it("409 ACTIVE_ROOM still allows resume when the active room slot is disconnected", async () => {
+  it("returns the existing room when the active room slot is disconnected", async () => {
     const firstJoin = await pairUsers(handle.port, "alice", "bob");
     const socket = ioClient(`http://localhost:${handle.port}`, {
       transports: ["websocket"],
@@ -233,10 +254,14 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     socket.disconnect();
 
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
-    expect(r2.status).toBe(409);
-    const body = r2.body as { code: string; roomId: string };
-    expect(body.code).toBe("ACTIVE_ROOM");
-    expect(body.roomId).toBe(verifyRoomToken(firstJoin.roomToken)!.roomId);
+    expect(r2.status).toBe(200);
+    const body = r2.body as JoinResponse;
+    const payload = verifyRoomToken(body.roomToken)!;
+    expect(payload.roomId).toBe(verifyRoomToken(firstJoin.roomToken)!.roomId);
+    expect(payload.userId).toBe("user:alice");
+    expect(payload.slot).toBe(0);
+    expect(body.joinKind).toBe("reconnect");
+    expect(body.reconnected).toBe(true);
   });
 
   it("409 ACCOUNT_IN_USE instead of 425 for duplicate pending joins", async () => {
@@ -257,25 +282,32 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
   });
 
   // T-v0.6-G05 · AR-7 single-active-match enforcement
-  it("409 response includes the existing roomId so client can call /resume", async () => {
+  it("join response includes a token for the existing room", async () => {
     const firstJoin = await pairUsers(handle.port, "carol", "carol2");
     const firstPayload = verifyRoomToken(firstJoin.roomToken)!;
     const firstRoomId = firstPayload.roomId;
 
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "carol");
-    expect(r2.status).toBe(409);
-    const body = r2.body as { code: string; roomId: string };
-    expect(body.code).toBe("ACTIVE_ROOM");
-    // The response must include the existing roomId so the client can call /resume.
-    expect(body.roomId).toBe(firstRoomId);
+    expect(r2.status).toBe(200);
+    const body = r2.body as JoinResponse;
+    const payload = verifyRoomToken(body.roomToken)!;
+    expect(payload.roomId).toBe(firstRoomId);
+    expect(payload.userId).toBe("user:carol");
+    expect(payload.slot).toBe(0);
+    expect(body.joinKind).toBe("reconnect");
+    expect(body.reconnected).toBe(true);
   });
 
-  it("AR-7 enforced across different modes (first pve, then turn_based rejected)", async () => {
+  it("AR-7 resumes the existing room across different requested modes", async () => {
     await pairUsers(handle.port, "dave", "dave2", "pve");
-    // Attempting a different mode is still rejected.
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "dave");
-    expect(r2.status).toBe(409);
-    expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
+    expect(r2.status).toBe(200);
+    const body = r2.body as JoinResponse;
+    const payload = verifyRoomToken(body.roomToken)!;
+    expect(payload.userId).toBe("user:dave");
+    expect(body.mode).toBe("pve");
+    expect(body.joinKind).toBe("reconnect");
+    expect(body.reconnected).toBe(true);
   });
 });
 
@@ -314,6 +346,8 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
     expect(resumePayload.roomId).toBe(joinPayload.roomId);
     expect(resumePayload.userId).toBe("user:alice");
     expect(resumePayload.slot).toBe(0);
+    expect(resumeBody.joinKind).toBe("reconnect");
+    expect(resumeBody.reconnected).toBe(true);
   });
 
   it("409 ACCOUNT_IN_USE when resuming a slot that is still connected", async () => {

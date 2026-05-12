@@ -226,24 +226,20 @@ async function handleJoin(
   // AR-7: one active match per userId.
   const existing = roomManager.getRoomByUserId(userId);
   if (existing) {
-    const slot = existing.userIds[0] === userId ? 0 : existing.userIds[1] === userId ? 1 : -1;
-    const existingPlayerId =
-      slot === -1 ? null : roomManager.getPlayerIdForSlot(existing.id, slot as 0 | 1);
-    if (
-      existingPlayerId &&
-      deps.isSocketConnected?.(existingPlayerId) === true
-    ) {
-      sendJson(res, 409, {
-        code: "ACCOUNT_IN_USE",
-        roomId: existing.id,
-        message: "This account is playing from a different device",
+    const result = matchmaking.resume(userId, existing.id);
+    if ("error" in result) {
+      sendJson(res, result.error === "forbidden" ? 403 : 410, {
+        code: result.error === "forbidden" ? "NOT_A_SLOT" : "ROOM_GONE",
       });
       return;
     }
-    sendJson(res, 409, {
-      code: "ACTIVE_ROOM",
-      roomId: existing.id,
-      message: "User already has an active match; call /matchmaking/resume instead",
+    sendJson(res, 200, {
+      roomToken: result.roomToken,
+      expiresAt: result.expiresAt,
+      mode: result.mode,
+      opponent: result.opponent,
+      joinKind: "reconnect",
+      reconnected: true,
     });
     return;
   }
@@ -263,11 +259,13 @@ async function handleJoin(
 
   try {
     const result = await matchmaking.join(userId, mode);
-    sendJson(res, 200, {
+    sendJson(res, 201, {
       roomToken: result.roomToken,
       expiresAt: result.expiresAt,
       mode: result.mode,
       opponent: result.opponent,
+      joinKind: "new",
+      reconnected: false,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -327,6 +325,8 @@ async function handleResume(
     expiresAt: result.expiresAt,
     mode: result.mode,
     opponent: result.opponent,
+    joinKind: "reconnect",
+    reconnected: true,
   });
 }
 
