@@ -89,8 +89,6 @@ export class RoomManager {
     gameMode: "turn_based" | "pve" = "turn_based"
   ): Room {
     const seed = this.nextSeed();
-    const isBotMatch = userIdSlot1 === "bot:default" || userIdSlot0 === "bot:default";
-    const effectiveMode = isBotMatch ? "pve" : gameMode;
     const room: Room = {
       id: generateId(),
       players: [],
@@ -100,9 +98,9 @@ export class RoomManager {
       activePlayer: null,
       status: "active",
       lastActivityAt: Date.now(),
-      gameMode: effectiveMode,
+      gameMode,
     };
-    if (effectiveMode === "turn_based") {
+    if (gameMode === "turn_based") {
       room.originalSeed = seed;
       room.boardGrid = createBoard(seed).grid;
       room.boardVersion = 1;
@@ -132,9 +130,25 @@ export class RoomManager {
   attachSocketToSlot(roomId: string, slot: 0 | 1, socketId: string): Room | null {
     const room = this.rooms.get(roomId);
     if (!room) return null;
-    if (!room.players.includes(socketId)) room.players.push(socketId);
+    const previousSocketId = room.players[slot];
+    if (previousSocketId && previousSocketId !== socketId) {
+      this.playerRoom.delete(previousSocketId);
+    }
+
+    const existingIndex = room.players.indexOf(socketId);
+    if (existingIndex !== -1 && existingIndex !== slot) {
+      room.players[existingIndex] = "";
+    }
+
+    room.players[slot] = socketId;
     this.playerRoom.set(socketId, roomId);
     return room;
+  }
+
+  getPlayerIdForSlot(roomId: string, slot: 0 | 1): string | null {
+    const room = this.rooms.get(roomId);
+    if (!room) return null;
+    return room.players[slot] || null;
   }
 
   addMove(roomId: string, move: Move): boolean {

@@ -111,10 +111,10 @@ describe("RoomManager", () => {
     expect(room.scores).toEqual({});
   });
 
-  it("createRoomForMatch with bot opponent forces pve mode", () => {
+  it("createRoomForMatch with bot opponent preserves requested mode", () => {
     const room = rm.createRoomForMatch("alice", "bot:default", "turn_based");
-    expect(room.gameMode).toBe("pve");
-    expect(room.boardGrid).toBeUndefined();
+    expect(room.gameMode).toBe("turn_based");
+    expect(room.boardGrid).toBeDefined();
   });
 
   it("two turn_based rooms with the same seed produce identical initial boardGrids", () => {

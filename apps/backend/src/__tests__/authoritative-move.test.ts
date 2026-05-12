@@ -5,7 +5,7 @@
  * - Invalid swap (no match) is rejected with move_rejected { no_match }
  * - Valid swap relays the accepted move to the opponent only
  * - The hot path broadcasts Flutter-native board-delta move_resolved payloads
- * - Snapshot rejoin: boardGrid + rngState in rejoin_ok match live room state
+ * - Snapshot rejoin: flat board in rejoin_ok match live room state
  * - Server determinism: two independent simulations from the same seed + moves
  *   produce byte-identical boardGrid and rngState at every step
  */
@@ -15,9 +15,9 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
-import { swapTiles } from "@match3/shared-js/engine/Board";
-import { createStatefulRng } from "@match3/shared-js/engine/rng";
-import { findMatches, resolveBoardAnimated } from "@match3/shared-js/engine/MatchEngine";
+import { BOARD_HEIGHT, BOARD_WIDTH } from "@match3/shared-js/engine/Board";
+import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import { BOT_ID, BOT_USER_ID } from "../constants";
 import type {
   BoardDeltaMoveResolvedPayload,
   MatchFoundPayload,
@@ -31,9 +31,9 @@ interface TestServer {
   url: string;
 }
 
-async function startServer(): Promise<TestServer> {
+async function startServer(botWaitMs?: number): Promise<TestServer> {
   const handle = await new Promise<ServerHandle>((resolve) => {
-    const h = createMatch3Server();
+    const h = createMatch3Server({ botWaitMs });
     h.httpServer.listen(0, () => resolve(h));
   });
   const port = (handle.httpServer.address() as AddressInfo).port;
@@ -58,6 +58,30 @@ async function joinAndConnect(
     auth: { token: roomToken },
   });
   return { socket, roomToken };
+}
+
+async function joinSoloAndConnect(
+  url: string,
+  userId: string
+): Promise<{ socket: ClientSocket; roomToken: string }> {
+  const session = signSession({ userId }).token;
+  const res = await fetch(`${url}/matchmaking/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session}` },
+    body: JSON.stringify({ mode: "turn_based" }),
+  });
+  if (!res.ok) throw new Error(`matchmaking/join failed: ${res.status}`);
+  const body = (await res.json()) as {
+    roomToken: string;
+    opponent: { userId: string } | null;
+  };
+  expect(body.opponent?.userId).toBe(BOT_USER_ID);
+  const socket = ioClient(url, {
+    transports: ["websocket"],
+    forceNew: true,
+    auth: { token: body.roomToken },
+  });
+  return { socket, roomToken: body.roomToken };
 }
 
 function waitForEvent<T>(socket: ClientSocket, event: string, timeoutMs = 5000): Promise<T> {
@@ -86,6 +110,22 @@ function waitForEventFilter<T>(
     };
     socket.on(event, handler);
   });
+}
+
+function gridFromFlatBoard(payload: MatchFoundPayload): number[][] {
+  if (!payload.board) throw new Error("match_found missing flat board");
+  expect(payload.board).toHaveLength(BOARD_WIDTH * BOARD_HEIGHT);
+  const grid: number[][] = [];
+  for (let r = 0; r < BOARD_HEIGHT; r++) {
+    grid.push(payload.board.slice(r * BOARD_WIDTH, (r + 1) * BOARD_WIDTH));
+  }
+  return grid;
+}
+
+function finalGridFromResolved(payload: BoardDeltaMoveResolvedPayload): number[][] {
+  const finalStep = payload.steps[payload.steps.length - 1];
+  if (!finalStep) throw new Error("move_resolved missing cascade steps");
+  return finalStep.afterRefill.map((row) => [...row]);
 }
 
 /** Find the first adjacent swap on grid that produces a match. */
@@ -170,24 +210,24 @@ describe("server-authoritative PvP move handler", () => {
     return { srv, sockA, sockB, mA, mB };
   }
 
-  it("match_found includes boardGrid, rngState, originalSeed for turn_based", async () => {
+  it("match_found includes flat board without seed or board dimensions for turn_based", async () => {
     const { mA, mB } = await setup();
     expect(mA.mode).toBe("turn_based");
-    expect(Array.isArray(mA.boardGrid)).toBe(true);
-    expect(mA.boardGrid!.length).toBe(8);
-    expect(typeof mA.rngState).toBe("number");
-    expect(typeof mA.originalSeed).toBe("number");
-    expect(mA.originalSeed).toBe(mA.seed);
-    // Both clients receive the same seed and board
-    expect(mA.seed).toBe(mB.seed);
-    expect(JSON.stringify(mA.boardGrid)).toBe(JSON.stringify(mB.boardGrid));
+    expect("seed" in mA).toBe(false);
+    expect("width" in mA).toBe(false);
+    expect("height" in mA).toBe(false);
+    expect("boardGrid" in mA).toBe(false);
+    expect(Array.isArray(mA.board)).toBe(true);
+    expect(mA.board).toHaveLength(BOARD_WIDTH * BOARD_HEIGHT);
+    // Both clients receive the same board
+    expect(mA.board).toEqual(mB.board);
   });
 
   it("valid move relays opponent_move to the opposing socket only", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const otherSocket = firstPlayerSocket === sockA ? sockB : sockA;
-    const firstPlayerBoard = mA.boardGrid!;
+    const firstPlayerBoard = gridFromFlatBoard(mA);
     const swap = findMatchingSwap(firstPlayerBoard);
     if (!swap) throw new Error("No matching swap found");
 
@@ -216,7 +256,7 @@ describe("server-authoritative PvP move handler", () => {
   it("broadcasts board-delta move_resolved on the hot path", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
-    const grid = mA.boardGrid!;
+    const grid = gridFromFlatBoard(mA);
     const swap = findMatchingSwap(grid);
     if (!swap) throw new Error("No matching swap found");
 
@@ -252,7 +292,7 @@ describe("server-authoritative PvP move handler", () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
     const otherSocket = firstPlayerSocket === sockA ? sockB : sockA;
-    const grid = mA.boardGrid!;
+    const grid = gridFromFlatBoard(mA);
     const badSwap = findNonMatchingSwap(grid);
     if (!badSwap) {
       // Edge case: all swaps produce matches (skip rather than fail).
@@ -277,7 +317,7 @@ describe("server-authoritative PvP move handler", () => {
     const { sockA, sockB, mA } = await setup();
     // The inactive player tries to move
     const inactiveSocket = mA.firstPlayerId === mA.myPlayerId ? sockB : sockA;
-    const inactiveBoard = mA.boardGrid!;
+    const inactiveBoard = gridFromFlatBoard(mA);
     const swap = findMatchingSwap(inactiveBoard);
     if (!swap) throw new Error("No matching swap found");
 
@@ -294,7 +334,7 @@ describe("server-authoritative PvP move handler", () => {
     const p2Socket = p1Socket === sockA ? sockB : sockA;
 
     // Move 1 by p1
-    let currentGrid = mA.boardGrid!;
+    let currentGrid = gridFromFlatBoard(mA);
     const swap1 = findMatchingSwap(currentGrid);
     if (!swap1) throw new Error("No swap1 found");
 
@@ -302,15 +342,13 @@ describe("server-authoritative PvP move handler", () => {
       sockA,
       "turn_changed"
     );
+    const resolved1Promise = waitForEvent<BoardDeltaMoveResolvedPayload>(sockA, "move_resolved");
     p1Socket.emit("move", { roomId: mA.roomId, ...swap1 });
-    const turn1 = await turn1Promise;
+    const [turn1, resolved1] = await Promise.all([turn1Promise, resolved1Promise]);
 
     expect(turn1.activePlayerId).toBe(p2Socket.id);
     expect(typeof turn1.serverReceivedAt).toBe("number");
-    const boardObj1 = { grid: currentGrid, width: 8, height: 8 };
-    const swapped1 = swapTiles(boardObj1, swap1.r1, swap1.c1, swap1.r2, swap1.c2);
-    const rng1 = createStatefulRng(mA.originalSeed!);
-    currentGrid = resolveBoardAnimated(swapped1.grid, rng1.next).grid;
+    currentGrid = finalGridFromResolved(resolved1);
 
     // Move 2 by p2
     const swap2 = findMatchingSwap(currentGrid);
@@ -326,6 +364,49 @@ describe("server-authoritative PvP move handler", () => {
     expect(turn2.activePlayerId).toBe(p1Socket.id);
     expect(typeof turn2.serverReceivedAt).toBe("number");
   });
+
+  it("bot fallback in turn_based uses the same board-delta judge path", async () => {
+    const srv = await startServer(50);
+    servers.push(srv);
+
+    const { socket } = await joinSoloAndConnect(srv.url, "bot:A");
+    sockets.push(socket);
+
+    const match = await waitForEvent<MatchFoundPayload>(socket, "match_found", 8000);
+    expect(match.mode).toBe("turn_based");
+    expect(match.opponentId).toBe(BOT_ID);
+    expect(match.board).toHaveLength(BOARD_WIDTH * BOARD_HEIGHT);
+    expect("seed" in match).toBe(false);
+
+    const grid = gridFromFlatBoard(match);
+    const swap = findMatchingSwap(grid);
+    if (!swap) throw new Error("No matching swap found");
+
+    const humanResolvedPromise = waitForEventFilter<BoardDeltaMoveResolvedPayload>(
+      socket,
+      "move_resolved",
+      (payload) => payload.playerId === socket.id,
+      5000
+    );
+    const botResolvedPromise = waitForEventFilter<BoardDeltaMoveResolvedPayload>(
+      socket,
+      "move_resolved",
+      (payload) => payload.playerId === BOT_ID,
+      8000
+    );
+
+    socket.emit("move", { roomId: match.roomId, ...swap });
+    const [humanResolved, botResolved] = await Promise.all([
+      humanResolvedPromise,
+      botResolvedPromise,
+    ]);
+
+    expect(humanResolved.playerId).toBe(socket.id);
+    expect(botResolved.playerId).toBe(BOT_ID);
+    expect(botResolved.boardVersion).toBeGreaterThan(humanResolved.boardVersion);
+    expect("scores" in botResolved).toBe(false);
+    expect(Array.isArray(botResolved.generatedTiles)).toBe(true);
+  });
 });
 
 // ─── Snapshot rejoin test ─────────────────────────────────────────────────────
@@ -335,7 +416,7 @@ describe("server-authoritative PvP move handler", () => {
 //   2. Client calls POST /matchmaking/resume → fresh room token
 //   3. Client reconnects with new token → D02 handshake attaches to room slot
 //   4. Server emits match_found to the reconnecting socket with the current
-//      boardGrid + rngState snapshot (for turn_based rooms)
+//      flat board snapshot (for turn_based rooms)
 //
 // The legacy "rejoin" socket event also supports snapshot delivery (via
 // RejoinManager.lookup); it requires the disconnect handler to have registered
@@ -350,7 +431,7 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
     for (const srv of servers.splice(0)) await srv.handle.close();
   });
 
-  it("reconnecting player receives match_found with current boardGrid and rngState", async () => {
+  it("reconnecting player receives match_found with current flat board", async () => {
     const srv = await startServer();
     servers.push(srv);
 
@@ -372,9 +453,8 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
     const p2Socket = p1Socket === sockA ? sockB : sockA;
 
     // Play 3 moves to advance board state
-    let currentGrid = mA.boardGrid!;
+    let currentGrid = gridFromFlatBoard(mA);
     let playedAnyMove = false;
-    let rngState = mA.originalSeed!;
 
     for (let i = 0; i < 3; i++) {
       const activeSocket = i % 2 === 0 ? p1Socket : p2Socket;
@@ -386,15 +466,10 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
         activeSocket === sockA ? sockB : sockA,
         "opponent_move"
       );
+      const resolvedPromise = waitForEvent<BoardDeltaMoveResolvedPayload>(sockA, "move_resolved");
       activeSocket.emit("move", { roomId: mA.roomId, ...swap });
-      await relayPromise;
-
-      const boardObj = { grid: currentGrid, width: 8, height: 8 };
-      const swapped = swapTiles(boardObj, swap.r1, swap.c1, swap.r2, swap.c2);
-      const rng = createStatefulRng(rngState);
-      const resolved = resolveBoardAnimated(swapped.grid, rng.next);
-      currentGrid = resolved.grid;
-      rngState = rng.state();
+      const [, resolved] = await Promise.all([relayPromise, resolvedPromise]);
+      currentGrid = finalGridFromResolved(resolved);
       playedAnyMove = true;
     }
 
@@ -423,7 +498,7 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
 
     // Reconnect with the new token — D02 handshake attaches to room slot.
     // When the second player is now present again, match_found fires with
-    // the current boardGrid and rngState snapshot.
+    // the current flat board snapshot.
     const rejoinSocket = ioClient(srv.url, {
       transports: ["websocket"],
       forceNew: true,
@@ -435,14 +510,13 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
     const reconnectPayload = await rejoinFoundPromise;
 
     // Validate: the reconnecting client receives the snapshot
-    expect(reconnectPayload.boardGrid).toBeDefined();
-    expect(reconnectPayload.rngState).toBeDefined();
-    expect(reconnectPayload.originalSeed).toBe(mA.seed);
+    expect("seed" in reconnectPayload).toBe(false);
+    expect("width" in reconnectPayload).toBe(false);
+    expect("height" in reconnectPayload).toBe(false);
+    expect("boardGrid" in reconnectPayload).toBe(false);
+    expect(reconnectPayload.board).toBeDefined();
 
-    // boardGrid must match the locally-computed result of the accepted moves.
-    expect(JSON.stringify(reconnectPayload.boardGrid)).toBe(JSON.stringify(currentGrid));
-
-    // rngState must match the locally-computed deterministic RNG state.
-    expect(reconnectPayload.rngState).toBe(rngState);
+    // Flat board snapshot must match the locally-computed result of the accepted moves.
+    expect(gridFromFlatBoard(reconnectPayload)).toEqual(currentGrid);
   });
 });

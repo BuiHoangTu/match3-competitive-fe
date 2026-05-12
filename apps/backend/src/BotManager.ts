@@ -85,4 +85,26 @@ export class BotManager {
       });
     }, BOT_THINK_MS);
   }
+
+  scheduleTurnBasedBotTurn(
+    roomId: string,
+    submitMove: (move: { r1: number; c1: number; r2: number; c2: number }) => void
+  ): void {
+    setTimeout(() => {
+      const room = this.roomManager.getRoom(roomId);
+      if (
+        !room ||
+        room.status === "over" ||
+        room.gameMode !== "turn_based" ||
+        room.activePlayer !== BOT_ID ||
+        !room.boardGrid
+      ) {
+        return;
+      }
+
+      const move = this.botPlayer.findBestMove(room.boardGrid);
+      if (!move) return;
+      submitMove(move);
+    }, BOT_THINK_MS);
+  }
 }

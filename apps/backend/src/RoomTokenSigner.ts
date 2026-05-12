@@ -15,7 +15,6 @@ export interface RoomTokenPayload {
   roomId: string;
   userId: string;
   slot: 0 | 1;
-  seed: number;
   iat: number;
   exp: number;
 }
@@ -24,7 +23,6 @@ export interface SignInput {
   roomId: string;
   userId: string;
   slot: 0 | 1;
-  seed: number;
   ttlMs?: number;
   now?: number;
 }
@@ -50,7 +48,6 @@ export function sign(input: SignInput): string {
     roomId: input.roomId,
     userId: input.userId,
     slot: input.slot,
-    seed: input.seed,
     iat: now,
     exp: now + ttl,
   };
@@ -92,7 +89,6 @@ export function verify(
       typeof parsed.roomId !== "string" ||
       typeof parsed.userId !== "string" ||
       (parsed.slot !== 0 && parsed.slot !== 1) ||
-      typeof parsed.seed !== "number" ||
       typeof parsed.iat !== "number" ||
       typeof parsed.exp !== "number"
     ) {

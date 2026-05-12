@@ -40,8 +40,22 @@ describe("MatchmakingService (T-v0.6-D09, D10)", () => {
     expect(p1Payload!.roomId).toBe(r1.roomId);
   });
 
-  it("falls back to bot match after BOT_WAIT_MS", async () => {
+  it("falls back to a turn_based bot match after BOT_WAIT_MS", async () => {
     const result = await svc.join("alice", "turn_based");
+    expect(result.mode).toBe("turn_based");
+    expect(result.opponent?.userId).toBe("bot:default");
+    expect(result.slot).toBe(0);
+    const room = rm.getRoom(result.roomId);
+    expect(room).not.toBeNull();
+    expect(room!.gameMode).toBe("turn_based");
+    expect(room!.userIds[0]).toBe("alice");
+    expect(room!.userIds[1]).toBe("bot:default");
+    expect(room!.boardGrid).toBeDefined();
+  });
+
+  it("falls back to bot match for pve after BOT_WAIT_MS", async () => {
+    const result = await svc.join("alice", "pve");
+    expect(result.mode).toBe("pve");
     expect(result.opponent?.userId).toBe("bot:default");
     expect(result.slot).toBe(0);
     const room = rm.getRoom(result.roomId);
@@ -53,11 +67,13 @@ describe("MatchmakingService (T-v0.6-D09, D10)", () => {
   it("different modes do not pair with each other", async () => {
     const p1 = svc.join("alice", "turn_based");
     const p2 = svc.join("bob", "pve");
-    // Neither pairs with the other; both fall through to bot.
+    // Neither pairs with the other; each falls through to its own bot match.
     const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.roomId).not.toBe(r2.roomId);
     expect(r1.opponent?.userId).toBe("bot:default");
     expect(r2.opponent?.userId).toBe("bot:default");
+    expect(r1.roomId).not.toBe(r2.roomId);
+    expect(rm.getRoom(r1.roomId)!.gameMode).toBe("turn_based");
+    expect(rm.getRoom(r2.roomId)!.gameMode).toBe("pve");
   });
 
   it("cancel removes a waiter before pairing", async () => {

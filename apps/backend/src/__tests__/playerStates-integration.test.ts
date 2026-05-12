@@ -7,7 +7,7 @@
  *
  * Also confirms:
  * - game_over emitted by forfeit includes playerStates.
- * - boardGrid snapshot on rejoin is present.
+ * - flat board snapshot on rejoin is present.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -15,6 +15,7 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
+import { BOARD_HEIGHT, BOARD_WIDTH } from "@match3/shared-js/engine/Board";
 import { findMatches } from "@match3/shared-js/engine/MatchEngine";
 import { DEFAULTS } from "@match3/shared-js/engine/PlayerStats";
 import type { MatchFoundPayload } from "@match3/shared-js/protocol";
@@ -63,6 +64,16 @@ function waitForEvent<T>(socket: ClientSocket, event: string, timeoutMs = 5000):
       resolve(data);
     });
   });
+}
+
+function gridFromFlatBoard(payload: MatchFoundPayload): number[][] {
+  if (!payload.board) throw new Error("match_found missing flat board");
+  expect(payload.board).toHaveLength(BOARD_WIDTH * BOARD_HEIGHT);
+  const grid: number[][] = [];
+  for (let r = 0; r < BOARD_HEIGHT; r++) {
+    grid.push(payload.board.slice(r * BOARD_WIDTH, (r + 1) * BOARD_WIDTH));
+  }
+  return grid;
 }
 
 function findMatchingSwap(grid: number[][]): { r1: number; c1: number; r2: number; c2: number } | null {
@@ -124,7 +135,7 @@ describe("playerStates integration", () => {
   it("turn_changed includes full PlayerStats for both players with valid ranges", async () => {
     const { sockA, sockB, mA } = await setup();
     const firstPlayerSocket = mA.firstPlayerId === mA.myPlayerId ? sockA : sockB;
-    const swap = findMatchingSwap(mA.boardGrid!);
+    const swap = findMatchingSwap(gridFromFlatBoard(mA));
     if (!swap) throw new Error("No matching swap");
 
     type FullPlayerState = {
@@ -232,9 +243,12 @@ describe("playerStates integration", () => {
     const mFoundPromise = waitForEvent<MatchFoundPayload>(rejoinSocket, "match_found", 8000);
     const mFound = await mFoundPromise;
 
-    // The reconnecting player's match_found should still have boardGrid
-    expect(mFound.boardGrid).toBeDefined();
-    expect(mFound.rngState).toBeDefined();
-    expect(mFound.originalSeed).toBe(mA.seed);
+    // The reconnecting player's match_found should still have a flat board snapshot.
+    expect("seed" in mFound).toBe(false);
+    expect("width" in mFound).toBe(false);
+    expect("height" in mFound).toBe(false);
+    expect("boardGrid" in mFound).toBe(false);
+    expect(mFound.board).toBeDefined();
+    expect(mFound.board).toHaveLength(BOARD_WIDTH * BOARD_HEIGHT);
   });
 });

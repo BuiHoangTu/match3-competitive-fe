@@ -5,7 +5,6 @@ const baseInput = {
   roomId: "room-abc",
   userId: "user-alice",
   slot: 0 as const,
-  seed: 12345,
 };
 
 describe("RoomTokenSigner (T-v0.6-D11)", () => {
@@ -17,7 +16,7 @@ describe("RoomTokenSigner (T-v0.6-D11)", () => {
     expect(payload!.roomId).toBe("room-abc");
     expect(payload!.userId).toBe("user-alice");
     expect(payload!.slot).toBe(0);
-    expect(payload!.seed).toBe(12345);
+    expect("seed" in payload!).toBe(false);
     expect(payload!.iat).toBe(now);
     expect(payload!.exp).toBe(now + 60_000);
   });

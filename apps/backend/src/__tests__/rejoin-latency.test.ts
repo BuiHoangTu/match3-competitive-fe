@@ -132,6 +132,8 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
 
         expect(matchPayload.roomId).toBe(roomId);
         const seed = matchPayload.seed;
+        expect(typeof seed).toBe("number");
+        if (typeof seed !== "number") throw new Error("pve match_found missing seed");
 
         // 3. Disconnect client without playing moves — the rejoin path is
         // independent of the room's move log; we just need the room alive.
@@ -200,7 +202,7 @@ describe("T-v0.5-15 (v0.6) reconnect-to-resume via HTTP resume endpoint", () => 
         const { roomToken } = joinResp.body as { roomToken: string };
         const payload = verifyRoomToken(roomToken)!;
         const roomId = payload.roomId;
-        const seed = payload.seed;
+        const seed = server.roomManager.getRoom(roomId)!.seed;
 
         const client = ioClient(`http://127.0.0.1:${port}`, {
           transports: ["websocket"],

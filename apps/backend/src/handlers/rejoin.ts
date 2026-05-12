@@ -2,8 +2,8 @@
  * socket.on("rejoin", ...) handler.
  * T-v0.6-G02/G03 · userId-keyed rejoin via verified socket identity.
  *
- * turn_based rooms: emits a one-shot board snapshot (boardGrid + rngState +
- * scores + originalSeed) instead of the legacy moves[] list.
+ * turn_based rooms: emits a one-shot flat board snapshot instead of the
+ * legacy moves[] list.
  *
  * pve rooms: retains the legacy seed + moves[] shape (unchanged).
  */
@@ -95,7 +95,6 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
 
       socket.emit("rejoin_ok", {
         roomId,
-        seed: updatedRoom.seed,
         mode: updatedRoom.gameMode,
         myPlayerId: socket.id,
         activePlayerId: updatedRoom.activePlayer,
@@ -103,13 +102,8 @@ export function registerRejoinHandler(socket: Socket, ctx: ServerContext): void 
         opponentId,
         rejoinToken: "", // rejoin tokens replaced by room tokens; use /matchmaking/resume
         // Snapshot fields:
-        width: updatedRoom.boardGrid?.[0]?.length ?? 0,
-        height: updatedRoom.boardGrid?.length ?? 0,
         boardVersion: updatedRoom.boardVersion ?? 1,
         board: flattenGrid(updatedRoom.boardGrid),
-        boardGrid: updatedRoom.boardGrid,
-        rngState: updatedRoom.rngState,
-        originalSeed: updatedRoom.originalSeed,
       });
     } else {
       // ── Legacy move-replay rejoin for pve ────────────────────────────────

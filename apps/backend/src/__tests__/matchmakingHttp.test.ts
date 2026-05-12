@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import { startServer, type ServerHandle } from "../server";
 import {
   setExternalTokenVerifierForTests,
@@ -66,6 +67,20 @@ async function getJson(
     /* leave as text */
   }
   return { status: res.status, body: parsed };
+}
+
+function waitForConnect(socket: ClientSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("socket connect timeout")), 1000);
+    socket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("connect_error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -144,11 +159,11 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(b2.opponent?.userId).toBe("user:alice");
   });
 
-  it("single request falls back to bot after BOT_WAIT_MS", async () => {
+  it("single pve request falls back to bot after BOT_WAIT_MS", async () => {
     const r = await postJson(
       handle.port,
       "/matchmaking/join",
-      { mode: "turn_based" },
+      { mode: "pve" },
       "alice"
     );
     expect(r.status).toBe(200);
@@ -159,6 +174,25 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     expect(payload!.slot).toBe(0);
   }, BOT_WAIT_MS + 2000);
 
+  it("single turn_based request falls back to an authoritative bot match", async () => {
+    const r = await postJson(
+      handle.port,
+      "/matchmaking/join",
+      { mode: "turn_based" },
+      "alice"
+    );
+    expect(r.status).toBe(200);
+    const body = r.body as JoinResponse;
+    expect(body.mode).toBe("turn_based");
+    expect(body.opponent?.userId).toBe("bot:default");
+    const payload = verifyRoomToken(body.roomToken);
+    expect(payload!.userId).toBe("user:alice");
+    expect(payload!.slot).toBe(0);
+    const room = handle.roomManager.getRoom(payload!.roomId);
+    expect(room?.gameMode).toBe("turn_based");
+    expect(room?.boardGrid).toBeDefined();
+  }, BOT_WAIT_MS + 2000);
+
   it("409 when the user already has an active room", async () => {
     // Pair alice+bob instantly so alice has an active room with no wait.
     await pairUsers(handle.port, "alice", "bob");
@@ -166,6 +200,60 @@ describe("POST /matchmaking/join — T-v0.6-D09", () => {
     const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
     expect(r2.status).toBe(409);
     expect((r2.body as { code: string }).code).toBe("ACTIVE_ROOM");
+  });
+
+  it("409 ACCOUNT_IN_USE when the active room slot is connected", async () => {
+    const firstJoin = await pairUsers(handle.port, "alice", "bob");
+    const socket = ioClient(`http://localhost:${handle.port}`, {
+      transports: ["websocket"],
+      forceNew: true,
+      auth: { token: firstJoin.roomToken },
+    });
+    try {
+      await waitForConnect(socket);
+
+      const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
+      expect(r2.status).toBe(409);
+      const body = r2.body as { code: string; message: string };
+      expect(body.code).toBe("ACCOUNT_IN_USE");
+      expect(body.message).toContain("different device");
+    } finally {
+      socket.disconnect();
+    }
+  });
+
+  it("409 ACTIVE_ROOM still allows resume when the active room slot is disconnected", async () => {
+    const firstJoin = await pairUsers(handle.port, "alice", "bob");
+    const socket = ioClient(`http://localhost:${handle.port}`, {
+      transports: ["websocket"],
+      forceNew: true,
+      auth: { token: firstJoin.roomToken },
+    });
+    await waitForConnect(socket);
+    socket.disconnect();
+
+    const r2 = await postJson(handle.port, "/matchmaking/join", { mode: "pve" }, "alice");
+    expect(r2.status).toBe(409);
+    const body = r2.body as { code: string; roomId: string };
+    expect(body.code).toBe("ACTIVE_ROOM");
+    expect(body.roomId).toBe(verifyRoomToken(firstJoin.roomToken)!.roomId);
+  });
+
+  it("409 ACCOUNT_IN_USE instead of 425 for duplicate pending joins", async () => {
+    const pending = postJson(handle.port, "/matchmaking/join", { mode: "turn_based" }, "alice");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const duplicate = await postJson(
+      handle.port,
+      "/matchmaking/join",
+      { mode: "turn_based" },
+      "alice"
+    );
+    expect(duplicate.status).toBe(409);
+    expect((duplicate.body as { code: string }).code).toBe("ACCOUNT_IN_USE");
+
+    handle.matchmaking.cancel("user:alice");
+    await pending;
   });
 
   // T-v0.6-G05 · AR-7 single-active-match enforcement
@@ -226,6 +314,30 @@ describe("POST /matchmaking/resume — T-v0.6-D10", () => {
     expect(resumePayload.roomId).toBe(joinPayload.roomId);
     expect(resumePayload.userId).toBe("user:alice");
     expect(resumePayload.slot).toBe(0);
+  });
+
+  it("409 ACCOUNT_IN_USE when resuming a slot that is still connected", async () => {
+    const joinBody = await pairUsers(handle.port, "alice", "alice2");
+    const joinPayload = verifyRoomToken(joinBody.roomToken)!;
+    const socket = ioClient(`http://localhost:${handle.port}`, {
+      transports: ["websocket"],
+      forceNew: true,
+      auth: { token: joinBody.roomToken },
+    });
+    try {
+      await waitForConnect(socket);
+
+      const resume = await postJson(
+        handle.port,
+        "/matchmaking/resume",
+        { roomId: joinPayload.roomId },
+        "alice"
+      );
+      expect(resume.status).toBe(409);
+      expect((resume.body as { code: string }).code).toBe("ACCOUNT_IN_USE");
+    } finally {
+      socket.disconnect();
+    }
   });
 
   it("403 when userId is not a slot in the room", async () => {

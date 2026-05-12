@@ -7,10 +7,11 @@
  * board state from both clients so determinism and reconnection tests can
  * run against it.
  *
- * The server validates and resolves each turn privately, then relays only the
- * accepted move. The harness mirrors the game-view contract by resolving the
- * cascades locally on both clients and asserting their board views remain
- * byte-identical under simulated latency.
+ * The server validates and resolves each turn privately, then relays the
+ * accepted move with board-delta cascade data. The harness mirrors the
+ * Flutter game-view contract by applying the accepted board-delta result on
+ * both clients and asserting their board views remain byte-identical under
+ * simulated latency.
  *
  * Tuning: set the env var `SIM_RTT_MS` (0 / 100 / 300 / 500). When imported
  * programmatically the same value can be passed via the `rttMs` option.
@@ -19,10 +20,10 @@ import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
-import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
-import { createStatefulRng } from "@match3/shared-js/engine/rng";
-import { findMatches, resolveBoardAnimated } from "@match3/shared-js/engine/MatchEngine";
+import { BOARD_HEIGHT, BOARD_WIDTH } from "@match3/shared-js/engine/Board";
+import { findMatches } from "@match3/shared-js/engine/MatchEngine";
 import type {
+  BoardDeltaMoveResolvedPayload,
   MatchFoundPayload,
   TurnChangedPayload,
 } from "@match3/shared-js/protocol";
@@ -47,8 +48,8 @@ export interface LatencyHarnessResult {
   roundtripsMs: number[];
   /** Total moves actually played (may be fewer than requested if we ran out). */
   movesPlayed: number;
-  /** Seed agreed between clients. */
-  seed: number;
+  /** Room under test, useful in failure messages. */
+  roomId: string;
 }
 
 interface DelayedClient {
@@ -203,26 +204,38 @@ export async function runLatencyHarness(
     clearTimeout(timeoutMatch);
     const mA = mARaw as MatchFoundPayload;
     const mB = mBRaw as MatchFoundPayload;
-    if (mA.seed !== mB.seed) {
-      throw new Error(`Seed mismatch: A=${mA.seed} B=${mB.seed}`);
-    }
     if (mA.roomId !== mB.roomId) {
       throw new Error(`Room mismatch: A=${mA.roomId} B=${mB.roomId}`);
     }
+    if (mA.board?.join(",") !== mB.board?.join(",")) {
+      throw new Error("Initial board mismatch between clients");
+    }
 
-    const seed = mA.seed;
     const roomId = mA.roomId;
 
-    // Clients start from the server-broadcast boardGrid (match_found).
-    // If absent (shouldn't be for turn_based), fall back to local createBoard.
-    let boardA: number[][] = mA.boardGrid
-      ? mA.boardGrid.map((r) => [...r])
-      : createBoard(seed).grid.map((r) => [...r]);
-    let boardB: number[][] = mB.boardGrid
-      ? mB.boardGrid.map((r) => [...r])
-      : createBoard(seed).grid.map((r) => [...r]);
+    const flatToGrid = (board?: number[]): number[][] | null => {
+      if (!board || board.length !== BOARD_WIDTH * BOARD_HEIGHT) return null;
+      const grid: number[][] = [];
+      for (let r = 0; r < BOARD_HEIGHT; r++) {
+        grid.push(board.slice(r * BOARD_WIDTH, (r + 1) * BOARD_WIDTH));
+      }
+      return grid;
+    };
 
-    let rngState = mA.rngState ?? seed;
+    // Clients start from the server-broadcast flat board (match_found).
+    const initialBoardA = flatToGrid(mA.board);
+    const initialBoardB = flatToGrid(mB.board);
+    if (!initialBoardA || !initialBoardB) {
+      throw new Error("match_found missing flat board snapshot");
+    }
+    let boardA: number[][] = initialBoardA;
+    let boardB: number[][] = initialBoardB;
+
+    const finalGridFromResolved = (payload: BoardDeltaMoveResolvedPayload): number[][] => {
+      const finalStep = payload.steps[payload.steps.length - 1];
+      if (!finalStep) throw new Error("move_resolved missing cascade steps");
+      return finalStep.afterRefill.map((row) => [...row]);
+    };
 
     // Helper: returns a promise resolving when `turn_changed` fires with
     // `activePlayerId === expected` on the given client.
@@ -300,6 +313,12 @@ export async function runLatencyHarness(
         currentClient.onFilter("game_over", () => true).then(() => resolve("game_over")).catch(() => undefined);
       });
       const turnChangedPromise = waitForTurn(currentClient, opponentId).then(() => "turn_changed" as const);
+      const resolvedPromise = currentClient
+        .onFilter("move_resolved", (args) => {
+          const resolved = args[0] as BoardDeltaMoveResolvedPayload;
+          return resolved.playerId === myId;
+        })
+        .then((args) => args[0] as BoardDeltaMoveResolvedPayload);
 
       const t0 = Date.now();
       currentClient.emit("move", {
@@ -310,13 +329,10 @@ export async function runLatencyHarness(
         c2: swap.c2,
       });
       const winner = await Promise.race([turnChangedPromise, gameOverPromise]);
+      const resolved = await resolvedPromise;
       const t1 = Date.now();
 
-      const boardObj = { grid: currentBoard, width: 8, height: 8 };
-      const swapped = swapTiles(boardObj, swap.r1, swap.c1, swap.r2, swap.c2);
-      const rng = createStatefulRng(rngState);
-      const { grid: finalGrid } = resolveBoardAnimated(swapped.grid, rng.next);
-      rngState = rng.state();
+      const finalGrid = finalGridFromResolved(resolved);
       boardA = finalGrid.map((r) => [...r]);
       boardB = finalGrid.map((r) => [...r]);
 
@@ -350,7 +366,7 @@ export async function runLatencyHarness(
       boardB: boardB.map((r) => [...r]),
       roundtripsMs,
       movesPlayed,
-      seed,
+      roomId,
     };
   } finally {
     await cleanup();

@@ -87,8 +87,6 @@ export interface MatchEngineEvents extends Record<string, unknown> {
   board_replaced: {
     roomId: string;
     reason: "no_legal_moves";
-    width: number;
-    height: number;
     boardVersion: number;
     board: number[];
     boardGrid: number[][];
@@ -423,8 +421,6 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       this.emit("board_replaced", {
         roomId,
         reason: "no_legal_moves",
-        width: state.boardGrid[0]?.length ?? 0,
-        height: state.boardGrid.length,
         boardVersion: state.boardVersion,
         board: flattenGrid(state.boardGrid),
         boardGrid: state.boardGrid,

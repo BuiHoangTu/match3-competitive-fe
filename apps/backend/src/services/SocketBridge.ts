@@ -15,6 +15,7 @@ import type { ServerContext } from "../context";
 import type { MatchEngineService, PlayerState } from "./MatchEngineService";
 import { computeOutcome, recordMatchEnd, roomCleanup } from "../matchEnd";
 import { logEvent } from "../logger";
+import { BOT_ID } from "../constants";
 
 export class SocketBridge {
   constructor(
@@ -53,6 +54,35 @@ export class SocketBridge {
       data.c1,
       data.r2,
       data.c2,
+      serverReceivedAt
+    );
+    return true;
+  }
+
+  /**
+   * Submit a bot move through the same turn_based judge path as a human move.
+   */
+  handleBotMove(
+    roomId: string,
+    move: { r1: number; c1: number; r2: number; c2: number }
+  ): boolean {
+    if (!this.service.hasRoom(roomId)) return false;
+    const serverReceivedAt = Date.now();
+    logEvent("move_submitted", {
+      matchId: roomId,
+      playerId: BOT_ID,
+      r1: move.r1,
+      c1: move.c1,
+      r2: move.r2,
+      c2: move.c2,
+    });
+    this.service.submitMove(
+      roomId,
+      BOT_ID,
+      move.r1,
+      move.c1,
+      move.r2,
+      move.c2,
       serverReceivedAt
     );
     return true;
@@ -170,6 +200,12 @@ export class SocketBridge {
         playerStates,
         serverReceivedAt,
       });
+
+      if (activePlayer === BOT_ID) {
+        this.ctx.botManager.scheduleTurnBasedBotTurn(roomId, (move) => {
+          this.handleBotMove(roomId, move);
+        });
+      }
     });
 
     this.service.on("board_replaced", (payload) => {
@@ -182,8 +218,6 @@ export class SocketBridge {
 
       this.io.to(payload.roomId).emit("board_replaced", {
         reason: payload.reason,
-        width: payload.width,
-        height: payload.height,
         boardVersion: payload.boardVersion,
         board: payload.board,
         playerStates: payload.playerStates,

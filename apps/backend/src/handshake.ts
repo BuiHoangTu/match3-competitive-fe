@@ -31,6 +31,22 @@ export function registerHandshake(io: Server, roomManager: RoomManager): void {
       next(new Error("slot_mismatch"));
       return;
     }
+    const existingPlayerId = roomManager.getPlayerIdForSlot(
+      payload.roomId,
+      payload.slot
+    );
+    if (
+      existingPlayerId &&
+      existingPlayerId !== socket.id &&
+      io.sockets.sockets.has(existingPlayerId)
+    ) {
+      next(
+        new Error(
+          "ACCOUNT_IN_USE:This account is playing from a different device"
+        )
+      );
+      return;
+    }
     socket.data.roomId = payload.roomId;
     socket.data.userId = payload.userId;
     socket.data.slot = payload.slot;

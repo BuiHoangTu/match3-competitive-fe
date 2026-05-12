@@ -41,6 +41,8 @@ export interface MatchmakingHttpDeps {
   roomManager: RoomManager;
   matchmaking: MatchmakingService;
   persistence: PersistenceAdapter;
+  /** Returns whether a socket id is currently connected to this process. */
+  isSocketConnected?: (socketId: string) => boolean;
   /**
    * Optional local-account store. When set, /auth/register and /auth/login
    * are wired. When omitted, those endpoints return 503 (auth unavailable).
@@ -224,6 +226,20 @@ async function handleJoin(
   // AR-7: one active match per userId.
   const existing = roomManager.getRoomByUserId(userId);
   if (existing) {
+    const slot = existing.userIds[0] === userId ? 0 : existing.userIds[1] === userId ? 1 : -1;
+    const existingPlayerId =
+      slot === -1 ? null : roomManager.getPlayerIdForSlot(existing.id, slot as 0 | 1);
+    if (
+      existingPlayerId &&
+      deps.isSocketConnected?.(existingPlayerId) === true
+    ) {
+      sendJson(res, 409, {
+        code: "ACCOUNT_IN_USE",
+        roomId: existing.id,
+        message: "This account is playing from a different device",
+      });
+      return;
+    }
     sendJson(res, 409, {
       code: "ACTIVE_ROOM",
       roomId: existing.id,
@@ -256,13 +272,9 @@ async function handleJoin(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "ALREADY_QUEUED") {
-      // 425 Too Early — semantically: a prior /matchmaking/join is still in
-      // flight for this user. Distinct from 409 ACTIVE_ROOM (room already
-      // exists) so the client can decide whether to ignore vs. resume.
-      sendJson(res, 425, {
-        code: "ALREADY_QUEUED",
-        message:
-          "User already has a pending matchmaking request — wait for it to resolve.",
+      sendJson(res, 409, {
+        code: "ACCOUNT_IN_USE",
+        message: "This account is already queuing from a different device",
       });
       return;
     }
@@ -280,6 +292,23 @@ async function handleResume(
   if (typeof roomId !== "string" || !roomId) {
     sendJson(res, 400, { code: "BAD_ROOM_ID" });
     return;
+  }
+  const room = deps.roomManager.getRoom(roomId);
+  if (room && room.status === "active") {
+    const slot = room.userIds[0] === userId ? 0 : room.userIds[1] === userId ? 1 : -1;
+    const existingPlayerId =
+      slot === -1 ? null : deps.roomManager.getPlayerIdForSlot(room.id, slot as 0 | 1);
+    if (
+      existingPlayerId &&
+      deps.isSocketConnected?.(existingPlayerId) === true
+    ) {
+      sendJson(res, 409, {
+        code: "ACCOUNT_IN_USE",
+        roomId: room.id,
+        message: "This account is playing from a different device",
+      });
+      return;
+    }
   }
   const result = deps.matchmaking.resume(userId, roomId);
   if ("error" in result) {

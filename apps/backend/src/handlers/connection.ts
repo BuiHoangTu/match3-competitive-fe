@@ -21,6 +21,10 @@ function flattenGrid(grid: number[][] | undefined): number[] | undefined {
   return grid ? grid.flatMap((row) => row) : undefined;
 }
 
+function connectedSlotPlayers(players: string[]): players is [string, string] {
+  return Boolean(players[0] && players[1]);
+}
+
 export function registerConnectionHandler(io: Server, ctx: ServerContext): void {
   io.on("connection", (socket: Socket) => {
     console.log(`[connect] ${socket.id}`);
@@ -50,20 +54,31 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
         const opponentSlot = tokenSlot === 0 ? 1 : 0;
         const opponentUserId = room.userIds[opponentSlot];
         const isBotOpponent = opponentUserId === BOT_USER_ID;
+        if (isBotOpponent && !room.players.includes(BOT_ID)) {
+          room.players.push(BOT_ID);
+        }
 
         // Both slots bound (both humans connected, OR bot opponent is
         // always "present"): start the match.
-        const bothSocketsConnected = room.players.length === 2;
+        const bothSocketsConnected = connectedSlotPlayers(room.players);
         if (bothSocketsConnected || isBotOpponent) {
           if (!room.activePlayer) {
             // Pick starter deterministically: slot 0 goes first.
-            room.activePlayer = room.players[0];
+            room.activePlayer = room.players[0] || room.players.find(Boolean) || null;
           }
           // Record match start time for duration calculation.
           if (!ctx.matchStartTimes.has(room.id)) {
             ctx.matchStartTimes.set(room.id, Date.now());
           }
-          if (isBotOpponent) {
+          if (isBotOpponent && room.gameMode === "turn_based") {
+            const humanPlayerId = room.players.find((p) => p !== BOT_ID) ?? socket.id;
+            ctx.socketBridge.startMatch(
+              room.id,
+              [humanPlayerId, BOT_ID],
+              room.originalSeed ?? room.seed,
+              room.gameMode
+            );
+          } else if (isBotOpponent) {
             // pve bot rooms use TimerManager (unchanged path).
             ctx.botManager.setup(room.id);
             ctx.timerManager.startRoomTimer(
@@ -78,7 +93,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
                 ctx.timerManager.scheduleRoomClose(id);
               }
             );
-          } else if (room.players.length === 2 && room.gameMode === "turn_based") {
+          } else if (connectedSlotPlayers(room.players) && room.gameMode === "turn_based") {
             // turn_based human-vs-human: judge takes over from here.
             const [p0, p1] = room.players as [string, string];
             ctx.socketBridge.startMatch(
@@ -87,7 +102,7 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
               room.originalSeed ?? room.seed,
               room.gameMode
             );
-          } else if (room.players.length === 2) {
+          } else if (connectedSlotPlayers(room.players)) {
             // pve fallback (non-bot, non-turn_based): keep TimerManager path.
             const [p0, p1] = room.players as [string, string];
             ctx.timerManager.startRoomTimer(room.id, p0, p1, (id, loserId) => {
@@ -101,30 +116,26 @@ export function registerConnectionHandler(io: Server, ctx: ServerContext): void 
 
           const initialPlayerStates = ctx.socketBridge.getPlayerStates(room.id);
           for (const pid of room.players) {
-            const opponentSocketId = room.players.find((p) => p !== pid) ?? BOT_ID;
+            if (!pid) continue;
+            if (pid === BOT_ID) continue;
+            const opponentSocketId = room.players.find((p) => p && p !== pid) ?? BOT_ID;
             const isTurnBased = room.gameMode === "turn_based";
             io.to(pid).emit("match_found", {
               roomId: room.id,
-              seed: room.seed,
               opponentId: isBotOpponent ? BOT_ID : opponentSocketId,
               myPlayerId: pid,
               firstPlayerId: room.activePlayer,
               activePlayerId: room.activePlayer,
               mode: room.gameMode,
-              // turn_based only: initial authoritative board snapshot
+              // turn_based only: initial authoritative flat board snapshot
               ...(isTurnBased && {
-                width: room.boardGrid?.[0]?.length ?? 0,
-                height: room.boardGrid?.length ?? 0,
                 boardVersion: room.boardVersion ?? 1,
                 board: flattenGrid(room.boardGrid),
-                boardGrid: room.boardGrid,
-                rngState: room.rngState,
-                originalSeed: room.originalSeed,
               }),
               // pve only: ship the move log so the client can replay on
               // reconnect. Empty on first connect; populated on resume after
               // the user has already played some moves.
-              ...(!isTurnBased && { moves: room.moves }),
+              ...(!isTurnBased && { seed: room.seed, moves: room.moves }),
               // Initial stats so the HUD can render full bars immediately.
               ...(initialPlayerStates && { playerStates: initialPlayerStates }),
             });

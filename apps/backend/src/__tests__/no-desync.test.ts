@@ -2,11 +2,11 @@
  * T-v0.5-12 — Accepted-move determinism contract.
  *
  * The server holds the canonical board for turn_based rooms and validates each
- * move privately. Clients receive only accepted moves on the hot path and
- * resolve cascades locally from the same seed/RNG state.
+ * move privately. Clients receive accepted moves plus board-delta cascade data
+ * on the hot path and apply the server-provided resolution.
  *
  * These tests validate:
- *  1. Both clients' locally-resolved boardGrid values are byte-identical.
+ *  1. Both clients' board-delta-applied boardGrid values are byte-identical.
  *  2. Same originalSeed + same move sequence → byte-identical boardGrid and
  *     rngState at every step (determinism lives in the server engine, not in
  *     clients separately running the RNG).
@@ -35,7 +35,7 @@ describe("T-v0.5-12 accepted-move determinism contract", () => {
   );
 
   it(
-    `${ITERATIONS} back-to-back matches: locally-resolved accepted moves are identical for both clients`,
+    `${ITERATIONS} back-to-back matches: board-delta accepted moves are identical for both clients`,
     async () => {
       for (let i = 0; i < ITERATIONS; i++) {
         const res = await runLatencyHarness({
@@ -44,7 +44,7 @@ describe("T-v0.5-12 accepted-move determinism contract", () => {
         });
         if (JSON.stringify(res.boardA) !== JSON.stringify(res.boardB)) {
           throw new Error(
-            `final board mismatch at iteration ${i} (seed=${res.seed}):\n` +
+            `final board mismatch at iteration ${i} (roomId=${res.roomId}):\n` +
               `A=${JSON.stringify(res.boardA)}\n` +
               `B=${JSON.stringify(res.boardB)}`
           );

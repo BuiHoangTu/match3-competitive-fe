@@ -108,6 +108,7 @@ export function createMatch3Server(opts: ServerOptions = {}): ServerHandle {
     matchmaking,
     persistence,
     localAccounts: opts.localAccounts,
+    isSocketConnected: (socketId) => io.sockets.sockets.has(socketId),
   });
   httpServer.on("request", (req, res) => {
     const url = req.url ?? "";

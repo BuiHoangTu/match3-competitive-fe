@@ -70,7 +70,10 @@ export class MatchmakingService {
         return;
       }
 
-      // No partner available — enqueue and set bot-fallback timer.
+      // No partner available — enqueue and fall back to a server bot after
+      // BOT_WAIT_MS. Bot fallback preserves the requested mode: turn_based bots
+      // run through the same authoritative judge as human opponents, while pve
+      // bots keep the legacy relay path.
       const pending: Pending = {
         userId,
         mode,
@@ -166,9 +169,8 @@ export class MatchmakingService {
   }
 
   private createBotMatch(userId: string, mode: MatchmakingMode): MatchmakingResult {
-    // Bot matches are always pve regardless of requested mode.
-    const room = this.roomManager.createRoomForMatch(userId, BOT_USER_ID, "pve");
-    if (this.botManager) this.botManager.setup(room.id);
+    const room = this.roomManager.createRoomForMatch(userId, BOT_USER_ID, mode);
+    if (this.botManager && room.gameMode === "pve") this.botManager.setup(room.id);
     return this.signForSlot(room, 0, mode, { userId: BOT_USER_ID });
   }
 
@@ -184,7 +186,6 @@ export class MatchmakingService {
       roomId: room.id,
       userId,
       slot,
-      seed: room.seed,
       ttlMs: this.roomTokenTtlMs,
       now,
     });
