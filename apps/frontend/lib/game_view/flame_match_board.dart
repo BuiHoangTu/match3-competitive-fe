@@ -424,8 +424,10 @@ class MatchBoardFlameGame extends FlameGame {
   final Map<int, Sprite> _sprites = {};
   bool _loaded = false;
   bool _animating = false;
+  bool _layoutAfterAnimation = false;
   int _animationGeneration = 0;
   _DragSwapPreview? _dragPreview;
+  Vector2? _lastResizeSize;
 
   @override
   Color backgroundColor() => _oldGameBackground;
@@ -444,6 +446,13 @@ class MatchBoardFlameGame extends FlameGame {
   @override
   void onGameResize(Vector2 size) {
     super.onGameResize(size);
+    final resizeChanged = !_sameResizeSize(_lastResizeSize, size);
+    _lastResizeSize = size.clone();
+    if (!resizeChanged) return;
+    if (_animating || _dragPreview != null) {
+      _layoutAfterAnimation = true;
+      return;
+    }
     _layoutTiles(animate: false);
   }
 
@@ -625,6 +634,7 @@ class MatchBoardFlameGame extends FlameGame {
       _disabled = disabled;
       _highlightTurn = highlightTurn;
       _animating = false;
+      _applyDeferredLayout();
       _syncTileState();
       onAnimationComplete?.call();
       return;
@@ -640,6 +650,7 @@ class MatchBoardFlameGame extends FlameGame {
     _disabled = disabled;
     _highlightTurn = highlightTurn;
     _animating = false;
+    _applyDeferredLayout();
     _syncTileState();
     onAnimationComplete?.call();
   }
@@ -722,9 +733,16 @@ class MatchBoardFlameGame extends FlameGame {
         alpha: 1,
         duration: const Duration(milliseconds: 120),
       );
+      if (_layoutAfterAnimation) {
+        unawaited(Future<void>.delayed(
+          const Duration(milliseconds: 120),
+          _applyDeferredLayout,
+        ));
+      }
     } else {
       preview.a.jumpTo(preview.aHome, alpha: 1);
       preview.b.jumpTo(preview.bHome, alpha: 1);
+      _applyDeferredLayout();
     }
   }
 
@@ -907,6 +925,7 @@ class MatchBoardFlameGame extends FlameGame {
 
   void _layoutTiles({required bool animate}) {
     if (size.x == 0 || size.y == 0) return;
+    _layoutAfterAnimation = false;
     final metrics = _BoardMetrics.forSize(
       size: Size(size.x, size.y),
       width: _board.width,
@@ -926,6 +945,11 @@ class MatchBoardFlameGame extends FlameGame {
         tile.jumpTo(Vector2(target.dx, target.dy), alpha: 1);
       }
     }
+  }
+
+  void _applyDeferredLayout() {
+    if (!_layoutAfterAnimation || _animating || _dragPreview != null) return;
+    _layoutTiles(animate: false);
   }
 
   void _syncTileState() {
@@ -1014,6 +1038,10 @@ class MatchBoardFlameGame extends FlameGame {
       if (a.tiles[i] != b.tiles[i]) return false;
     }
     return true;
+  }
+
+  bool _sameResizeSize(Vector2? a, Vector2 b) {
+    return a != null && a.x == b.x && a.y == b.y;
   }
 }
 
