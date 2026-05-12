@@ -81,7 +81,7 @@ STOP and hand back to a human reviewer if any of these occur:
 | v0.7 Accessibility | PARTIAL | Code-level a11y done (T-v0.7-01..06). Pending: T-v0.7-07 colour-blindness audit, T-v0.7-08..12 device matrix runs, T-v0.7-13 external reviewer. |
 | v1.0 Public launch | PARTIAL | Code: T-v1.0-08 logger + T-v1.0-09 metrics shipped; T-v1.0-13 runbook drafted. Pending: production infra (T-v1.0-01..05), store submissions (06/07), load + soak tests (10..12). |
 | v0.8 Characters | PARTIAL | Foundations shipped: F01 character registry, F02 extra-turn/scaling helpers, F03 user_progress store/migration. S01 shell picker is partially wired. Pending: backend character start, skills, fizzle, XP/level-up, HUD skill UI. |
-| v0.9 Flutter-native gameplay | PARTIAL | Native Practice, local vs Bot shell, online board-delta screen, backend generated-tile protocol, and runtime bridge removal are in progress. Remaining: backend seed-field cleanup, richer bot/player-state effects, animations/reconnect/result hardening, and regression closeout. |
+| v0.9 Flutter-native gameplay | PARTIAL | Native Practice, local vs Bot shell, online board-delta screen, backend generated-tile protocol, seed-free competitive payloads/tokens, and runtime bridge removal are in progress. Remaining: richer bot/player-state effects, animations/reconnect/result hardening, and regression closeout. |
 
 ---
 
@@ -1447,10 +1447,10 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol); [system-design § 4](system-design.md#4-runtime-flows).
 - **Inputs:** `packages/shared-js/src/protocol.ts`, current backend socket tests, current Flutter model conventions.
 - **Outputs:** Protocol fixture docs/tests under `specification/fixtures/` or the closest existing fixture location; updated TypeScript protocol types for `match_found`, `move_resolved`, `board_replaced`, and rejoin snapshots.
-- **Implementation Notes:** Define payloads before implementation code changes. `match_found` / rejoin must contain flat row-major `board`, `width`, `height`, `boardVersion`, active player, player states, and clocks. `move_resolved` must contain generated replacement tiles in deterministic refill order; no seed or competitive score fields. `board_replaced.reason` must support `"no_legal_moves"`.
+- **Implementation Notes:** Define payloads before implementation code changes. `match_found` / rejoin must contain flat row-major `board`, `boardVersion`, active player, player states, and clocks. Board width/height are agreed constants and must not be sent. `move_resolved` must contain generated replacement tiles in deterministic refill order; no seed or competitive score fields. `board_replaced.reason` must support `"no_legal_moves"`.
 - **Acceptance:**
   - Fixture set includes match start, accepted move with generated tiles, swap fizzle, no-legal-move board replacement, and rejoin.
-  - Fixture validation asserts board arrays are 1D row-major and length equals `width * height`.
+  - Fixture validation asserts board arrays are 1D row-major and length equals the agreed board size.
   - Fixture validation asserts `generatedTiles` order is columns left-to-right and top-to-bottom within each column after each cascade's gravity, concatenated chronologically for multi-cascade moves.
   - Fixture validation fails if `seed`, `originalSeed`, or `rngState` is present in client-visible online payloads.
 
@@ -1569,12 +1569,12 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Inputs:** `online_game_client.dart`, board renderer, backend board-delta protocol.
 - **Outputs:** `apps/frontend/lib/screens/online_game_screen.dart` and online session controller.
 - **Implementation Notes:** The online controller must render only server-authored board state. It may animate predicted selection/recoil locally, but accepted board changes come from `match_found`, `move_resolved`, and `board_replaced`.
-- **Status:** `OnlineGameScreen` now joins/resumes through matchmaking, opens the native Socket.IO board-delta connection, renders `match_found` flat boards, submits moves, applies `move_resolved` final cascade board/version, and handles `board_replaced` with the no-move notification. Remaining work: animation, clock/result handling, reconnect hardening, and removing legacy seed fields once backend compatibility is dropped.
+- **Status:** `OnlineGameScreen` now joins/resumes through matchmaking, opens the native Socket.IO board-delta connection, renders `match_found` flat boards, submits moves, applies `move_resolved` final cascade board/version, and handles `board_replaced` with the no-move notification. Remaining work: animation, clock/result handling, and reconnect hardening.
 - **Acceptance:**
   - `match_found` flat board table displays without local regeneration.
   - `move_resolved.generatedTiles` animates and updates the board version.
   - `board_replaced` swaps the full board and shows the no-move notification.
-  - Rejoin restores flat board table/dimensions/version without replaying moves.
+  - Rejoin restores flat board table/version without replaying moves.
 
 ### Sub-track E — Backend board authority
 
@@ -1583,9 +1583,9 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Context:** [system-design § 4.2](system-design.md#42-online-vs-human-move).
 - **Inputs:** `apps/backend/src/RoomManager.ts`, `MatchEngineService.ts`, protocol types.
 - **Outputs:** Backend room/judge changes and tests.
-- **Implementation Notes:** The server may keep private randomness state internally, but client-visible vs Human payloads must expose flat board table/dimensions/version and generated tile arrays, not seed/rng replay data or competitive scores.
+- **Implementation Notes:** The server may keep private randomness state internally, but client-visible vs Human payloads must expose flat board table/version and generated tile arrays, not dimensions, seed/rng replay data, or competitive scores.
 - **Acceptance:**
-  - `match_found` and rejoin include flat board table/dimensions/version and no seed fields.
+  - `match_found` and rejoin include flat board table/version and no seed or dimension fields.
   - Backend tests assert room snapshots preserve board version, player states, active player, and clocks.
 
 **T-v0.9-E02** (DONE) · Server move_resolved generated-tile arrays
@@ -1603,7 +1603,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Context:** [requirement § MR-9](requirement.md#2-multiplayer--networking-requirements).
 - **Inputs:** Backend judge/legal move detection.
 - **Outputs:** `board_replaced` server event, tests for no-legal-move path.
-- **Implementation Notes:** Detect after a board settles. If no legal moves exist, generate a new playable board, increment `boardVersion`, and emit `board_replaced { reason: "no_legal_moves", width, height, board, boardVersion, playerStates }`.
+- **Implementation Notes:** Detect after a board settles. If no legal moves exist, generate a new playable board, increment `boardVersion`, and emit `board_replaced { reason: "no_legal_moves", board, boardVersion, playerStates }`.
 - **Acceptance:**
   - Forced no-move board emits one replacement event.
   - Replacement board has at least one legal move.

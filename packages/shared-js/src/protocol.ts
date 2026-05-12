@@ -23,10 +23,8 @@ export interface Move {
 
 // ─── v0.9 Flutter-native board-delta protocol ───────────────────────────────
 
-/** Flat row-major board table. Index = row * width + col. */
+/** Flat row-major board table. Index = row * agreedBoardWidth + col. */
 export interface FlatBoardWire {
-  width: number;
-  height: number;
   boardVersion: number;
   board: number[];
 }
@@ -135,7 +133,8 @@ export interface MoveRejectedPayload {
 /** Payload of the server → client "match_found" event. */
 export interface MatchFoundPayload {
   roomId: string;
-  seed: number;
+  /** pve only: legacy seed for local replay. Not sent for turn_based rooms. */
+  seed?: number;
   opponentId: string;
   myPlayerId: string;
   firstPlayerId: string;
@@ -143,27 +142,9 @@ export interface MatchFoundPayload {
   mode: string;
   /** HMAC-signed token; store in sessionStorage for reconnect after network drop. */
   rejoinToken: string;
-  /**
-   * turn_based only: authoritative initial board grid.
-   * Clients initialise GameLoopController from this snapshot when present,
-   * then animate hot-path moves locally from server-accepted move relays.
-   */
-  boardGrid?: number[][];
-  /** turn_based v0.9: flat row-major board snapshot. */
-  width?: number;
-  height?: number;
+  /** turn_based v0.9: flat row-major board snapshot using the agreed board size. */
   boardVersion?: number;
   board?: number[];
-  /**
-   * turn_based only: RNG state at match start (equals originalSeed initially).
-   * Used by the client to stash for diagnostics; server drives all resolutions.
-   */
-  rngState?: number;
-  /**
-   * turn_based only: the immutable seed used to generate the initial board.
-   * Included for debug/replay purposes.
-   */
-  originalSeed?: number;
   /**
    * pve only: the move log so the client can replay on reconnect. Empty on
    * first connect. Not present for turn_based (server validates privately;
@@ -250,21 +231,20 @@ export interface GameOverPayload {
 /**
  * Payload of the server → client "rejoin_ok" event.
  *
- * For turn_based rooms: contains a one-shot snapshot (boardGrid + rngState)
- * so the client can restore state instantly without replaying move history.
+ * For turn_based rooms: contains a one-shot flat board snapshot so the client
+ * can restore state instantly without replaying move history.
  *
  * For pve rooms: retains the legacy seed + moves[] shape (unchanged).
  */
 export interface RejoinOkPayload {
   roomId: string;
   /**
-   * Kept for pve rooms and backward-compat. For turn_based, use boardGrid +
-   * rngState from the snapshot fields instead.
+   * Kept for pve rooms and backward-compat. Not sent for turn_based rooms.
    */
-  seed: number;
+  seed?: number;
   /**
    * pve rooms only: full move history with playerIds remapped to current socket
-   * IDs. Not present for turn_based rooms (use boardGrid snapshot instead).
+   * IDs. Not present for turn_based rooms (use board snapshot instead).
    */
   moves?: Move[];
   myPlayerId: string;
@@ -274,30 +254,13 @@ export interface RejoinOkPayload {
   opponentId: string | null;
   /** Fresh token to replace the one stored in sessionStorage. */
   rejoinToken: string;
-  /** turn_based v0.9: flat row-major board snapshot. */
-  width?: number;
-  height?: number;
+  /** turn_based v0.9: flat row-major board snapshot using the agreed board size. */
   boardVersion?: number;
   board?: number[];
-  /**
-   * turn_based only: authoritative board state at the moment of rejoin.
-   * Client renders from this snapshot; no move-replay needed.
-   */
-  boardGrid?: number[][];
-  /**
-   * turn_based only: RNG state at the moment of rejoin.
-   * The next move's resolution will advance from this state.
-   */
-  rngState?: number;
   /**
    * turn_based only: per-player score totals at the moment of rejoin.
    */
   scores?: { [playerId: string]: number };
-  /**
-   * turn_based only: the original seed used to generate the board.
-   * Included for diagnostics/replay — not needed for state reconstruction.
-   */
-  originalSeed?: number;
 }
 
 /** Emitted to the remaining player while their opponent is reconnecting. */

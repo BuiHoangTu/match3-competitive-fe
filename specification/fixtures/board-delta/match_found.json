@@ -3,10 +3,17 @@
   "payload": {
     "roomId": "room-1",
     "mode": "turn_based",
-    "width": 4,
-    "height": 4,
     "boardVersion": 1,
-    "board": [0, 1, 2, 3, 1, 2, 3, 4, 2, 3, 4, 0, 3, 4, 0, 1],
+    "board": [
+      0, 1, 2, 3, 4, 0, 1, 2,
+      1, 2, 3, 4, 0, 1, 2, 3,
+      2, 3, 4, 0, 1, 2, 3, 4,
+      3, 4, 0, 1, 2, 3, 4, 0,
+      4, 0, 1, 2, 3, 4, 0, 1,
+      0, 1, 2, 3, 4, 0, 1, 2,
+      1, 2, 3, 4, 0, 1, 2, 3,
+      2, 3, 4, 0, 1, 2, 3, 4
+    ],
     "activePlayerId": "player-a",
     "myPlayerId": "player-a",
     "opponentId": "player-b",

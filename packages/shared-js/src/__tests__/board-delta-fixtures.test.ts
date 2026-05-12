@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "fs";
 import { resolve } from "path";
+import { BOARD_HEIGHT, BOARD_WIDTH } from "../engine/Board.js";
 
 const fixtureDir = resolve(__dirname, "../../../../specification/fixtures/board-delta");
 
@@ -10,19 +11,17 @@ function readFixture(file: string): { event: string; payload: Record<string, unk
 
 function assertNoForbiddenOnlineFields(value: unknown): void {
   const text = JSON.stringify(value);
-  for (const field of ["seed", "originalSeed", "rngState", "score", "scores"]) {
+  for (const field of ["seed", "originalSeed", "rngState", "boardGrid", "score", "scores"]) {
     expect(text.includes(`"${field}"`), `${field} must not appear`).toBe(false);
   }
 }
 
 function assertFlatBoard(payload: Record<string, unknown>): void {
-  expect(typeof payload.width).toBe("number");
-  expect(typeof payload.height).toBe("number");
+  expect(payload.width).toBeUndefined();
+  expect(payload.height).toBeUndefined();
   expect(typeof payload.boardVersion).toBe("number");
   expect(Array.isArray(payload.board)).toBe(true);
-  expect((payload.board as unknown[]).length).toBe(
-    (payload.width as number) * (payload.height as number)
-  );
+  expect((payload.board as unknown[]).length).toBe(BOARD_WIDTH * BOARD_HEIGHT);
 }
 
 describe("v0.9 board-delta fixtures", () => {

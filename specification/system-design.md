@@ -9,7 +9,7 @@ Companion to [planning.md](planning.md) and [requirement.md](requirement.md). Th
 
 The current target is a **full Flutter game client** backed by a pure Dart game-core library. The Phaser/Vite embedded game view, WebView/iframe wrapper, and shell-to-game bridge are legacy implementation details to be removed during the migration tracked in [flutter-native-migration.md](flutter-native-migration.md).
 
-This pivot also changes networking: online clients no longer receive or replay a shared seed. In **vs Human**, the server sends the current board table as a flat row-major array with explicit dimensions at match start/rejoin and sends board-delta packets containing explicit generated tiles for normal moves. If no legal moves exist after a settled board, the server emits a full-board replacement event and the Flutter client shows a notification. In **Practice** and **vs Bot**, a local Dart authoritative judge/generator owns the board. Competitive modes do not use point scores.
+This pivot also changes networking: online clients no longer receive or replay a shared seed. In **vs Human**, the server sends the current board table as a flat row-major array at match start/rejoin and sends board-delta packets containing explicit generated tiles for normal moves. Board dimensions are shared constants, not wire fields. If no legal moves exist after a settled board, the server emits a full-board replacement event and the Flutter client shows a notification. In **Practice** and **vs Bot**, a local Dart authoritative judge/generator owns the board. Competitive modes do not use point scores.
 
 ---
 
@@ -23,7 +23,7 @@ These principles derive from the plan's guiding rules ([planning.md § 1](planni
 | Bot before human | Bot AI is a pure function over board state, shared between the client (PvE) and the server (matchmaking fallback). The online flow is a transport swap over the same turn loop, not a re-implementation. |
 | Ship playable slices | Every version after v0.1 boots a real UI. No "infrastructure-only" releases means no long-lived hidden branches. |
 | Accessibility is not a bolt-on ([NFR-7](requirement.md#accessibility), [NFR-8](requirement.md#accessibility)) | Tile identity is encoded as shape + colour from v0.2. Input is abstracted behind a device-agnostic interface so keyboard support in v0.6 is additive. |
-| Board-delta wire protocol ([MR-3](requirement.md#2-multiplayer--networking-requirements), [MR-8](requirement.md#2-multiplayer--networking-requirements)) | The server sends flat row-major board tables plus dimensions at match start/rejoin/replacement and generated tile arrays during normal move resolution. Server and client share the same refill consumption order. Clients animate server-authored deltas; they do not replay seeds. |
+| Board-delta wire protocol ([MR-3](requirement.md#2-multiplayer--networking-requirements), [MR-8](requirement.md#2-multiplayer--networking-requirements)) | The server sends flat row-major board tables at match start/rejoin/replacement and generated tile arrays during normal move resolution. Server and client share the same board dimensions and refill consumption order. Clients animate server-authored deltas; they do not replay seeds. |
 | Identity in Flutter ([AR-1](requirement.md#3-identity--account-requirements), [AR-3](requirement.md#3-identity--account-requirements)) | The Flutter app owns sign-in, token refresh, matchmaking, socket connection, lifecycle handling, and gameplay rendering. No WebView bridge is part of the target architecture. |
 | Flutter replaces, does not wrap | The product is a Flutter app with Flutter-native gameplay. Phaser is retired rather than embedded. |
 
@@ -116,7 +116,7 @@ Responsibilities split cleanly:
 
 - **Flutter app owns:** sign-in UI, token acquisition/refresh, account deletion UI, privacy/ToS screens, lobby/home screen, character selection, match screen, result screen, platform lifecycle detection, socket connection, and all gameplay rendering.
 - **Dart game_core owns:** local board state, match resolution, no-legal-move detection, local generation, local bot decisions, and event packets for Practice/vs Bot.
-- **Server owns for vs Human:** flat board table, dimensions, generated tiles, turn ownership, clocks, player states, rejoin snapshots, and match end.
+- **Server owns for vs Human:** flat board table, generated tiles, turn ownership, clocks, player states, rejoin snapshots, and match end. Board dimensions are agreed constants.
 
 The reason for this split: the latency-sensitive loop ([NFR-2](requirement.md#performance), [NFR-3](requirement.md#performance)) should stay in one Flutter runtime. Local modes do not wait for the server; online mode does not trust the client for board generation.
 
@@ -163,7 +163,7 @@ sequenceDiagram
     Shell->>FC: store roomToken for match screen
     FC->>S: Socket.IO connect<br/>auth: { token: roomToken }
     S->>S: verify HMAC locally → decode {roomId, slot}
-    S->>FC: place in room<br/>emit match_found {width,height,board,boardVersion,activePlayerId}
+    S->>FC: place in room<br/>emit match_found {board,boardVersion,activePlayerId}
     Note over Shell,FC: Later — room token nears expiry during a long match
     FC->>S: next move (stale token)
     S-->>FC: auth_token_rejected
@@ -270,7 +270,7 @@ sequenceDiagram
         Judge->>Judge: resolve cascades<br/>generate local refill tiles
         alt no legal moves after settle
             Judge->>Judge: replace board
-            Judge-->>UI: board_replaced {reason:no_legal_moves, width,height,board}
+            Judge-->>UI: board_replaced {reason:no_legal_moves,board}
             UI-->>Player: show board refreshed notification
         else playable board
             Judge-->>UI: move_resolved {steps, generatedTiles, score}
@@ -292,9 +292,9 @@ sequenceDiagram
     participant CB as Flutter Client B
     actor B as Player B
     CA->>S: Socket.IO connect auth:{roomToken}
-    S-->>CA: match_found {width,height,board,boardVersion,activePlayerId}
+    S-->>CA: match_found {board,boardVersion,activePlayerId}
     CB->>S: Socket.IO connect auth:{roomToken}
-    S-->>CB: match_found {width,height,board,boardVersion,activePlayerId}
+    S-->>CB: match_found {board,boardVersion,activePlayerId}
     A->>CA: swap (a,b)
     CA->>S: submit_move {a,b, boardVersion}
     S->>S: validate room + turn + adjacency
@@ -308,8 +308,8 @@ sequenceDiagram
         CB-->>B: animate server-authored deltas
         alt no legal moves after settle
             S->>S: replace board
-            S-->>CA: board_replaced {reason:no_legal_moves,width,height,board}
-            S-->>CB: board_replaced {reason:no_legal_moves,width,height,board}
+            S-->>CA: board_replaced {reason:no_legal_moves,board}
+            S-->>CB: board_replaced {reason:no_legal_moves,board}
         end
     end
 ```
@@ -364,9 +364,9 @@ sequenceDiagram
     actor B as Player B
     Note over A,B: both clients already hold room tokens from § 2.4
     CA->>S: Socket.IO connect<br/>auth: { token: roomTokenA }
-    S->>CA: match_start {seed, firstPlayerId}
+    S->>CA: match_start {board, boardVersion, firstPlayerId}
     CB->>S: Socket.IO connect<br/>auth: { token: roomTokenB }
-    S->>CB: match_start {seed, firstPlayerId}
+    S->>CB: match_start {board, boardVersion, firstPlayerId}
     A->>CA: swap (a, b)
     CA->>CA: optimistic local animation
     CA->>S: submit_move {a, b}
@@ -387,7 +387,7 @@ Legacy key property: the wire carries `(a, b) + metadata` only and clients repla
 
 ### 4.5 Reconnection ([MR-6](requirement.md#2-multiplayer--networking-requirements))
 
-The rejoin path sends current authoritative state to the reconnecting Flutter client: flat board table, dimensions, board version, active player, player states, and clocks. It does not send seed + move history as the primary restore path.
+The rejoin path sends current authoritative state to the reconnecting Flutter client: flat board table, board version, active player, player states, and clocks. It does not send seed + move history as the primary restore path.
 
 ```mermaid
 sequenceDiagram

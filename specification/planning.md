@@ -132,7 +132,7 @@ Versions are cumulative: v0.3 includes everything from v0.1 and v0.2.
 **Out of scope:** rollback netcode, prediction/reconciliation beyond what determinism already gives, spectator mode.
 
 **Deliverables:**
-- Rejoin flow: signed rejoin token, bounded rejoin window, full state restore on rejoin. The legacy implementation restores from seed + move history; v0.9 changes the primary restore payload to flat board table + dimensions + board version + clocks / player states.
+- Rejoin flow: signed rejoin token, bounded rejoin window, full state restore on rejoin. The legacy implementation restores from seed + move history; v0.9 changes the primary restore payload to flat board table + board version + clocks / player states. Board dimensions are shared constants.
 - Opponent-reconnecting indicator on the remaining player's screen.
 - Network-latency test harness (simulate 100/300/500 ms RTT and assert no desync).
 - Server-side logging of match lifecycle events for post-hoc debugging.
@@ -229,8 +229,8 @@ Versions are cumulative: v0.3 includes everything from v0.1 and v0.2.
 **Deliverables:**
 - `apps/frontend/lib/game_core/` pure Dart flat board models, judge, generator, bot, Practice scoring, player-state effects, no-legal-move detection, and protocol fixtures.
 - `apps/frontend/lib/game_ui/` Flutter-native board renderer, input controller, animations, HUD, Practice score-only screen, vs Bot local session, online session, reconnect state, and no-legal-move board-swap notification.
-- `apps/frontend/lib/net/` Dart Socket.IO client for online vs Human. It receives `match_found` / `rejoin` flat board tables with dimensions, applies `move_resolved.generatedTiles`, and handles `board_replaced { reason: "no_legal_moves" }`.
-- Backend online protocol updated so vs Human does not share seeds. The server owns the flat board table, dimensions, board version, generated tile arrays, full-board replacements, clocks, player states, and game-over decisions.
+- `apps/frontend/lib/net/` Dart Socket.IO client for online vs Human. It receives `match_found` / `rejoin` flat board tables using the agreed board size, applies `move_resolved.generatedTiles`, and handles `board_replaced { reason: "no_legal_moves" }`.
+- Backend online protocol updated so vs Human does not share seeds. The server owns the flat board table, board version, generated tile arrays, full-board replacements, clocks, player states, and game-over decisions.
 - Practice mode becomes non-competitive: local Dart judge/generator, score only, no opponent, no clock, no result screen, play continues until the player leaves.
 - vs Bot becomes local: local Dart judge/generator and local bot. It may keep competitive local presentation, but no gameplay network dependency.
 - Legacy Phaser/WebView/iframe bridge path retired from runtime builds and Docker/CI once parity is reached.

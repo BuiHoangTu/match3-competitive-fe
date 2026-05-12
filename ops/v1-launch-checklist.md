@@ -17,7 +17,7 @@ State as of 2026-05-11. This checklist is temporarily **blocked by v0.9**: the p
 
 | Task group | What must be true before v1.0 resumes |
 |---|---|
-| Protocol | Online vs Human payloads use flat board/dimensions/version, generated tile arrays with deterministic refill order, and `board_replaced`; no client-visible seed replay or competitive score fields. |
+| Protocol | Online vs Human payloads use flat board/version snapshots, generated tile arrays with deterministic refill order, and `board_replaced`; no client-visible board dimensions, seed replay, or competitive score fields. |
 | Flutter local modes | Practice is Flutter-native, score-only, endless until leave; vs Bot is local with Dart judge/generator and no point score. |
 | Flutter online mode | Flutter Socket.IO client consumes room tokens directly and renders only server-authored board state. |
 | Legacy removal | DONE for runtime/build: no runtime route loads Phaser through WebView/iframe; Docker/CI no longer require the game-view bundle for product builds. |

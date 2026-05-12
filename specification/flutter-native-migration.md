@@ -65,8 +65,6 @@ Practice and vs Bot must use the same Dart judge event model as online packets w
 {
   roomId: string,
   mode: "turn_based",
-  width: number,
-  height: number,
   boardVersion: number,
   board: number[],
   activePlayerId: string,
@@ -75,7 +73,7 @@ Practice and vs Bot must use the same Dart judge event model as online packets w
 }
 ```
 
-`board` is a flat row-major array with length `width * height`. Index `i` maps to `row = floor(i / width)` and `col = i % width`. The client uses the explicit dimensions; it does not infer width or height from array length alone.
+`board` is a flat row-major array with length `8 * 8`. Index `i` maps to `row = floor(i / 8)` and `col = i % 8`. Client and server use the agreed board dimensions; the server does not send width or height.
 
 There is no seed in this payload, no score in competitive payloads, and no seed in the room token.
 
@@ -97,7 +95,7 @@ move_resolved {
 
 `ResolvedStepWire` is animation-first data: cleared cells, falling movements, per-step stat snapshots, and refill destinations. `GeneratedTileWire[]` is a flat list and the only source of newly generated symbols on the client for that move. The client must not invent refill symbols.
 
-Refill order is deterministic: after each cascade's gravity settles, scan columns left-to-right (`col = 0..width-1`) and, within each column, fill empty cells top-to-bottom (`row = 0..height-1`). The server emits `generatedTiles` in exactly that order for each cascade, concatenating multi-cascade refill streams chronologically. The client consumes the list in order and may either trust each item’s explicit `{ row, col, tile }` destination or assert that each cascade's destinations match the deterministic scan. If the order or destination does not match, the client treats the packet as a reconciliation error.
+Refill order is deterministic: after each cascade's gravity settles, scan columns left-to-right (`col = 0..7`) and, within each column, fill empty cells top-to-bottom (`row = 0..7`). The server emits `generatedTiles` in exactly that order for each cascade, concatenating multi-cascade refill streams chronologically. The client consumes the list in order and may either trust each item’s explicit `{ row, col, tile }` destination or assert that each cascade's destinations match the deterministic scan. If the order or destination does not match, the client treats the packet as a reconciliation error.
 
 The server may include a `boardHash` for cheap client reconciliation. Full final board snapshots should be avoided on every move unless debugging or recovery requires them.
 
@@ -109,8 +107,6 @@ After every settled board, the authoritative judge checks for legal match-produc
 board_replaced {
   boardVersion: number,
   reason: "no_legal_moves",
-  width: number,
-  height: number,
   board: number[],
   playerStates: Record<string, PlayerStatsWire>
 }
@@ -151,7 +147,7 @@ The new match UI is Flutter-native:
 ## 9. Server Changes
 
 - Remove seed from room-token payload and online match start payload.
-- Ensure `RoomManager` stores flat `board`, `width`, `height`, `boardVersion`, player states, active player, and any generated tile metadata needed for audit/debug.
+- Ensure `RoomManager` stores flat `board`, `boardVersion`, player states, active player, and any generated tile metadata needed for audit/debug. Board dimensions remain shared constants.
 - Extend `MatchEngineService` so every refill returns explicit `GeneratedTileWire[]`.
 - Add no-legal-move detection and `board_replaced` emission.
 - Keep rejoin snapshot as board table + board version, not seed + moves.
@@ -183,7 +179,7 @@ screen that renders server-authored flat boards and handles `move_resolved` /
    Add Dart Socket.IO wrapper that uses room tokens directly. Remove any dependency on shell/game bridge messages for online play.
 
 6. **Change backend online board protocol.**
-   Make `match_found` send flat board/version/dimensions, make `move_resolved` send generated tile arrays in deterministic refill order, add `board_replaced`, remove score from competitive payloads, and remove seed from room token and online payloads.
+   Make `match_found` send flat board/version without dimensions, make `move_resolved` send generated tile arrays in deterministic refill order, add `board_replaced`, remove score from competitive payloads, and remove seed from room token and online payloads.
 
 7. **Connect Flutter online match screen.**
    Consume server board packets, animate resolve steps, apply generated tiles, handle board replacement notifications, and reconcile by board version/hash.
