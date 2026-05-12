@@ -1,6 +1,6 @@
 # Flutter-Native Game Client Migration
 
-Status: implementation in progress on 2026-05-11. This document is the review checklist for replacing the current Flutter-shell-plus-Phaser embed with a full Flutter game client and a pure Dart game library.
+Status: implementation in progress on 2026-05-12. This document is the review checklist for replacing the current Flutter-shell-plus-Phaser embed with a full Flutter game client and a pure Dart game library.
 
 ## 1. Decision
 
@@ -156,12 +156,17 @@ The new match UI is Flutter-native:
 
 ## 10. Migration Plan
 
-Current implementation status: steps 1-5 and 8-9 are implemented for the active
-runtime. Step 6 is partial because backend room internals and some transitional
-tests still retain private/legacy seed and grid fields while client-visible
-board-delta payloads are being tightened. Step 7 has an initial online Flutter
-screen that renders server-authored flat boards and handles `move_resolved` /
-`board_replaced`; animation, reconnect hardening, and result handling remain.
+Current implementation status on 2026-05-12: steps 1-5 and 8-9 are implemented for the active runtime. Step 6 is mostly implemented for the client-visible board-delta protocol: match start/rejoin use flat boards with agreed dimensions, competitive score is removed, reconnect is allowed, same-account second-device joins are rejected with a user-facing popup, bot fill-in remains supported, and generated tiles are consumed in deterministic order. Backend internals may still contain transitional helpers/fixtures from the older seed/grid model, but online clients should no longer depend on seed replay.
+
+Step 7 is implemented for the main Flutter-native match flow. Online, Practice, and vs Bot now use the Flutter/Flame board; the board uses provided sprite assets, old game-view color styling, swap, invalid recoil, clear, fall/refill, and board replacement animations. Tap-tap and drag input are unified through `SwapRequest`; drag previews mirror both tiles toward their swapped positions, only submit after half-cell distance or sufficient fling speed, and finish the remaining swap animation from the current drag progress. Competitive modes remain score-free. Practice is score-only and endless until leave. Full-board replacement notifications are visible. Leave-match confirmation warns that leaving counts as a loss.
+
+Latest uncommitted session changes: the board no longer grays out while input is locked or animations are running. A separate `highlightTurn` flag draws a red outer table edge when it is the human/player turn; otherwise there is no board-wide visual effect. These latest changes are not committed yet.
+
+Recent committed migration checkpoints:
+
+- `13e162b docs: update flutter-native board protocol`
+- `b3f2fbb backend: support flat board rooms and reconnects`
+- `bfcb420 frontend: add Flutter-native match board`
 
 1. **Document and freeze target protocol.**
    Update `requirement.md`, `system-design.md`, `CLAUDE.md`, and `implementation-plan.md`. Add protocol fixtures for board packets before code changes.
@@ -183,6 +188,7 @@ screen that renders server-authored flat boards and handles `move_resolved` /
 
 7. **Connect Flutter online match screen.**
    Consume server board packets, animate resolve steps, apply generated tiles, handle board replacement notifications, and reconcile by board version/hash.
+   Current code status: implemented for match start, move resolution, fizzle/recoil, generated tile refill, board replacement notification, reconnect/resume, account-in-use popup, leave confirmation, and unified tap/drag swap input. Remaining follow-up is mainly hardening/visual polish: confirm production two-device behavior, verify result/end-state UX, and decide whether to add board-hash reconciliation.
 
 8. **Retire Phaser bridge path.**
    Delete or quarantine `packages/game-view`, bridge transports, `GameViewHandle`, iframe/WebView bootstrap, and nginx `/game/` packaging once Flutter online play is green.
@@ -194,6 +200,7 @@ screen that renders server-authored flat boards and handles `move_resolved` /
 
 10. **Regression matrix.**
    Verify Practice endless mode, local vs Bot, online two-client shared board, no-legal-move replacement notification, rejoin board snapshot, token refresh, account deletion, and production Docker build.
+   Current verification in this session: targeted Flutter screen tests, full `flutter test`, Flutter analyzer for touched game/screens, and `git diff --check` pass. Backend/npm tests were not rerun after the latest client-only interaction changes.
 
 ## 11. Review Checklist
 
@@ -205,3 +212,5 @@ screen that renders server-authored flat boards and handles `move_resolved` /
 - Is Practice score-only and endless until leave? It must be.
 - Do competitive modes avoid score display and score fields? They must.
 - Are Phaser/WebView/bridge references either removed or clearly marked legacy? They must be before merge.
+- Does input lock avoid dimming the board? It should; player turn is indicated only by the red table edge.
+- Do tap-tap and drag both route through the same `SwapRequest` path? They should.

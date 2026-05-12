@@ -338,6 +338,49 @@ void main() {
     });
   });
 
+  testWidgets('online screen ignores short slow drag swaps', (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('online_tile_2_1'))),
+    );
+    await gesture.moveBy(const Offset(10, 0));
+    await tester.pump(const Duration(milliseconds: 250));
+    await gesture.up();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(fake.submittedMove, isNull);
+  });
+
   testWidgets('online screen shows account-in-use popup copy', (tester) async {
     var left = false;
     final matchmaking = MatchmakingClient(

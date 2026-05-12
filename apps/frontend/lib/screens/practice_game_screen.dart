@@ -47,29 +47,17 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
     ).board;
   }
 
-  void _handleTileTap(int row, int col) {
+  void _handleSelectionChanged(BoardPosition? selected) {
     if (_boardAnimating) return;
-    final selected = _selected;
-    if (selected == null) {
-      setState(() => _selected = BoardPosition(row, col));
-      return;
-    }
-
-    if (selected.row == row && selected.col == col) {
-      setState(() => _selected = null);
-      return;
-    }
-
-    if (!_board.isAdjacent(selected.row, selected.col, row, col)) {
-      setState(() => _selected = BoardPosition(row, col));
-      return;
-    }
-
-    _resolveSwap(selected.row, selected.col, row, col);
+    setState(() => _selected = selected);
   }
 
-  void _handleTileSwap(int r1, int c1, int r2, int c2) {
+  void _handleSwapRequest(SwapRequest request) {
     if (_boardAnimating) return;
+    final r1 = request.from.row;
+    final c1 = request.from.col;
+    final r2 = request.to.row;
+    final c2 = request.to.col;
     if (!_board.isAdjacent(r1, c1, r2, c2)) return;
     _resolveSwap(r1, c1, r2, c2);
   }
@@ -248,11 +236,12 @@ class _PracticeGameScreenState extends State<PracticeGameScreen> {
                       board: _board,
                       selected: _selected,
                       disabled: _boardAnimating,
+                      highlightTurn: true,
                       animation: _boardAnimation,
                       onAnimationComplete: _handleBoardAnimationComplete,
                       tileKeyPrefix: 'practice',
-                      onTileTap: _handleTileTap,
-                      onTileSwap: _handleTileSwap,
+                      onSelectionChanged: _handleSelectionChanged,
+                      onSwapRequest: _handleSwapRequest,
                     ),
                   ),
                 ),

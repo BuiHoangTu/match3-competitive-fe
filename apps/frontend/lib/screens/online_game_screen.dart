@@ -313,43 +313,28 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     return dto.loserId == _myPlayerId ? 'Defeat' : 'Victory';
   }
 
-  void _handleTileTap(int row, int col) {
-    final board = _board;
-    final roomId = _roomId;
-    final connection = _connection;
-    if (board == null || roomId == null || connection == null) return;
+  void _handleSelectionChanged(BoardPosition? selected) {
     if (_pendingMove || _boardAnimating) return;
     if (!_isMyTurn) {
       setState(() => _notice = 'Opponent turn');
       return;
     }
-
-    final selected = _selected;
-    if (selected == null) {
-      setState(() => _selected = BoardPosition(row, col));
-      return;
-    }
-    if (selected.row == row && selected.col == col) {
-      setState(() => _selected = null);
-      return;
-    }
-    if (!board.isAdjacent(selected.row, selected.col, row, col)) {
-      setState(() => _selected = BoardPosition(row, col));
-      return;
-    }
-
-    _submitSwap(selected.row, selected.col, row, col);
+    setState(() => _selected = selected);
   }
 
-  void _handleTileSwap(int r1, int c1, int r2, int c2) {
+  void _handleSwapRequest(SwapRequest request) {
     final board = _board;
+    final r1 = request.from.row;
+    final c1 = request.from.col;
+    final r2 = request.to.row;
+    final c2 = request.to.col;
     if (board == null || _boardAnimating || !board.isAdjacent(r1, c1, r2, c2)) {
       return;
     }
-    _submitSwap(r1, c1, r2, c2);
+    _submitSwap(request);
   }
 
-  void _submitSwap(int r1, int c1, int r2, int c2) {
+  void _submitSwap(SwapRequest request) {
     final roomId = _roomId;
     final connection = _connection;
     if (roomId == null || connection == null) return;
@@ -361,10 +346,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
 
     connection.submitMove(
       roomId: roomId,
-      r1: r1,
-      c1: c1,
-      r2: r2,
-      c2: c2,
+      r1: request.from.row,
+      c1: request.from.col,
+      r2: request.to.row,
+      c2: request.to.col,
     );
     setState(() {
       _pendingMove = true;
@@ -461,14 +446,15 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                             selected: _selected,
                             disabled:
                                 _pendingMove || _boardAnimating || !_isMyTurn,
+                            highlightTurn: _isMyTurn,
                             animation: _boardAnimation,
                             onAnimationComplete: () {
                               if (!mounted) return;
                               setState(() => _boardAnimating = false);
                             },
                             tileKeyPrefix: 'online',
-                            onTileTap: _handleTileTap,
-                            onTileSwap: _handleTileSwap,
+                            onSelectionChanged: _handleSelectionChanged,
+                            onSwapRequest: _handleSwapRequest,
                           ),
                         ),
                       ),

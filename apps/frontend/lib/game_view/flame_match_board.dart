@@ -9,15 +9,43 @@ import 'package:flutter/material.dart';
 
 import '../game_core/board.dart';
 
-typedef TileTapCallback = void Function(int row, int col);
-typedef TileSwapCallback = void Function(int r1, int c1, int r2, int c2);
+enum SwapInputMode { tapTap, drag }
+
+class SwapRequest {
+  const SwapRequest({
+    required this.from,
+    required this.to,
+    required this.mode,
+    this.dragOffset,
+  });
+
+  final BoardPosition from;
+  final BoardPosition to;
+  final SwapInputMode mode;
+  final Offset? dragOffset;
+}
+
+typedef TileSelectionCallback = void Function(BoardPosition? selected);
+typedef TileSwapRequestCallback = void Function(SwapRequest request);
+typedef TileDragPreviewCallback = void Function(
+  int row,
+  int col,
+  int targetRow,
+  int targetCol,
+  double progress,
+);
 
 const _oldGameBackground = Color(0xFF1A1A2E);
 const _cellBorderColor = Color(0x2EFFFFFF);
+const _turnBorderColor = Color(0xFFE53935);
 const _selectionOverlayAlpha = 0.35;
-const _swapDuration = Duration(milliseconds: 260);
+const _swapDuration = Duration(milliseconds: 180);
+const _minSwapDuration = Duration(milliseconds: 40);
 const _clearDuration = Duration(milliseconds: 180);
 const _fallDuration = Duration(milliseconds: 220);
+const _hitTargetSpacing = 5.0;
+const _minFlingVelocity = 700.0;
+const _minDirectionalDrag = 4.0;
 
 class BoardMoveAnimation {
   const BoardMoveAnimation({
@@ -83,21 +111,23 @@ class FlameMatchBoard extends StatefulWidget {
   const FlameMatchBoard({
     super.key,
     required this.board,
-    required this.onTileTap,
-    this.onTileSwap,
+    required this.onSelectionChanged,
+    required this.onSwapRequest,
     this.animation,
     this.onAnimationComplete,
     required this.tileKeyPrefix,
     this.selected,
     this.disabled = false,
+    this.highlightTurn = false,
   });
 
   final GameBoard board;
   final BoardPosition? selected;
   final bool disabled;
+  final bool highlightTurn;
   final String tileKeyPrefix;
-  final TileTapCallback onTileTap;
-  final TileSwapCallback? onTileSwap;
+  final TileSelectionCallback onSelectionChanged;
+  final TileSwapRequestCallback onSwapRequest;
   final BoardMoveAnimation? animation;
   final VoidCallback? onAnimationComplete;
 
@@ -115,6 +145,7 @@ class _FlameMatchBoardState extends State<FlameMatchBoard> {
       board: widget.board,
       selected: widget.selected,
       disabled: widget.disabled,
+      highlightTurn: widget.highlightTurn,
       onAnimationComplete: widget.onAnimationComplete,
     );
   }
@@ -129,17 +160,20 @@ class _FlameMatchBoardState extends State<FlameMatchBoard> {
         animation,
         selected: widget.selected,
         disabled: widget.disabled,
+        highlightTurn: widget.highlightTurn,
       );
     } else if (animation != null) {
       _game.updateInteractionState(
         selected: widget.selected,
         disabled: widget.disabled,
+        highlightTurn: widget.highlightTurn,
       );
     } else {
       _game.setBoard(
         widget.board,
         selected: widget.selected,
         disabled: widget.disabled,
+        highlightTurn: widget.highlightTurn,
       );
     }
   }
@@ -163,8 +197,10 @@ class _FlameMatchBoardState extends State<FlameMatchBoard> {
             selected: widget.selected,
             disabled: widget.disabled,
             tileKeyPrefix: widget.tileKeyPrefix,
-            onTileTap: widget.onTileTap,
-            onTileSwap: widget.onTileSwap,
+            onSelectionChanged: widget.onSelectionChanged,
+            onSwapRequest: widget.onSwapRequest,
+            onDragPreview: _game.previewDragSwap,
+            onDragCancel: _game.cancelDragPreview,
           ),
         ],
       ),
@@ -178,16 +214,20 @@ class _BoardHitTargets extends StatefulWidget {
     required this.selected,
     required this.disabled,
     required this.tileKeyPrefix,
-    required this.onTileTap,
-    required this.onTileSwap,
+    required this.onSelectionChanged,
+    required this.onSwapRequest,
+    required this.onDragPreview,
+    required this.onDragCancel,
   });
 
   final GameBoard board;
   final BoardPosition? selected;
   final bool disabled;
   final String tileKeyPrefix;
-  final TileTapCallback onTileTap;
-  final TileSwapCallback? onTileSwap;
+  final TileSelectionCallback onSelectionChanged;
+  final TileSwapRequestCallback onSwapRequest;
+  final TileDragPreviewCallback onDragPreview;
+  final VoidCallback onDragCancel;
 
   @override
   State<_BoardHitTargets> createState() => _BoardHitTargetsState();
@@ -195,45 +235,127 @@ class _BoardHitTargets extends StatefulWidget {
 
 class _BoardHitTargetsState extends State<_BoardHitTargets> {
   Offset _dragDelta = Offset.zero;
-  bool _dragSubmitted = false;
-
-  void _submitSwap(int row, int col, int targetRow, int targetCol) {
-    if (!widget.board.contains(targetRow, targetCol)) return;
-    final directSwap = widget.onTileSwap;
-    if (directSwap != null) {
-      directSwap(row, col, targetRow, targetCol);
-      return;
-    }
-    widget.onTileTap(row, col);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.onTileTap(targetRow, targetCol);
-    });
-  }
+  BoardPosition? _dragStart;
 
   void _handleTap(int row, int col) {
-    widget.onTileTap(row, col);
+    if (widget.disabled) return;
+    final pos = BoardPosition(row, col);
+    final selected = widget.selected;
+    if (selected == null) {
+      widget.onSelectionChanged(pos);
+      return;
+    }
+
+    if (selected == pos) {
+      widget.onSelectionChanged(null);
+      return;
+    }
+
+    if (!widget.board.isAdjacent(selected.row, selected.col, row, col)) {
+      widget.onSelectionChanged(pos);
+      return;
+    }
+
+    widget.onSelectionChanged(null);
+    widget.onSwapRequest(
+      SwapRequest(
+        from: selected,
+        to: pos,
+        mode: SwapInputMode.tapTap,
+      ),
+    );
   }
 
-  void _handlePanStart() {
+  void _handlePanStart(int row, int col) {
     _dragDelta = Offset.zero;
-    _dragSubmitted = false;
+    _dragStart = BoardPosition(row, col);
   }
 
   void _handlePanUpdate(
     DragUpdateDetails details,
-    int row,
-    int col,
-    double threshold,
+    double cellExtent,
   ) {
-    if (_dragSubmitted || widget.disabled) return;
+    final start = _dragStart;
+    if (widget.disabled || start == null) return;
     _dragDelta += details.delta;
-    if (_dragDelta.distance < threshold) return;
+    final intent = _dragIntent(_dragDelta);
+    if (intent == null) {
+      widget.onDragCancel();
+      return;
+    }
+    final targetRow = start.row + intent.dRow;
+    final targetCol = start.col + intent.dCol;
+    if (!widget.board.contains(targetRow, targetCol)) {
+      widget.onDragCancel();
+      return;
+    }
+    final progress = (intent.distance / cellExtent).clamp(0.0, 1.0);
+    widget.onDragPreview(start.row, start.col, targetRow, targetCol, progress);
+  }
 
-    _dragSubmitted = true;
-    final horizontal = _dragDelta.dx.abs() >= _dragDelta.dy.abs();
-    final dRow = horizontal ? 0 : (_dragDelta.dy > 0 ? 1 : -1);
-    final dCol = horizontal ? (_dragDelta.dx > 0 ? 1 : -1) : 0;
-    _submitSwap(row, col, row + dRow, col + dCol);
+  void _handlePanEnd(
+    DragEndDetails details,
+    double cellExtent,
+  ) {
+    final start = _dragStart;
+    _dragStart = null;
+    if (widget.disabled || start == null) return;
+    final intent = _dragIntent(
+      _dragDelta,
+      velocity: details.velocity.pixelsPerSecond,
+    );
+    if (intent == null) {
+      widget.onDragCancel();
+      return;
+    }
+
+    final targetRow = start.row + intent.dRow;
+    final targetCol = start.col + intent.dCol;
+    final shouldSwap = widget.board.contains(targetRow, targetCol) &&
+        (intent.distance >= cellExtent * 0.5 ||
+            intent.speed.abs() >= _minFlingVelocity);
+    if (!shouldSwap) {
+      widget.onDragCancel();
+      return;
+    }
+
+    final progress = (intent.distance / cellExtent).clamp(0.0, 1.0);
+    final target = BoardPosition(targetRow, targetCol);
+    widget.onSelectionChanged(null);
+    widget.onDragPreview(start.row, start.col, targetRow, targetCol, progress);
+    widget.onSwapRequest(
+      SwapRequest(
+        from: start,
+        to: target,
+        mode: SwapInputMode.drag,
+        dragOffset: _dragDelta,
+      ),
+    );
+  }
+
+  void _handlePanCancel() {
+    _dragDelta = Offset.zero;
+    _dragStart = null;
+    widget.onDragCancel();
+  }
+
+  ({int dRow, int dCol, double distance, double speed})? _dragIntent(
+    Offset delta, {
+    Offset velocity = Offset.zero,
+  }) {
+    final horizontal = delta.dx.abs() >= delta.dy.abs();
+    final distance = horizontal ? delta.dx : delta.dy;
+    final speed = horizontal ? velocity.dx : velocity.dy;
+    final directionValue =
+        distance.abs() >= _minDirectionalDrag ? distance : speed;
+    if (directionValue == 0) return null;
+    final direction = directionValue.sign.toInt();
+    return (
+      dRow: horizontal ? 0 : direction,
+      dCol: horizontal ? direction : 0,
+      distance: distance.abs(),
+      speed: speed,
+    );
   }
 
   @override
@@ -253,7 +375,7 @@ class _BoardHitTargetsState extends State<_BoardHitTargets> {
         final tile = widget.board.tileAt(row, col);
         return LayoutBuilder(
           builder: (context, constraints) {
-            final threshold = math.max(10.0, constraints.maxWidth * 0.28);
+            final cellExtent = constraints.maxWidth + _hitTargetSpacing;
             return Semantics(
               button: true,
               label: 'Tile ${tile + 1}',
@@ -263,11 +385,15 @@ class _BoardHitTargetsState extends State<_BoardHitTargets> {
                 key: Key('${widget.tileKeyPrefix}_tile_${row}_$col'),
                 behavior: HitTestBehavior.opaque,
                 onTap: widget.disabled ? null : () => _handleTap(row, col),
-                onPanStart: widget.disabled ? null : (_) => _handlePanStart(),
+                onPanStart:
+                    widget.disabled ? null : (_) => _handlePanStart(row, col),
                 onPanUpdate: widget.disabled
                     ? null
-                    : (details) =>
-                        _handlePanUpdate(details, row, col, threshold),
+                    : (details) => _handlePanUpdate(details, cellExtent),
+                onPanEnd: widget.disabled
+                    ? null
+                    : (details) => _handlePanEnd(details, cellExtent),
+                onPanCancel: widget.disabled ? null : _handlePanCancel,
               ),
             );
           },
@@ -282,20 +408,24 @@ class MatchBoardFlameGame extends FlameGame {
     required GameBoard board,
     BoardPosition? selected,
     bool disabled = false,
+    bool highlightTurn = false,
     this.onAnimationComplete,
   })  : _board = board,
         _selected = selected,
-        _disabled = disabled;
+        _disabled = disabled,
+        _highlightTurn = highlightTurn;
 
   GameBoard _board;
   BoardPosition? _selected;
   bool _disabled;
+  bool _highlightTurn;
   VoidCallback? onAnimationComplete;
   final List<_TileComponent> _tiles = [];
   final Map<int, Sprite> _sprites = {};
   bool _loaded = false;
   bool _animating = false;
   int _animationGeneration = 0;
+  _DragSwapPreview? _dragPreview;
 
   @override
   Color backgroundColor() => _oldGameBackground;
@@ -321,37 +451,49 @@ class MatchBoardFlameGame extends FlameGame {
     GameBoard board, {
     BoardPosition? selected,
     required bool disabled,
+    required bool highlightTurn,
   }) {
     final boardChanged = !_sameBoard(_board, board);
+    final wasDisabled = _disabled;
     if (!_loaded) {
       _board = board;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       return;
     }
     if (_animating) {
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       return;
     }
 
     if (_tiles.length != board.width * board.height ||
         _board.width != board.width ||
         _board.height != board.height) {
+      _clearDragPreview(animateBack: false);
       _board = board;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       _rebuildTiles(initial: false);
     } else if (boardChanged) {
+      _clearDragPreview(animateBack: false);
       final oldBoard = _board;
       _board = board;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       _applyBoardChange(oldBoard, board);
     } else {
+      if (wasDisabled && !disabled) {
+        _clearDragPreview(animateBack: true);
+      }
       _board = board;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       _syncTileState();
     }
   }
@@ -359,21 +501,80 @@ class MatchBoardFlameGame extends FlameGame {
   void updateInteractionState({
     BoardPosition? selected,
     required bool disabled,
+    required bool highlightTurn,
   }) {
     _selected = selected;
     _disabled = disabled;
+    _highlightTurn = highlightTurn;
     if (!_animating) _syncTileState();
+  }
+
+  void previewDragSwap(
+    int row,
+    int col,
+    int targetRow,
+    int targetCol,
+    double progress,
+  ) {
+    if (!_loaded ||
+        _animating ||
+        !_board.isAdjacent(row, col, targetRow, targetCol)) {
+      return;
+    }
+    final a = _componentAt(row, col);
+    final b = _componentAt(targetRow, targetCol);
+    if (a == null || b == null) return;
+
+    var preview = _dragPreview;
+    if (preview == null ||
+        preview.row != row ||
+        preview.col != col ||
+        preview.targetRow != targetRow ||
+        preview.targetCol != targetCol) {
+      _clearDragPreview(animateBack: false);
+      final metrics = _BoardMetrics.forSize(
+        size: Size(size.x, size.y),
+        width: _board.width,
+        height: _board.height,
+      );
+      final aHome = metrics.cellTopLeft(row, col);
+      final bHome = metrics.cellTopLeft(targetRow, targetCol);
+      preview = _DragSwapPreview(
+        row: row,
+        col: col,
+        targetRow: targetRow,
+        targetCol: targetCol,
+        a: a,
+        b: b,
+        aHome: Vector2(aHome.dx, aHome.dy),
+        bHome: Vector2(bHome.dx, bHome.dy),
+      );
+      _dragPreview = preview;
+    }
+
+    final clamped = progress.clamp(0.0, 1.0);
+    preview.progress = clamped;
+    final delta = preview.bHome - preview.aHome;
+    preview.a.jumpTo(preview.aHome + delta * clamped, alpha: 1);
+    preview.b.jumpTo(preview.bHome - delta * clamped, alpha: 1);
+  }
+
+  void cancelDragPreview() {
+    _clearDragPreview(animateBack: true);
   }
 
   void playMoveAnimation(
     BoardMoveAnimation animation, {
     BoardPosition? selected,
     required bool disabled,
+    required bool highlightTurn,
   }) {
     _animationGeneration += 1;
     final generation = _animationGeneration;
     _selected = null;
     _disabled = disabled;
+    _highlightTurn = highlightTurn;
+    final swapStartProgress = _consumeDragPreview(animation);
 
     if (!_loaded ||
         _board.width != animation.finalBoard.width ||
@@ -381,6 +582,7 @@ class MatchBoardFlameGame extends FlameGame {
       _board = animation.finalBoard;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       if (_loaded) {
         _rebuildTiles(initial: false);
       }
@@ -390,21 +592,29 @@ class MatchBoardFlameGame extends FlameGame {
     unawaited(_runMoveAnimation(
       animation,
       generation: generation,
+      swapStartProgress: swapStartProgress,
       selected: selected,
       disabled: disabled,
+      highlightTurn: highlightTurn,
     ));
   }
 
   Future<void> _runMoveAnimation(
     BoardMoveAnimation animation, {
     required int generation,
+    required double swapStartProgress,
     BoardPosition? selected,
     required bool disabled,
+    required bool highlightTurn,
   }) async {
     _animating = true;
     _syncTileState();
 
-    await _animateAcceptedSwap(animation, generation);
+    await _animateAcceptedSwap(
+      animation,
+      generation,
+      startProgress: swapStartProgress,
+    );
     if (!_isCurrentAnimation(generation)) return;
 
     if (animation.revert || animation.steps.isEmpty) {
@@ -413,6 +623,7 @@ class MatchBoardFlameGame extends FlameGame {
       _board = animation.finalBoard;
       _selected = selected;
       _disabled = disabled;
+      _highlightTurn = highlightTurn;
       _animating = false;
       _syncTileState();
       onAnimationComplete?.call();
@@ -427,6 +638,7 @@ class MatchBoardFlameGame extends FlameGame {
     _board = animation.finalBoard;
     _selected = selected;
     _disabled = disabled;
+    _highlightTurn = highlightTurn;
     _animating = false;
     _syncTileState();
     onAnimationComplete?.call();
@@ -434,17 +646,32 @@ class MatchBoardFlameGame extends FlameGame {
 
   Future<void> _animateAcceptedSwap(
     BoardMoveAnimation animation,
-    int generation,
-  ) async {
+    int generation, {
+    required double startProgress,
+  }) async {
     final a = _componentAt(animation.r1, animation.c1);
     final b = _componentAt(animation.r2, animation.c2);
     if (a == null || b == null) return;
 
-    final aHome = a.position.clone();
-    final bHome = b.position.clone();
-    a.animateTo(bHome, alpha: 1, duration: _swapDuration);
-    b.animateTo(aHome, alpha: 1, duration: _swapDuration);
-    await Future<void>.delayed(_swapDuration);
+    final metrics = _BoardMetrics.forSize(
+      size: Size(size.x, size.y),
+      width: _board.width,
+      height: _board.height,
+    );
+    final aTarget = metrics.cellTopLeft(animation.r2, animation.c2);
+    final bTarget = metrics.cellTopLeft(animation.r1, animation.c1);
+    final duration = _remainingSwapDuration(startProgress);
+    a.animateTo(
+      Vector2(aTarget.dx, aTarget.dy),
+      alpha: 1,
+      duration: duration,
+    );
+    b.animateTo(
+      Vector2(bTarget.dx, bTarget.dy),
+      alpha: 1,
+      duration: duration,
+    );
+    await Future<void>.delayed(duration);
     if (!_isCurrentAnimation(generation)) return;
 
     a
@@ -455,6 +682,50 @@ class MatchBoardFlameGame extends FlameGame {
       ..col = animation.c1;
     _board =
         _board.swap(animation.r1, animation.c1, animation.r2, animation.c2);
+  }
+
+  double _consumeDragPreview(BoardMoveAnimation animation) {
+    final preview = _dragPreview;
+    if (preview == null) return 0;
+    final matches = preview.row == animation.r1 &&
+        preview.col == animation.c1 &&
+        preview.targetRow == animation.r2 &&
+        preview.targetCol == animation.c2;
+    if (matches) {
+      _dragPreview = null;
+      return preview.progress;
+    }
+    _clearDragPreview(animateBack: false);
+    return 0;
+  }
+
+  Duration _remainingSwapDuration(double startProgress) {
+    final remaining = 1 - startProgress.clamp(0.0, 1.0);
+    final milliseconds = (_swapDuration.inMilliseconds * remaining)
+        .round()
+        .clamp(_minSwapDuration.inMilliseconds, _swapDuration.inMilliseconds);
+    return Duration(milliseconds: milliseconds);
+  }
+
+  void _clearDragPreview({required bool animateBack}) {
+    final preview = _dragPreview;
+    if (preview == null) return;
+    _dragPreview = null;
+    if (animateBack) {
+      preview.a.animateTo(
+        preview.aHome,
+        alpha: 1,
+        duration: const Duration(milliseconds: 120),
+      );
+      preview.b.animateTo(
+        preview.bHome,
+        alpha: 1,
+        duration: const Duration(milliseconds: 120),
+      );
+    } else {
+      preview.a.jumpTo(preview.aHome, alpha: 1);
+      preview.b.jumpTo(preview.bHome, alpha: 1);
+    }
   }
 
   Future<void> _animateSwapBack(
@@ -598,6 +869,20 @@ class MatchBoardFlameGame extends FlameGame {
       }
     }
     super.render(canvas);
+
+    if (_highlightTurn) {
+      final turnPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..color = _turnBorderColor;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          metrics.rect.deflate(2),
+          const Radius.circular(12),
+        ),
+        turnPaint,
+      );
+    }
   }
 
   void _rebuildTiles({required bool initial}) {
@@ -648,8 +933,7 @@ class MatchBoardFlameGame extends FlameGame {
       component
         ..tile = _board.tileAt(component.row, component.col)
         ..sprite = _spriteForTile(_board.tileAt(component.row, component.col))
-        ..selected = _selected == BoardPosition(component.row, component.col)
-        ..disabled = _disabled;
+        ..selected = _selected == BoardPosition(component.row, component.col);
     }
   }
 
@@ -733,6 +1017,29 @@ class MatchBoardFlameGame extends FlameGame {
   }
 }
 
+class _DragSwapPreview {
+  _DragSwapPreview({
+    required this.row,
+    required this.col,
+    required this.targetRow,
+    required this.targetCol,
+    required this.a,
+    required this.b,
+    required this.aHome,
+    required this.bHome,
+  });
+
+  final int row;
+  final int col;
+  final int targetRow;
+  final int targetCol;
+  final _TileComponent a;
+  final _TileComponent b;
+  final Vector2 aHome;
+  final Vector2 bHome;
+  double progress = 0;
+}
+
 class _BoardMetrics {
   const _BoardMetrics({
     required this.rect,
@@ -789,7 +1096,6 @@ class _TileComponent extends PositionComponent {
   int tile;
   Sprite? sprite;
   bool selected = false;
-  bool disabled = false;
 
   Vector2? _target;
   Vector2? _startPosition;
@@ -847,13 +1153,12 @@ class _TileComponent extends PositionComponent {
   @override
   void render(Canvas canvas) {
     final rect = Offset.zero & Size(size.x, size.y);
-    final opacity = disabled ? 0.48 : 1.0;
 
     final currentSprite = sprite;
     if (currentSprite != null) {
       canvas.saveLayer(
         rect,
-        Paint()..color = Colors.white.withValues(alpha: _alpha * opacity),
+        Paint()..color = Colors.white.withValues(alpha: _alpha),
       );
       currentSprite.render(
         canvas,
@@ -862,7 +1167,7 @@ class _TileComponent extends PositionComponent {
       );
       canvas.restore();
     } else {
-      _drawMissingSprite(canvas, rect, opacity);
+      _drawMissingSprite(canvas, rect);
     }
 
     if (selected) {
@@ -870,18 +1175,18 @@ class _TileComponent extends PositionComponent {
         rect,
         Paint()
           ..color = Colors.white.withValues(
-            alpha: _selectionOverlayAlpha * _alpha * opacity,
+            alpha: _selectionOverlayAlpha * _alpha,
           ),
       );
     }
   }
 
-  void _drawMissingSprite(Canvas canvas, Rect rect, double opacity) {
+  void _drawMissingSprite(Canvas canvas, Rect rect) {
     final textPainter = TextPainter(
       text: TextSpan(
         text: '${tile + 1}',
         style: TextStyle(
-          color: Colors.white.withValues(alpha: _alpha * opacity),
+          color: Colors.white.withValues(alpha: _alpha),
           fontSize: size.x * 0.42,
           fontWeight: FontWeight.w700,
         ),
