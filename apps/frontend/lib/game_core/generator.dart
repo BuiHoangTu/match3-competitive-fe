@@ -29,3 +29,24 @@ class SequenceTileGenerator implements TileGenerator {
     return value;
   }
 }
+
+class TileStreamGenerator implements TileGenerator {
+  TileStreamGenerator(this.values);
+
+  final List<int> values;
+  int _index = 0;
+
+  int get consumed => _index;
+  int get remaining => values.length - _index;
+  bool get isExhausted => _index >= values.length;
+
+  @override
+  int nextTile(int symbolCount) {
+    if (_index >= values.length) {
+      throw StateError('generated tile stream is exhausted');
+    }
+    final value = values[_index];
+    _index += 1;
+    return value % symbolCount;
+  }
+}

@@ -29,28 +29,10 @@ void main() {
     expect(dto.activePlayerId, 'player-b');
   });
 
-  test('decodes generatedTiles in deterministic order', () {
+  test('decodes compact generatedTiles stream and boardHash', () {
     final dto = MoveResolvedDto.fromJson(_payload('move_resolved'));
-    expect(dto.steps.single.matchedCells.map((t) => [t.row, t.col]), [
-      [2, 0],
-      [2, 1],
-      [2, 2],
-    ]);
-    expect(dto.steps.single.movements.map((t) => [t.col, t.fromRow, t.toRow]), [
-      [0, 1, 2],
-      [0, 0, 1],
-      [1, 1, 2],
-      [1, 0, 1],
-      [2, 1, 2],
-      [2, 0, 1],
-    ]);
-    expect(dto.steps.single.afterGravity.first, [-1, -1, -1, 3]);
-    expect(dto.steps.single.afterRefill.first, [4, 0, 1, 3]);
-    expect(dto.generatedTiles.map((t) => [t.row, t.col, t.tile]), [
-      [0, 0, 4],
-      [0, 1, 0],
-      [0, 2, 1],
-    ]);
+    expect(dto.generatedTiles, [0, 1, 2, 3]);
+    expect(dto.boardHash, hasLength(64));
   });
 
   test('decodes board_replaced fixture', () {

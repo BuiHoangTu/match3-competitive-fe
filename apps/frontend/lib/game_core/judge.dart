@@ -299,7 +299,7 @@ class LocalJudge {
     final generated = <GeneratedTile>[];
 
     for (var col = 0; col < board.width; col++) {
-      for (var row = 0; row < board.height; row++) {
+      for (var row = board.height - 1; row >= 0; row--) {
         if (next.tileAt(row, col) == emptyTile) {
           final tile = generator.nextTile(symbolCount);
           next = next.withTile(row, col, tile);

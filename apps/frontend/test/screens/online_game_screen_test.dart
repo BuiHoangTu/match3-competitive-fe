@@ -301,7 +301,7 @@ void main() {
     expect(find.text('Board 3'), findsOneWidget);
   });
 
-  testWidgets('online screen treats empty resolved steps as a swap fizzle',
+  testWidgets('online screen treats empty generated stream as a swap fizzle',
       (tester) async {
     final fake = _FakeConnection();
     final matchmaking = MatchmakingClient(
@@ -383,6 +383,56 @@ void main() {
     expect(find.text('Opponent moved'), findsNothing);
     expect(find.byKey(const Key('online_notice')), findsNothing);
     expect(find.text('Board 2'), findsOneWidget);
+  });
+
+  testWidgets('online screen applies rapid resolved moves without sticking',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.moveResolvedController.add(
+      MoveResolvedDto.fromJson(_payload('move_resolved')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final queuedPayload = Map<String, dynamic>.from(_payload('swap_fizzle'))
+      ..['boardVersion'] = 3
+      ..['playerId'] = 'player-b'
+      ..['boardHash'] =
+          '31675f4cc0bf2be56ee068dd860f58e81096d52dcc00073ccf3b1dd6dda55b83';
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson(queuedPayload));
+    await tester.pump(const Duration(milliseconds: 10));
+    await tester.pump();
+
+    expect(find.text('Board 3'), findsOneWidget);
   });
 
   testWidgets('online screen reports score-free result on game over',

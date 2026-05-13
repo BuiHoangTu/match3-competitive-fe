@@ -689,6 +689,9 @@ class MatchBoardFlameGame extends FlameGame {
       if (_loaded) {
         _rebuildTiles(initial: false);
       }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        onAnimationComplete?.call();
+      });
       return;
     }
 
@@ -729,7 +732,7 @@ class MatchBoardFlameGame extends FlameGame {
       _highlightTurn = highlightTurn;
       _animating = false;
       _applyDeferredLayout();
-      _syncTileState();
+      _syncTileState(settleVisuals: true);
       onAnimationComplete?.call();
       return;
     }
@@ -745,7 +748,7 @@ class MatchBoardFlameGame extends FlameGame {
     _highlightTurn = highlightTurn;
     _animating = false;
     _applyDeferredLayout();
-    _syncTileState();
+    _syncTileState(settleVisuals: true);
     onAnimationComplete?.call();
   }
 
@@ -948,7 +951,7 @@ class MatchBoardFlameGame extends FlameGame {
         ..col = entry.movement.col;
     }
     _board = step.afterRefill;
-    _syncTileState();
+    _syncTileState(settleVisuals: true);
   }
 
   bool _isCurrentAnimation(int generation) {
@@ -1046,12 +1049,25 @@ class MatchBoardFlameGame extends FlameGame {
     _layoutTiles(animate: false);
   }
 
-  void _syncTileState() {
+  void _syncTileState({bool settleVisuals = false}) {
+    final metrics = settleVisuals && size.x != 0 && size.y != 0
+        ? _BoardMetrics.forSize(
+            size: Size(size.x, size.y),
+            width: _board.width,
+            height: _board.height,
+          )
+        : null;
     for (final component in _tiles) {
       component
         ..tile = _board.tileAt(component.row, component.col)
         ..sprite = _spriteForTile(_board.tileAt(component.row, component.col))
         ..selected = _selected == BoardPosition(component.row, component.col);
+      if (metrics != null) {
+        final target = metrics.cellTopLeft(component.row, component.col);
+        component
+          ..size = Vector2.all(metrics.tileSize)
+          ..jumpTo(Vector2(target.dx, target.dy), alpha: 1);
+      }
     }
   }
 

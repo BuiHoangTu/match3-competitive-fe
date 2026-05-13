@@ -1,12 +1,17 @@
 library;
 
 import 'dart:async';
+import 'dart:collection';
+import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
 
 import '../errors/matchmaking_errors.dart';
 import '../game_core/board.dart';
+import '../game_core/generator.dart';
+import '../game_core/judge.dart';
 import '../game_view/flame_match_board.dart';
 import '../models/match_result.dart';
 import '../models/matchmaking_result.dart';
@@ -54,6 +59,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   int? _boardVersion;
   BoardPosition? _selected;
   BoardMoveAnimation? _boardAnimation;
+  final Queue<MoveResolvedDto> _queuedResolvedMoves = Queue<MoveResolvedDto>();
   int _boardAnimationId = 0;
   bool _boardAnimating = false;
   bool _pendingMove = false;
@@ -137,31 +143,14 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
             tiles: dto.board,
           );
           _boardAnimation = null;
+          _queuedResolvedMoves.clear();
           _boardAnimating = false;
           _loading = false;
           _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
           _notice = null;
         });
       }))
-      ..add(connection.moveResolved.listen((dto) {
-        final nextBoard = _boardFromResolved(dto);
-        final animation = nextBoard == null
-            ? null
-            : _animationFromResolvedDto(dto, nextBoard);
-        setState(() {
-          if (nextBoard != null) _board = nextBoard;
-          _boardAnimation = animation;
-          _boardAnimating = animation != null;
-          _boardVersion = dto.boardVersion;
-          _playerStates =
-              dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
-          _pendingMove = false;
-          _selected = null;
-          _notice = dto.steps.isEmpty && dto.playerId == _myPlayerId
-              ? 'No match'
-              : null;
-        });
-      }))
+      ..add(connection.moveResolved.listen(_handleMoveResolved))
       ..add(connection.turnChanged.listen((dto) {
         setState(() {
           _activePlayerId = dto.activePlayerId;
@@ -172,6 +161,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }))
       ..add(connection.boardReplaced.listen((dto) {
         setState(() {
+          _queuedResolvedMoves.clear();
           _board = GameBoard.fromFlat(
             width: dto.width,
             height: dto.height,
@@ -189,6 +179,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }))
       ..add(connection.moveRejected.listen((dto) {
         setState(() {
+          _queuedResolvedMoves.clear();
           _pendingMove = false;
           _boardAnimating = false;
           _boardAnimation = null;
@@ -199,6 +190,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       ..add(connection.gameOver.listen((dto) {
         final result = _resultFromGameOver(dto);
         setState(() {
+          _queuedResolvedMoves.clear();
           _playerStates =
               dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
           _pendingMove = false;
@@ -220,30 +212,112 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }));
   }
 
-  GameBoard? _boardFromResolved(MoveResolvedDto dto) {
-    if (dto.steps.isEmpty) return _board;
-    return GameBoard.fromRows(dto.steps.last.afterRefill);
+  String _hashBoard(int boardVersion, GameBoard board) {
+    final flat = board.tiles.join(',');
+    return sha256
+        .convert(
+            utf8.encode('$boardVersion|${board.width}|${board.height}|$flat'))
+        .toString();
   }
 
-  BoardMoveAnimation _animationFromResolvedDto(
+  MoveResolution _resolutionFromResolved(MoveResolvedDto dto) {
+    final board = _board;
+    if (board == null) {
+      throw const FormatException('move_resolved arrived before board state');
+    }
+    final generator = TileStreamGenerator(dto.generatedTiles);
+    final resolution = const LocalJudge().resolveSwap(
+      board: board,
+      r1: dto.r1,
+      c1: dto.c1,
+      r2: dto.r2,
+      c2: dto.c2,
+      generator: generator,
+    );
+    if (generator.remaining != 0) {
+      throw FormatException(
+        'move_resolved generatedTiles has ${generator.remaining} unused tiles',
+      );
+    }
+    final localHash = _hashBoard(dto.boardVersion, resolution.finalBoard);
+    if (localHash != dto.boardHash) {
+      throw FormatException(
+        'move_resolved boardHash mismatch: expected ${dto.boardHash}, '
+        'computed $localHash',
+      );
+    }
+    return resolution;
+  }
+
+  void _handleMoveResolved(MoveResolvedDto dto) {
+    if (_boardAnimating) {
+      _queuedResolvedMoves.add(dto);
+      return;
+    }
+    _applyMoveResolved(dto);
+  }
+
+  void _applyMoveResolved(MoveResolvedDto dto) {
+    late final MoveResolution resolution;
+    try {
+      resolution = _resolutionFromResolved(dto);
+    } catch (e) {
+      setState(() {
+        _queuedResolvedMoves.clear();
+        _pendingMove = false;
+        _boardAnimating = false;
+        _boardAnimation = null;
+        _selected = null;
+        _notice = 'Board sync error';
+      });
+      developer.log(
+        'Failed to apply move_resolved: $e',
+        name: 'board_delta_socket',
+      );
+      return;
+    }
+    final animation = _animationFromResolution(dto, resolution);
+    setState(() {
+      _board = resolution.finalBoard;
+      _boardAnimation = animation;
+      _boardAnimating = true;
+      _boardVersion = dto.boardVersion;
+      _playerStates =
+          dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
+      _pendingMove = false;
+      _selected = null;
+      _notice =
+          resolution.fizzle && dto.playerId == _myPlayerId ? 'No match' : null;
+    });
+  }
+
+  void _handleBoardAnimationComplete() {
+    if (!mounted) return;
+    if (_queuedResolvedMoves.isNotEmpty) {
+      _applyMoveResolved(_queuedResolvedMoves.removeFirst());
+      return;
+    }
+    setState(() => _boardAnimating = false);
+  }
+
+  BoardMoveAnimation _animationFromResolution(
     MoveResolvedDto dto,
-    GameBoard finalBoard,
+    MoveResolution resolution,
   ) {
-    var generatedIndex = 0;
     return BoardMoveAnimation(
       id: ++_boardAnimationId,
       r1: dto.r1,
       c1: dto.c1,
       r2: dto.r2,
       c2: dto.c2,
-      finalBoard: finalBoard,
-      revert: dto.steps.isEmpty,
+      finalBoard: resolution.finalBoard,
+      revert: resolution.fizzle,
       steps: [
-        for (final step in dto.steps)
+        for (final step in resolution.steps)
           BoardCascadeAnimationStep(
             matchedCells: [
-              for (final cell in step.matchedCells)
-                BoardPosition(cell.row, cell.col),
+              for (final match in step.matches)
+                for (final cell in match.cells) cell,
             ],
             movements: [
               for (final movement in step.movements)
@@ -254,38 +328,16 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                 ),
             ],
             generatedTiles: [
-              for (final position in step.newTilePositions)
-                _generatedTileForAnimation(
-                  dto.generatedTiles,
-                  generatedIndex++,
-                  expected: BoardPosition(position.row, position.col),
+              for (final generated in step.generatedTiles)
+                BoardGeneratedTile(
+                  row: generated.row,
+                  col: generated.col,
+                  tile: generated.tile,
                 ),
             ],
-            afterRefill: GameBoard.fromRows(step.afterRefill),
+            afterRefill: step.afterRefill,
           ),
       ],
-    );
-  }
-
-  BoardGeneratedTile _generatedTileForAnimation(
-    List<GeneratedTileDto> generatedTiles,
-    int index, {
-    required BoardPosition expected,
-  }) {
-    if (index >= generatedTiles.length) {
-      throw const FormatException('move_resolved generatedTiles is too short');
-    }
-    final generated = generatedTiles[index];
-    if (generated.row != expected.row || generated.col != expected.col) {
-      throw FormatException(
-        'move_resolved generatedTiles[$index] targets '
-        '(${generated.row},${generated.col}) but expected $expected',
-      );
-    }
-    return BoardGeneratedTile(
-      row: generated.row,
-      col: generated.col,
-      tile: generated.tile,
     );
   }
 
@@ -509,10 +561,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                                 _pendingMove || _boardAnimating || !_isMyTurn,
                             highlightTurn: _isMyTurn,
                             animation: _boardAnimation,
-                            onAnimationComplete: () {
-                              if (!mounted) return;
-                              setState(() => _boardAnimating = false);
-                            },
+                            onAnimationComplete: _handleBoardAnimationComplete,
                             tileKeyPrefix: 'online',
                             onSelectionChanged: _handleSelectionChanged,
                             onSwapRequest: _handleSwapRequest,

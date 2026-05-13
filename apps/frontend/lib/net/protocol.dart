@@ -67,25 +67,6 @@ class FlatBoardDto {
   }
 }
 
-class GeneratedTileDto {
-  const GeneratedTileDto({
-    required this.row,
-    required this.col,
-    required this.tile,
-  });
-
-  final int row;
-  final int col;
-  final int tile;
-
-  factory GeneratedTileDto.fromJson(Map<String, dynamic> json) =>
-      GeneratedTileDto(
-        row: _readInt(json, 'row'),
-        col: _readInt(json, 'col'),
-        tile: _readInt(json, 'tile'),
-      );
-}
-
 class BoardDeltaMatchFoundDto extends FlatBoardDto {
   BoardDeltaMatchFoundDto({
     required super.boardVersion,
@@ -150,9 +131,9 @@ class MoveResolvedDto {
     required this.c1,
     required this.r2,
     required this.c2,
-    required this.steps,
     required this.generatedTiles,
     required this.playerStates,
+    required this.boardHash,
   });
 
   final int boardVersion;
@@ -161,17 +142,12 @@ class MoveResolvedDto {
   final int c1;
   final int r2;
   final int c2;
-  final List<ResolvedStepDto> steps;
-  final List<GeneratedTileDto> generatedTiles;
+  final List<int> generatedTiles;
   final Map<String, PlayerStateDto> playerStates;
+  final String boardHash;
 
   factory MoveResolvedDto.fromJson(Map<String, dynamic> json) {
-    final steps = (json['steps'] as List<dynamic>)
-        .map((raw) => ResolvedStepDto.fromJson(raw as Map<String, dynamic>))
-        .toList(growable: false);
-    final generatedTiles = (json['generatedTiles'] as List<dynamic>)
-        .map((raw) => GeneratedTileDto.fromJson(raw as Map<String, dynamic>))
-        .toList(growable: false);
+    final generatedTiles = _readIntList(json, 'generatedTiles');
 
     return MoveResolvedDto(
       boardVersion: _readInt(json, 'boardVersion'),
@@ -180,75 +156,11 @@ class MoveResolvedDto {
       c1: _readInt(json, 'c1'),
       r2: _readInt(json, 'r2'),
       c2: _readInt(json, 'c2'),
-      steps: steps,
       generatedTiles: generatedTiles,
       playerStates: _parsePlayerStates(json['playerStates']),
+      boardHash: json['boardHash'] as String,
     );
   }
-}
-
-class ResolvedStepDto {
-  const ResolvedStepDto({
-    required this.matchedCells,
-    required this.movements,
-    required this.newTilePositions,
-    required this.afterGravity,
-    required this.afterRefill,
-    required this.playerStatesAfter,
-  });
-
-  final List<BoardCellDto> matchedCells;
-  final List<TileMovementDto> movements;
-  final List<BoardCellDto> newTilePositions;
-  final List<List<int>> afterGravity;
-  final List<List<int>> afterRefill;
-  final Map<String, PlayerStateDto> playerStatesAfter;
-
-  factory ResolvedStepDto.fromJson(Map<String, dynamic> json) {
-    return ResolvedStepDto(
-      matchedCells: _parseCellPairs(json['matchedCells']),
-      movements: (json['movements'] as List<dynamic>? ?? const [])
-          .map((raw) => TileMovementDto.fromJson(raw as Map<String, dynamic>))
-          .toList(growable: false),
-      newTilePositions: (json['newTilePositions'] as List<dynamic>)
-          .map((raw) => BoardCellDto.fromJson(raw as Map<String, dynamic>))
-          .toList(growable: false),
-      afterGravity: _parseGrid(json['afterGravity']),
-      afterRefill: _parseGrid(json['afterRefill']),
-      playerStatesAfter: _parsePlayerStates(json['playerStatesAfter']),
-    );
-  }
-}
-
-class TileMovementDto {
-  const TileMovementDto({
-    required this.col,
-    required this.fromRow,
-    required this.toRow,
-  });
-
-  final int col;
-  final int fromRow;
-  final int toRow;
-
-  factory TileMovementDto.fromJson(Map<String, dynamic> json) =>
-      TileMovementDto(
-        col: _readInt(json, 'col'),
-        fromRow: _readInt(json, 'fromRow'),
-        toRow: _readInt(json, 'toRow'),
-      );
-}
-
-class BoardCellDto {
-  const BoardCellDto({required this.row, required this.col});
-
-  final int row;
-  final int col;
-
-  factory BoardCellDto.fromJson(Map<String, dynamic> json) => BoardCellDto(
-        row: _readInt(json, 'row'),
-        col: _readInt(json, 'col'),
-      );
 }
 
 class TurnChangedDto {
@@ -302,29 +214,6 @@ Map<String, PlayerStateDto> _parsePlayerStates(Object? raw) {
       PlayerStateDto.fromJson(value as Map<String, dynamic>),
     ),
   ));
-}
-
-List<BoardCellDto> _parseCellPairs(Object? raw) {
-  if (raw == null) return const [];
-  return List<BoardCellDto>.unmodifiable((raw as List<dynamic>).map((cell) {
-    final pair = cell as List<dynamic>;
-    if (pair.length != 2) {
-      throw const FormatException('matchedCells entry must have row and col');
-    }
-    return BoardCellDto(
-      row: _readIntValue(pair[0]),
-      col: _readIntValue(pair[1]),
-    );
-  }));
-}
-
-List<List<int>> _parseGrid(Object? raw) {
-  final rows = raw as List<dynamic>;
-  return List<List<int>>.unmodifiable(
-    rows.map((row) => List<int>.unmodifiable(
-          (row as List<dynamic>).map(_readIntValue),
-        )),
-  );
 }
 
 int _readInt(Map<String, dynamic> json, String key) {
