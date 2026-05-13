@@ -29,13 +29,6 @@ export interface FlatBoardWire {
   board: number[];
 }
 
-/** A generated tile consumed after gravity in deterministic refill order. */
-export interface GeneratedTileWire {
-  row: number;
-  col: number;
-  tile: number;
-}
-
 /** Hot-path move-resolution packet for the Flutter-native online client. */
 export interface BoardDeltaMoveResolvedPayload {
   boardVersion: number;
@@ -45,10 +38,9 @@ export interface BoardDeltaMoveResolvedPayload {
   r2: number;
   c2: number;
   serverReceivedAt?: number;
-  steps: ResolvedStepWire[];
-  generatedTiles: GeneratedTileWire[];
+  generatedTiles: number[];
   playerStates?: Record<string, PlayerState>;
-  boardHash?: string;
+  boardHash: string;
 }
 
 /** Start/rejoin snapshot for the Flutter-native online client. */
@@ -109,10 +101,10 @@ export interface MoveResolvedPayload {
   serverReceivedAt?: number;
   /** Monotonic flat-board version after this resolution. */
   boardVersion?: number;
-  /** Cascade-by-cascade animation data. Non-empty — 0-match swaps are rejected. */
+  /** Cascade-by-cascade animation data, private to the server/service layer. */
   steps: ResolvedStepWire[];
   /** Generated replacement tiles in deterministic refill order. */
-  generatedTiles?: GeneratedTileWire[];
+  generatedTiles?: number[];
   /** Final board after all cascades have settled. Authoritative truth. */
   finalGrid: number[][];
   /** RNG state after the resolution — used for snapshot rejoin. */

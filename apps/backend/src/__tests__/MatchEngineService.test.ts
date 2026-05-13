@@ -204,21 +204,24 @@ describe("MatchEngineService", () => {
       roomId: string;
       boardVersion: number;
       steps: Array<{ newTilePositions: Array<{ row: number; col: number }> }>;
-      generatedTiles: Array<{ row: number; col: number; tile: number }>;
+      generatedTiles: number[];
       finalGrid: number[][];
       rngState: number;
       pointsEarned: number;
       scores: Record<string, number>;
       playerStates: Record<string, PlayerState>;
+      boardHash: string;
     };
     expect(r.roomId).toBe(ROOM_ID);
     expect(r.playerId).toBe(P1);
     expect(r.boardVersion).toBe(2);
     expect(r.steps.length).toBeGreaterThan(0);
     expect(r.generatedTiles.length).toBeGreaterThan(0);
-    expect(r.generatedTiles.map(({ row, col }) => ({ row, col }))).toEqual(
-      r.steps.flatMap((step) => step.newTilePositions)
+    expect(r.generatedTiles.every(Number.isInteger)).toBe(true);
+    expect(r.generatedTiles).toHaveLength(
+      r.steps.flatMap((step) => step.newTilePositions).length
     );
+    expect(r.boardHash).toMatch(/^[0-9a-f]{64}$/);
     expect(r.pointsEarned).toBeGreaterThan(0);
     expect(r.scores[P1]).toBe(r.pointsEarned);
     expect(r.finalGrid.length).toBe(8);

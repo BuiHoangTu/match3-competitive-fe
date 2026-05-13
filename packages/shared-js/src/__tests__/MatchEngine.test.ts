@@ -185,7 +185,7 @@ describe("refill", () => {
     expect(grid[0][0]).toBe(-1);
   });
 
-  it("consumes generated tiles column-left, then top-to-bottom", () => {
+  it("consumes generated tiles column-left, then bottom-to-top", () => {
     const grid = [
       [-1, -1, 9],
       [-1, 8, -1],
@@ -194,8 +194,8 @@ describe("refill", () => {
     const result = refill(grid, () => (next++ + 0.01) / 5);
 
     expect(result).toEqual([
-      [0, 2, 9],
-      [1, 8, 3],
+      [1, 2, 9],
+      [0, 8, 3],
     ]);
   });
 });

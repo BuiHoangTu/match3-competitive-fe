@@ -16,7 +16,11 @@ import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
 import { BOARD_HEIGHT, BOARD_WIDTH } from "@match3/shared-js/engine/Board";
-import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import {
+  applyGravity,
+  findMatches,
+  removeMatches,
+} from "@match3/shared-js/engine/MatchEngine";
 import { BOT_ID, BOT_USER_ID } from "../constants";
 import type {
   BoardDeltaMoveResolvedPayload,
@@ -122,10 +126,35 @@ function gridFromFlatBoard(payload: MatchFoundPayload): number[][] {
   return grid;
 }
 
-function finalGridFromResolved(payload: BoardDeltaMoveResolvedPayload): number[][] {
-  const finalStep = payload.steps[payload.steps.length - 1];
-  if (!finalStep) throw new Error("move_resolved missing cascade steps");
-  return finalStep.afterRefill.map((row) => [...row]);
+function finalGridFromResolved(
+  startGrid: number[][],
+  payload: BoardDeltaMoveResolvedPayload
+): number[][] {
+  let current = startGrid.map((row) => [...row]);
+  [current[payload.r1]![payload.c1], current[payload.r2]![payload.c2]] = [
+    current[payload.r2]![payload.c2]!,
+    current[payload.r1]![payload.c1]!,
+  ];
+  let generatedIndex = 0;
+
+  for (let i = 0; i < 20; i++) {
+    const matches = findMatches(current);
+    if (matches.length === 0) break;
+    const afterGravity = applyGravity(removeMatches(current, matches));
+    current = afterGravity.map((row) => [...row]);
+    for (let c = 0; c < BOARD_WIDTH; c++) {
+      for (let r = BOARD_HEIGHT - 1; r >= 0; r--) {
+        if (current[r]![c] === -1) {
+          const tile = payload.generatedTiles[generatedIndex++];
+          if (tile === undefined) throw new Error("generatedTiles exhausted");
+          current[r]![c] = tile;
+        }
+      }
+    }
+  }
+
+  expect(generatedIndex).toBe(payload.generatedTiles.length);
+  return current;
 }
 
 /** Find the first adjacent swap on grid that produces a match. */
@@ -280,9 +309,12 @@ describe("server-authoritative PvP move handler", () => {
       expect(resolved.r2).toBe(swap.r2);
       expect(resolved.c2).toBe(swap.c2);
       expect(resolved.boardVersion).toBeGreaterThan(mA.boardVersion ?? 1);
-      expect(Array.isArray(resolved.steps)).toBe(true);
-      expect(resolved.steps.length).toBeGreaterThan(0);
+      expect("steps" in resolved).toBe(false);
       expect(Array.isArray(resolved.generatedTiles)).toBe(true);
+      expect(resolved.generatedTiles.every(Number.isInteger)).toBe(true);
+      expect(typeof resolved.boardHash).toBe("string");
+      expect("rngState" in resolved).toBe(false);
+      expect("finalGrid" in resolved).toBe(false);
       expect("scores" in resolved).toBe(false);
       expect("pointsEarned" in resolved).toBe(false);
     }
@@ -348,7 +380,7 @@ describe("server-authoritative PvP move handler", () => {
 
     expect(turn1.activePlayerId).toBe(p2Socket.id);
     expect(typeof turn1.serverReceivedAt).toBe("number");
-    currentGrid = finalGridFromResolved(resolved1);
+    currentGrid = finalGridFromResolved(currentGrid, resolved1);
 
     // Move 2 by p2
     const swap2 = findMatchingSwap(currentGrid);
@@ -405,7 +437,9 @@ describe("server-authoritative PvP move handler", () => {
     expect(botResolved.playerId).toBe(BOT_ID);
     expect(botResolved.boardVersion).toBeGreaterThan(humanResolved.boardVersion);
     expect("scores" in botResolved).toBe(false);
+    expect("steps" in botResolved).toBe(false);
     expect(Array.isArray(botResolved.generatedTiles)).toBe(true);
+    expect(typeof botResolved.boardHash).toBe("string");
   });
 });
 
@@ -469,7 +503,7 @@ describe("snapshot rejoin for turn_based rooms (D02 resume path)", () => {
       const resolvedPromise = waitForEvent<BoardDeltaMoveResolvedPayload>(sockA, "move_resolved");
       activeSocket.emit("move", { roomId: mA.roomId, ...swap });
       const [, resolved] = await Promise.all([relayPromise, resolvedPromise]);
-      currentGrid = finalGridFromResolved(resolved);
+      currentGrid = finalGridFromResolved(currentGrid, resolved);
       playedAnyMove = true;
     }
 

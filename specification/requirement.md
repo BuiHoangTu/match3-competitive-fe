@@ -52,8 +52,8 @@ Practice mode is explicitly exempt from WIN / LOSE / DRAW. It has no opponent, n
 
 **MR-3 — Board-delta wire protocol.** During normal **vs Human** play, the server MUST send enough board data for Flutter clients to animate and reconstruct the authoritative board without a shared seed:
   - `match_found` / rejoin payloads include the current board table as a flat 1D row-major array and board version. Board width/height are agreed constants and are not sent on the wire.
-  - accepted moves emit ordered resolve steps: cleared cells, falling tile movements, stat updates, and a 1D array of newly generated tiles with their destination coordinates and symbols.
-  - server and client MUST agree on refill consumption order: after each cascade's gravity settles, scan columns left-to-right and fill each column's empty cells top-to-bottom. `generatedTiles` MUST be emitted and consumed in that order, with multi-cascade moves concatenating each cascade's refill stream chronologically.
+  - accepted moves emit move coordinates, final player-state updates, a board hash, and a 1D array of newly generated tile ids. The server does not send cascade animation steps or generated-tile destinations on the hot path; clients derive those locally from the accepted move and tile stream.
+  - server and client MUST agree on refill consumption order: after each cascade's gravity settles, scan columns left-to-right and fill each column's empty cells bottom-to-top. `generatedTiles` MUST be emitted and consumed in that order, with multi-cascade moves concatenating each cascade's refill stream chronologically.
   - if the settled board has no legal moves, the server emits a dedicated full-board replacement notification containing the new flat board table and reason `no_legal_moves`.
   - turn-change and clock/player-state updates remain server-authored.
 

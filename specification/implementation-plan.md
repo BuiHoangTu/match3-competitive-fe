@@ -1451,7 +1451,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Acceptance:**
   - Fixture set includes match start, accepted move with generated tiles, swap fizzle, no-legal-move board replacement, and rejoin.
   - Fixture validation asserts board arrays are 1D row-major and length equals the agreed board size.
-  - Fixture validation asserts `generatedTiles` order is columns left-to-right and top-to-bottom within each column after each cascade's gravity, concatenated chronologically for multi-cascade moves.
+  - Fixture validation asserts `generatedTiles` order is columns left-to-right and bottom-to-top within each column after each cascade's gravity, concatenated chronologically for multi-cascade moves.
   - Fixture validation fails if `seed`, `originalSeed`, or `rngState` is present in client-visible online payloads.
 
 **T-v0.9-A02** (DONE) · Dart protocol DTOs
@@ -1480,7 +1480,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Context:** [requirement § Functional requirements](requirement.md#1-functional-requirements--gameplay--modes).
 - **Inputs:** `apps/frontend/lib/game_core/` from B01; legacy `MatchEngine` tests.
 - **Outputs:** `apps/frontend/lib/game_core/judge.dart`, `resolution.dart`, tests for swaps, cascades, Practice scoring, gravity, refill, and generated-tile reporting.
-- **Implementation Notes:** Resolution must report enough steps for Flutter animations and enough generated tile data for local sessions to mirror the online packet shape. Refill reporting uses the same deterministic order as the server: columns left-to-right, top-to-bottom within each column.
+- **Implementation Notes:** Resolution must report enough steps for Flutter animations and enough generated tile data for local sessions to mirror the online packet shape. Refill reporting uses the same deterministic order as the server: columns left-to-right, bottom-to-top within each column.
 - **Acceptance:**
   - A valid Practice swap returns ordered cascade steps, score delta, generated tiles, and final flat board.
   - Competitive session code can consume the same steps without exposing or rendering a point score.
@@ -1593,7 +1593,7 @@ This milestone replaces the embedded Phaser runtime with Flutter-native gameplay
 - **Context:** [flutter-native-migration § Board protocol](flutter-native-migration.md#board-protocol).
 - **Inputs:** Backend judge cascade/refill code.
 - **Outputs:** Updated `move_resolved` events, protocol tests, bandwidth regression sample.
-- **Implementation Notes:** Hot-path packets should include ordered animation steps and generated tile arrays. The emitted generated tile order is columns left-to-right and top-to-bottom within each column. Avoid full board snapshots except where allowed by MR-3/MR-8.
+- **Implementation Notes:** Hot-path packets should include raw generated tile arrays and a board hash; clients derive ordered animation steps locally. The emitted generated tile order is columns left-to-right and bottom-to-top within each column. Avoid full board snapshots except where allowed by MR-3/MR-8.
 - **Acceptance:**
   - Accepted move emits generated tiles sufficient for a client to reconstruct the final board.
   - Test fails if every normal move sends a full board snapshot as the primary refill mechanism.

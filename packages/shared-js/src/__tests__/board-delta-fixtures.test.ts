@@ -11,7 +11,17 @@ function readFixture(file: string): { event: string; payload: Record<string, unk
 
 function assertNoForbiddenOnlineFields(value: unknown): void {
   const text = JSON.stringify(value);
-  for (const field of ["seed", "originalSeed", "rngState", "boardGrid", "score", "scores"]) {
+  for (const field of [
+    "seed",
+    "originalSeed",
+    "rngState",
+    "boardGrid",
+    "score",
+    "scores",
+    "steps",
+    "finalGrid",
+    "pointsEarned",
+  ]) {
     expect(text.includes(`"${field}"`), `${field} must not appear`).toBe(false);
   }
 }
@@ -37,11 +47,12 @@ describe("v0.9 board-delta fixtures", () => {
     }
   });
 
-  it("generatedTiles are ordered by column, then row", () => {
+  it("move_resolved uses a compact generated tile stream and board hash", () => {
     const { payload } = readFixture("move_resolved.json");
-    const generatedTiles = payload.generatedTiles as Array<{ row: number; col: number }>;
+    const generatedTiles = payload.generatedTiles as unknown[];
 
-    const sorted = [...generatedTiles].sort((a, b) => a.col - b.col || a.row - b.row);
-    expect(generatedTiles).toEqual(sorted);
+    expect(generatedTiles.length).toBeGreaterThan(0);
+    expect(generatedTiles.every(Number.isInteger)).toBe(true);
+    expect(typeof payload.boardHash).toBe("string");
   });
 });

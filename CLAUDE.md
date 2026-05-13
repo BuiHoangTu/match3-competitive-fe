@@ -87,7 +87,7 @@ Target v0.9 layers:
 ## Key Constraints
 
 - **No shared seed for online clients.** vs Human clients receive flat row-major `board` + `width` + `height` + `boardVersion` at match start/rejoin, `move_resolved` packets with generated tile arrays during normal play, and `board_replaced { reason: "no_legal_moves" }` for full-board swaps.
-- **Refill order is contractual.** Server and client consume generated tiles in the same order: columns left-to-right, and within each column empty cells top-to-bottom after gravity settles.
+- **Refill order is contractual.** Server and client consume generated tiles in the same order: columns left-to-right, and within each column empty cells bottom-to-top after gravity settles.
 - **Authority by mode:** Practice and vs Bot use the local Dart judge/generator. vs Human uses the backend judge/generator. UI/rendering code never invents board-affecting randomness.
 - **Practice is non-competitive.** It shows only the player's score, has no opponent, no clock, no win/lose/draw, and continues until the player leaves.
 - **Competitive modes have no score.** vs Bot and vs Human use player states, clocks, turns, and outcome. Do not add point-score fields to competitive protocol or UI.
@@ -108,7 +108,7 @@ Target v0.9 layers:
 ## Board Protocol
 
 - `match_found` / rejoin: `width`, `height`, `boardVersion`, full flat row-major `board`, `activePlayerId`, `myPlayerId`, player states, clocks, room metadata.
-- `move_resolved`: `boardVersion`, player id, move coordinates, ordered animation steps, explicit `generatedTiles`, player-state updates, optional board hash.
+- `move_resolved`: `boardVersion`, player id, move coordinates, raw `generatedTiles`, player-state updates, required board hash. Clients derive animation steps locally.
 - `swap_fizzled`: valid adjacent swap that produced no match; use for bounce/stamina effects, not as a protocol error.
 - `move_rejected`: true protocol/input errors such as bounds, adjacency, stale board version, wrong turn, or inactive room.
 - `board_replaced`: full flat board replacement, currently with `reason: "no_legal_moves"`, plus width, height, board version, and player states.

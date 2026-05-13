@@ -157,10 +157,9 @@ export class SocketBridge {
         timestamp: payload.serverReceivedAt,
       };
 
-      // Hot path: clients animate cascades locally from the accepted move.
-      // The judge still computes cascades privately for validation, scoring,
-      // HP death, and snapshot rejoin, but cascade steps/finalGrid stay off
-      // the socket during normal play.
+      // Hot path: clients derive cascades locally from the accepted move and
+      // this server-authored refill stream. The judge keeps cascade steps and
+      // finalGrid private for validation, HP death, and snapshot rejoin.
       if (room) {
         this.io.to(payload.roomId).emit("move_resolved", {
           boardVersion: payload.boardVersion,
@@ -170,9 +169,9 @@ export class SocketBridge {
           r2: payload.r2,
           c2: payload.c2,
           serverReceivedAt: payload.serverReceivedAt,
-          steps: payload.steps,
           generatedTiles: payload.generatedTiles,
           playerStates: payload.playerStates,
+          boardHash: payload.boardHash,
         });
 
         for (const pid of room.players) {

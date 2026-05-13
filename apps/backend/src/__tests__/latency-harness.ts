@@ -8,10 +8,9 @@
  * run against it.
  *
  * The server validates and resolves each turn privately, then relays the
- * accepted move with board-delta cascade data. The harness mirrors the
- * Flutter game-view contract by applying the accepted board-delta result on
- * both clients and asserting their board views remain byte-identical under
- * simulated latency.
+ * accepted move with a generated-tile stream. The harness mirrors the Flutter
+ * client contract by deriving cascades locally and asserting both client board
+ * views remain byte-identical under simulated latency.
  *
  * Tuning: set the env var `SIM_RTT_MS` (0 / 100 / 300 / 500). When imported
  * programmatically the same value can be passed via the `rttMs` option.
@@ -21,7 +20,11 @@ import type { AddressInfo } from "net";
 import { createMatch3Server, type ServerHandle } from "../server";
 import { signSession } from "../LocalSessionSigner";
 import { BOARD_HEIGHT, BOARD_WIDTH } from "@match3/shared-js/engine/Board";
-import { findMatches } from "@match3/shared-js/engine/MatchEngine";
+import {
+  applyGravity,
+  findMatches,
+  removeMatches,
+} from "@match3/shared-js/engine/MatchEngine";
 import type {
   BoardDeltaMoveResolvedPayload,
   MatchFoundPayload,
@@ -231,10 +234,36 @@ export async function runLatencyHarness(
     let boardA: number[][] = initialBoardA;
     let boardB: number[][] = initialBoardB;
 
-    const finalGridFromResolved = (payload: BoardDeltaMoveResolvedPayload): number[][] => {
-      const finalStep = payload.steps[payload.steps.length - 1];
-      if (!finalStep) throw new Error("move_resolved missing cascade steps");
-      return finalStep.afterRefill.map((row) => [...row]);
+    const finalGridFromResolved = (
+      startGrid: number[][],
+      payload: BoardDeltaMoveResolvedPayload
+    ): number[][] => {
+      let current = startGrid.map((row) => [...row]);
+      const tmp = current[payload.r1]![payload.c1]!;
+      current[payload.r1]![payload.c1] = current[payload.r2]![payload.c2]!;
+      current[payload.r2]![payload.c2] = tmp;
+      let generatedIndex = 0;
+
+      for (let i = 0; i < 20; i++) {
+        const matches = findMatches(current);
+        if (matches.length === 0) break;
+        const afterGravity = applyGravity(removeMatches(current, matches));
+        current = afterGravity.map((row) => [...row]);
+        for (let c = 0; c < BOARD_WIDTH; c++) {
+          for (let r = BOARD_HEIGHT - 1; r >= 0; r--) {
+            if (current[r]![c] === -1) {
+              const tile = payload.generatedTiles[generatedIndex++];
+              if (tile === undefined) throw new Error("generatedTiles exhausted");
+              current[r]![c] = tile;
+            }
+          }
+        }
+      }
+
+      if (generatedIndex !== payload.generatedTiles.length) {
+        throw new Error("generatedTiles was not fully consumed");
+      }
+      return current;
     };
 
     // Helper: returns a promise resolving when `turn_changed` fires with
@@ -332,7 +361,7 @@ export async function runLatencyHarness(
       const resolved = await resolvedPromise;
       const t1 = Date.now();
 
-      const finalGrid = finalGridFromResolved(resolved);
+      const finalGrid = finalGridFromResolved(currentBoard, resolved);
       boardA = finalGrid.map((r) => [...r]);
       boardB = finalGrid.map((r) => [...r]);
 

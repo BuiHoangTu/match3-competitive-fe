@@ -86,18 +86,17 @@ move_resolved {
   boardVersion: number,
   playerId: string,
   move: { r1: number, c1: number, r2: number, c2: number },
-  steps: ResolvedStepWire[],
-  generatedTiles: GeneratedTileWire[],
+  generatedTiles: number[],
   playerStates: Record<string, PlayerStatsWire>,
-  boardHash?: string
+  boardHash: string
 }
 ```
 
-`ResolvedStepWire` is animation-first data: cleared cells, falling movements, per-step stat snapshots, and refill destinations. `GeneratedTileWire[]` is a flat list and the only source of newly generated symbols on the client for that move. The client must not invent refill symbols.
+The server does not send cascade animation steps on the hot path. The client derives cleared cells, falling movements, refill destinations, and cascade animation steps locally from its current board, the accepted move coordinates, and the server-provided generated tile stream. `generatedTiles` is the only source of newly generated symbols on the client for that move. The client must not invent refill symbols.
 
-Refill order is deterministic: after each cascade's gravity settles, scan columns left-to-right (`col = 0..7`) and, within each column, fill empty cells top-to-bottom (`row = 0..7`). The server emits `generatedTiles` in exactly that order for each cascade, concatenating multi-cascade refill streams chronologically. The client consumes the list in order and may either trust each item’s explicit `{ row, col, tile }` destination or assert that each cascade's destinations match the deterministic scan. If the order or destination does not match, the client treats the packet as a reconciliation error.
+Refill order is deterministic: after each cascade's gravity settles, scan columns left-to-right (`col = 0..7`) and, within each column, fill empty cells bottom-to-top (`row = 7..0`). The server emits raw tile ids in exactly that order for each cascade, concatenating multi-cascade refill streams chronologically. The client consumes the list in order and derives the destinations from the deterministic scan. If the stream is too short, has leftovers after local resolution, or produces a different final hash, the client treats the packet as a reconciliation error.
 
-The server may include a `boardHash` for cheap client reconciliation. Full final board snapshots should be avoided on every move unless debugging or recovery requires them.
+The server includes `boardHash` for cheap client reconciliation. `rngState` is server-private and must not be sent. Full final board snapshots should be avoided on every move unless debugging or recovery requires them.
 
 ### 6.3 No-Legal-Move Replacement
 
@@ -148,7 +147,7 @@ The new match UI is Flutter-native:
 
 - Remove seed from room-token payload and online match start payload.
 - Ensure `RoomManager` stores flat `board`, `boardVersion`, player states, active player, and any generated tile metadata needed for audit/debug. Board dimensions remain shared constants.
-- Extend `MatchEngineService` so every refill returns explicit `GeneratedTileWire[]`.
+- Extend `MatchEngineService` so every refill returns a raw generated tile stream.
 - Add no-legal-move detection and `board_replaced` emission.
 - Keep rejoin snapshot as board table + board version, not seed + moves.
 - Keep Socket.IO token validation and one-active-match enforcement.
@@ -187,7 +186,7 @@ Recent committed migration checkpoints:
    Make `match_found` send flat board/version without dimensions, make `move_resolved` send generated tile arrays in deterministic refill order, add `board_replaced`, remove score from competitive payloads, and remove seed from room token and online payloads.
 
 7. **Connect Flutter online match screen.**
-   Consume server board packets, animate resolve steps, apply generated tiles, handle board replacement notifications, and reconcile by board version/hash.
+   Consume server board packets, derive resolve steps from move confirmations and generated tiles, handle board replacement notifications, and reconcile by board version/hash.
    Current code status: implemented for match start, move resolution, fizzle/recoil, generated tile refill, board replacement notification, reconnect/resume, account-in-use popup, leave confirmation, and unified tap/drag swap input. Remaining follow-up is mainly hardening/visual polish: confirm production two-device behavior, verify result/end-state UX, and decide whether to add board-hash reconciliation.
 
 8. **Retire Phaser bridge path.**

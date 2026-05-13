@@ -7,8 +7,8 @@
     "c1": 0,
     "r2": 0,
     "c2": 1,
-    "steps": [],
     "generatedTiles": [],
+    "boardHash": "fe7cbeb5d4ad5203195a66bffa5c57d391287c77d80a81f9a23aa66dac287741",
     "playerStates": {
       "player-a": {
         "stamina": 299000,

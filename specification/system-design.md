@@ -23,7 +23,7 @@ These principles derive from the plan's guiding rules ([planning.md § 1](planni
 | Bot before human | Bot AI is a pure function over board state, shared between the client (PvE) and the server (matchmaking fallback). The online flow is a transport swap over the same turn loop, not a re-implementation. |
 | Ship playable slices | Every version after v0.1 boots a real UI. No "infrastructure-only" releases means no long-lived hidden branches. |
 | Accessibility is not a bolt-on ([NFR-7](requirement.md#accessibility), [NFR-8](requirement.md#accessibility)) | Tile identity is encoded as shape + colour from v0.2. Input is abstracted behind a device-agnostic interface so keyboard support in v0.6 is additive. |
-| Board-delta wire protocol ([MR-3](requirement.md#2-multiplayer--networking-requirements), [MR-8](requirement.md#2-multiplayer--networking-requirements)) | The server sends flat row-major board tables at match start/rejoin/replacement and generated tile arrays during normal move resolution. Server and client share the same board dimensions and refill consumption order. Clients animate server-authored deltas; they do not replay seeds. |
+| Board-delta wire protocol ([MR-3](requirement.md#2-multiplayer--networking-requirements), [MR-8](requirement.md#2-multiplayer--networking-requirements)) | The server sends flat row-major board tables at match start/rejoin/replacement and raw generated tile arrays during normal move resolution. Server and client share the same board dimensions and refill consumption order. Clients derive animation steps locally from accepted moves and server tile streams; they do not replay seeds. |
 | Identity in Flutter ([AR-1](requirement.md#3-identity--account-requirements), [AR-3](requirement.md#3-identity--account-requirements)) | The Flutter app owns sign-in, token refresh, matchmaking, socket connection, lifecycle handling, and gameplay rendering. No WebView bridge is part of the target architecture. |
 | Flutter replaces, does not wrap | The product is a Flutter app with Flutter-native gameplay. Phaser is retired rather than embedded. |
 
@@ -301,11 +301,11 @@ sequenceDiagram
     alt rejected
         S-->>CA: move_rejected {reason}
     else accepted
-        S->>S: resolve cascades and generate explicit refill tiles<br/>columns left-to-right, top-to-bottom
-        S-->>CA: move_resolved {steps, generatedTiles, boardVersion}
-        S-->>CB: move_resolved {steps, generatedTiles, boardVersion}
-        CA-->>A: animate server-authored deltas
-        CB-->>B: animate server-authored deltas
+        S->>S: resolve cascades and generate explicit refill tile stream<br/>columns left-to-right, bottom-to-top
+        S-->>CA: move_resolved {generatedTiles, boardVersion, boardHash}
+        S-->>CB: move_resolved {generatedTiles, boardVersion, boardHash}
+        CA-->>A: derive and animate local cascade steps, verify boardHash
+        CB-->>B: derive and animate local cascade steps, verify boardHash
         alt no legal moves after settle
             S->>S: replace board
             S-->>CA: board_replaced {reason:no_legal_moves,board}

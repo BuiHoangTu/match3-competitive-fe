@@ -16,6 +16,7 @@
  */
 
 import { TypedEmitter } from "../lib/TypedEmitter";
+import { createHash } from "crypto";
 import { createBoard, swapTiles } from "@match3/shared-js/engine/Board";
 import { createStatefulRng } from "@match3/shared-js/engine/rng";
 import {
@@ -35,7 +36,6 @@ import { isValidMove, validateProducesMatch } from "../validator";
 import type {
   ResolvedStepWire,
   LoseReason,
-  GeneratedTileWire,
 } from "@match3/shared-js/protocol";
 
 // ─── PlayerState (re-exported for SocketBridge / test imports) ───────────────
@@ -66,12 +66,13 @@ export interface MatchEngineEvents extends Record<string, unknown> {
     serverReceivedAt: number;
     boardVersion: number;
     steps: ResolvedStepWire[];
-    generatedTiles: GeneratedTileWire[];
+    generatedTiles: number[];
     finalGrid: number[][];
     rngState: number;
     pointsEarned: number;
     scores: { [playerId: string]: number };
     playerStates: { [playerId: string]: PlayerState };
+    boardHash: string;
   };
   move_rejected: {
     roomId: string;
@@ -155,15 +156,11 @@ function computePoints(steps: AnimatedResolveStep[]): number {
   return total;
 }
 
-function generatedTilesFromSteps(steps: AnimatedResolveStep[]): GeneratedTileWire[] {
-  const generated: GeneratedTileWire[] = [];
+function generatedTilesFromSteps(steps: AnimatedResolveStep[]): number[] {
+  const generated: number[] = [];
   for (const step of steps) {
     for (const pos of step.newTilePositions) {
-      generated.push({
-        row: pos.row,
-        col: pos.col,
-        tile: step.afterRefill[pos.row]![pos.col]!,
-      });
+      generated.push(step.afterRefill[pos.row]![pos.col]!);
     }
   }
   return generated;
@@ -171,6 +168,18 @@ function generatedTilesFromSteps(steps: AnimatedResolveStep[]): GeneratedTileWir
 
 function flattenGrid(grid: number[][]): number[] {
   return grid.flatMap((row) => row);
+}
+
+export function boardHash(
+  boardVersion: number,
+  grid: number[][],
+  width: number = grid[0]?.length ?? 0,
+  height: number = grid.length
+): string {
+  const flat = flattenGrid(grid).join(",");
+  return createHash("sha256")
+    .update(`${boardVersion}|${width}|${height}|${flat}`)
+    .digest("hex");
 }
 
 function hasLegalMove(grid: number[][]): boolean {
@@ -434,6 +443,7 @@ export class MatchEngineService extends TypedEmitter<MatchEngineEvents> {
       pointsEarned,
       scores: { ...state.scores },
       playerStates: this._copyPlayerStates(state),
+      boardHash: boardHash(state.boardVersion, finalGrid),
     });
 
     // If HP hit zero, end the match before switching turns.

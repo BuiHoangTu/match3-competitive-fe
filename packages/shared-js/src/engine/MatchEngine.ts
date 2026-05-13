@@ -222,7 +222,7 @@ export function refill(grid: number[][], rng: () => number): number[][] {
   const width = newGrid[0]?.length ?? 0;
 
   for (let c = 0; c < width; c++) {
-    for (let r = 0; r < height; r++) {
+    for (let r = height - 1; r >= 0; r--) {
       if (newGrid[r][c] === -1) {
         newGrid[r][c] = randInt(rng, 0, NUM_SYMBOLS - 1);
       }
@@ -313,7 +313,7 @@ export function resolveBoardAnimated(
     const height = afterGravity.length;
     const width = afterGravity[0]?.length ?? 0;
     for (let c = 0; c < width; c++) {
-      for (let r = 0; r < height; r++) {
+      for (let r = height - 1; r >= 0; r--) {
         if (afterGravity[r][c] === -1) newTilePositions.push({ row: r, col: c });
       }
     }
