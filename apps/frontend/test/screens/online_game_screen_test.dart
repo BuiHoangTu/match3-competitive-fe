@@ -133,9 +133,25 @@ void main() {
     expect(find.byKey(const Key('online_player_state')), findsOneWidget);
     expect(find.byKey(const Key('online_opponent_state')), findsOneWidget);
     expect(find.text('You (turn)'), findsOneWidget);
-    expect(find.text('Opp'), findsOneWidget);
-    expect(find.text('300s/300s'), findsNWidgets(2));
+    expect(find.text('Opponent'), findsOneWidget);
+    expect(find.byKey(const Key('online_player_health_bar')), findsOneWidget);
+    expect(find.byKey(const Key('online_player_stamina_bar')), findsOneWidget);
+    expect(find.byKey(const Key('online_player_mana_bar')), findsOneWidget);
+    expect(find.byKey(const Key('online_opponent_mana_bar')), findsOneWidget);
+    expect(find.text('300s/300s'), findsNothing);
+    expect(find.text('100/100'), findsNothing);
     expect(find.textContaining('Score'), findsNothing);
+
+    expect(
+      tester.getTopLeft(find.byKey(const Key('online_opponent_state'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(const Key('online_tile_0_0'))).dy),
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('online_player_state'))).dy,
+      greaterThan(
+        tester.getBottomLeft(find.byKey(const Key('online_tile_7_0'))).dy,
+      ),
+    );
 
     await tester.tap(find.byKey(const Key('online_tile_2_1')));
     await tester.pump(const Duration(milliseconds: 10));
@@ -172,6 +188,78 @@ void main() {
     await tester.pump(const Duration(milliseconds: 250));
     expect(fake.forfeited, isTrue);
     expect(left, isTrue);
+  });
+
+  testWidgets(
+      'online screen predicts stamina locally and tunes to server state',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final initial = tester
+        .widget<LinearProgressIndicator>(
+          find.descendant(
+            of: find.byKey(const Key('online_player_stamina_bar')),
+            matching: find.byType(LinearProgressIndicator),
+          ),
+        )
+        .value;
+
+    await tester.pump(const Duration(seconds: 2));
+
+    final predicted = tester
+        .widget<LinearProgressIndicator>(
+          find.descendant(
+            of: find.byKey(const Key('online_player_stamina_bar')),
+            matching: find.byType(LinearProgressIndicator),
+          ),
+        )
+        .value;
+    expect(predicted, lessThan(initial!));
+
+    fake.turnChangedController.add(TurnChangedDto.fromJson({
+      'activePlayerId': 'player-a',
+      'playerStates': _payload('match_found')['playerStates'],
+    }));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final tuned = tester
+        .widget<LinearProgressIndicator>(
+          find.descendant(
+            of: find.byKey(const Key('online_player_stamina_bar')),
+            matching: find.byType(LinearProgressIndicator),
+          ),
+        )
+        .value;
+    expect(tuned, initial);
   });
 
   testWidgets('online screen resumes known active room before joining',

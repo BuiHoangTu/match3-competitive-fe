@@ -27,6 +27,31 @@ class PlayerStateDto {
   final int expToNext;
   final int atk;
 
+  PlayerStateDto copyWith({
+    int? stamina,
+    int? maxStamina,
+    int? health,
+    int? maxHealth,
+    int? mana,
+    int? maxMana,
+    int? lv,
+    int? exp,
+    int? expToNext,
+    int? atk,
+  }) =>
+      PlayerStateDto(
+        stamina: stamina ?? this.stamina,
+        maxStamina: maxStamina ?? this.maxStamina,
+        health: health ?? this.health,
+        maxHealth: maxHealth ?? this.maxHealth,
+        mana: mana ?? this.mana,
+        maxMana: maxMana ?? this.maxMana,
+        lv: lv ?? this.lv,
+        exp: exp ?? this.exp,
+        expToNext: expToNext ?? this.expToNext,
+        atk: atk ?? this.atk,
+      );
+
   factory PlayerStateDto.fromJson(Map<String, dynamic> json) => PlayerStateDto(
         stamina: _readInt(json, 'stamina'),
         maxStamina: _readInt(json, 'maxStamina'),

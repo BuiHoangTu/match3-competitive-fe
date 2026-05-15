@@ -68,6 +68,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
+  DateTime _playerStatesSyncedAt = DateTime.now();
+  Timer? _staminaTicker;
 
   @override
   void initState() {
@@ -136,7 +138,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _opponentPlayerId = dto.opponentId;
           _activePlayerId = dto.activePlayerId;
           _boardVersion = dto.boardVersion;
-          _playerStates = dto.playerStates;
+          _acceptPlayerStates(dto.playerStates);
           _board = GameBoard.fromFlat(
             width: dto.width,
             height: dto.height,
@@ -149,15 +151,16 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
           _notice = null;
         });
+        _syncStaminaTicker();
       }))
       ..add(connection.moveResolved.listen(_handleMoveResolved))
       ..add(connection.turnChanged.listen((dto) {
         setState(() {
           _activePlayerId = dto.activePlayerId;
-          _playerStates =
-              dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
+          _acceptPlayerStates(dto.playerStates);
           _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
         });
+        _syncStaminaTicker();
       }))
       ..add(connection.boardReplaced.listen((dto) {
         setState(() {
@@ -170,12 +173,12 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _boardAnimation = null;
           _boardAnimating = false;
           _boardVersion = dto.boardVersion;
-          _playerStates =
-              dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
+          _acceptPlayerStates(dto.playerStates);
           _pendingMove = false;
           _selected = null;
           _notice = 'No moves available. Board swapped.';
         });
+        _syncStaminaTicker();
       }))
       ..add(connection.moveRejected.listen((dto) {
         setState(() {
@@ -191,8 +194,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         final result = _resultFromGameOver(dto);
         setState(() {
           _queuedResolvedMoves.clear();
-          _playerStates =
-              dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
+          _acceptPlayerStates(dto.playerStates);
           _pendingMove = false;
           _boardAnimating = false;
           _boardAnimation = null;
@@ -201,6 +203,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _notice = _status;
         });
         _reportMatchComplete(result);
+        _syncStaminaTicker();
       }))
       ..add(connection.errors.listen((message) {
         developer.log(message, name: 'board_delta_socket');
@@ -282,13 +285,13 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _boardAnimation = animation;
       _boardAnimating = true;
       _boardVersion = dto.boardVersion;
-      _playerStates =
-          dto.playerStates.isEmpty ? _playerStates : dto.playerStates;
+      _acceptPlayerStates(dto.playerStates);
       _pendingMove = false;
       _selected = null;
       _notice =
           resolution.fizzle && dto.playerId == _myPlayerId ? 'No match' : null;
     });
+    _syncStaminaTicker();
   }
 
   void _handleBoardAnimationComplete() {
@@ -346,18 +349,59 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _activePlayerId != null &&
       _myPlayerId == _activePlayerId;
 
-  PlayerStateDto? get _myState =>
-      _myPlayerId == null ? null : _playerStates[_myPlayerId];
+  void _acceptPlayerStates(Map<String, PlayerStateDto> playerStates) {
+    if (playerStates.isEmpty) return;
+    _playerStates = playerStates;
+    _playerStatesSyncedAt = DateTime.now();
+  }
+
+  void _syncStaminaTicker() {
+    final activePlayerId = _activePlayerId;
+    final shouldTick = mounted &&
+        !_loading &&
+        !_matchCompleteReported &&
+        activePlayerId != null &&
+        _playerStates.containsKey(activePlayerId);
+    if (!shouldTick) {
+      _staminaTicker?.cancel();
+      _staminaTicker = null;
+      return;
+    }
+    _staminaTicker ??= Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) {
+        if (!mounted) return;
+        setState(() {});
+      },
+    );
+  }
+
+  int _predictedStamina(String playerId, PlayerStateDto state) {
+    if (playerId != _activePlayerId) return state.stamina;
+    final elapsedMs =
+        DateTime.now().difference(_playerStatesSyncedAt).inMilliseconds;
+    final predicted = state.stamina - elapsedMs;
+    return predicted.clamp(0, state.maxStamina).toInt();
+  }
+
+  PlayerStateDto? _displayState(String? playerId) {
+    if (playerId == null) return null;
+    final state = _playerStates[playerId];
+    if (state == null) return null;
+    return state.copyWith(stamina: _predictedStamina(playerId, state));
+  }
+
+  PlayerStateDto? get _myState => _displayState(_myPlayerId);
 
   PlayerStateDto? get _opponentState {
     final explicitId = _opponentPlayerId;
     if (explicitId != null && _playerStates.containsKey(explicitId)) {
-      return _playerStates[explicitId];
+      return _displayState(explicitId);
     }
     final myId = _myPlayerId;
     if (myId == null) return null;
     for (final entry in _playerStates.entries) {
-      if (entry.key != myId) return entry.value;
+      if (entry.key != myId) return _displayState(entry.key);
     }
     return null;
   }
@@ -369,6 +413,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _status = 'Connection failed';
       _notice = message;
     });
+    _syncStaminaTicker();
   }
 
   void _showAccountInUse() {
@@ -502,6 +547,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
 
   @override
   void dispose() {
+    _staminaTicker?.cancel();
     for (final sub in _subs) {
       unawaited(sub.cancel());
     }
@@ -542,12 +588,14 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
             : Column(
                 children: [
                   _NoticeBanner(notice: _notice),
-                  _HudRow(
-                    myState: _myState,
-                    opponentState: _opponentState,
-                    boardVersion: _boardVersion,
-                    isMyTurn: _isMyTurn,
+                  _PlayerStatePanel(
+                    key: const Key('online_opponent_state'),
+                    keyPrefix: 'online_opponent',
+                    label: 'Opponent',
+                    state: _opponentState,
+                    active: !_isMyTurn,
                   ),
+                  _BoardVersionLabel(boardVersion: _boardVersion),
                   Expanded(
                     child: Center(
                       child: AspectRatio(
@@ -569,6 +617,13 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                         ),
                       ),
                     ),
+                  ),
+                  _PlayerStatePanel(
+                    key: const Key('online_player_state'),
+                    keyPrefix: 'online_player',
+                    label: 'You',
+                    state: _myState,
+                    active: _isMyTurn,
                   ),
                 ],
               ),
@@ -636,73 +691,23 @@ class _NoticeBanner extends StatelessWidget {
   }
 }
 
-class _HudRow extends StatelessWidget {
-  const _HudRow({
-    required this.myState,
-    required this.opponentState,
-    required this.boardVersion,
-    required this.isMyTurn,
-  });
+class _BoardVersionLabel extends StatelessWidget {
+  const _BoardVersionLabel({required this.boardVersion});
 
-  final PlayerStateDto? myState;
-  final PlayerStateDto? opponentState;
   final int? boardVersion;
-  final bool isMyTurn;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 560;
-          final panels = [
-            _PlayerStatePanel(
-              key: const Key('online_player_state'),
-              label: 'You',
-              state: myState,
-              active: isMyTurn,
-            ),
-            _PlayerStatePanel(
-              key: const Key('online_opponent_state'),
-              label: 'Opp',
-              state: opponentState,
-              active: !isMyTurn,
-            ),
-          ];
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (compact)
-                ...panels.map(
-                  (panel) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: panel,
-                  ),
-                )
-              else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < panels.length; i++) ...[
-                      Expanded(child: panels[i]),
-                      if (i == 0) const SizedBox(width: 12),
-                    ],
-                  ],
-                ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  'Board ${boardVersion ?? '-'}',
-                  key: const Key('online_board_version'),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-            ],
-          );
-        },
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          'Board ${boardVersion ?? '-'}',
+          key: const Key('online_board_version'),
+          style: theme.textTheme.bodySmall,
+        ),
       ),
     );
   }
@@ -711,11 +716,13 @@ class _HudRow extends StatelessWidget {
 class _PlayerStatePanel extends StatelessWidget {
   const _PlayerStatePanel({
     super.key,
+    required this.keyPrefix,
     required this.label,
     required this.state,
     required this.active,
   });
 
+  final String keyPrefix;
   final String label;
   final PlayerStateDto? state;
   final bool active;
@@ -729,81 +736,91 @@ class _PlayerStatePanel extends StatelessWidget {
       color: active ? theme.colorScheme.primary : theme.colorScheme.onSurface,
     );
 
-    return Semantics(
-      label: '$label combat stats',
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: active
-                ? theme.colorScheme.primary
-                : theme.colorScheme.outlineVariant,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: state == null
-              ? Text('$label  HP --', style: titleStyle)
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            active ? '$label (turn)' : label,
-                            style: titleStyle,
-                          ),
-                        ),
-                        Text(
-                          'Lv ${state.lv}  Atk ${state.atk}',
-                          style: theme.textTheme.labelMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _StatLine(
-                      label: 'HP',
-                      value: state.health,
-                      max: state.maxHealth,
-                      color: Colors.redAccent,
-                    ),
-                    _StatLine(
-                      label: 'Stamina',
-                      value: (state.stamina / 1000).ceil(),
-                      max: (state.maxStamina / 1000).ceil(),
-                      color: Colors.orangeAccent,
-                      suffix: 's',
-                    ),
-                    _StatLine(
-                      label: 'Mana',
-                      value: state.mana,
-                      max: state.maxMana,
-                      color: Colors.lightBlueAccent,
-                    ),
-                  ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Semantics(
+            label: '$label combat stats',
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: active
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outlineVariant,
                 ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: state == null
+                    ? Text('$label  --', style: titleStyle)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  active ? '$label (turn)' : label,
+                                  style: titleStyle,
+                                ),
+                              ),
+                              Text(
+                                'Lv ${state.lv}  Atk ${state.atk}',
+                                style: theme.textTheme.labelMedium,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _StatBar(
+                            key: Key('${keyPrefix}_health_bar'),
+                            label: 'HP',
+                            value: state.health,
+                            max: state.maxHealth,
+                            color: Colors.redAccent,
+                          ),
+                          _StatBar(
+                            key: Key('${keyPrefix}_stamina_bar'),
+                            label: 'Stamina',
+                            value: state.stamina,
+                            max: state.maxStamina,
+                            color: Colors.orangeAccent,
+                          ),
+                          _StatBar(
+                            key: Key('${keyPrefix}_mana_bar'),
+                            label: 'Mana',
+                            value: state.mana,
+                            max: state.maxMana,
+                            color: Colors.lightBlueAccent,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _StatLine extends StatelessWidget {
-  const _StatLine({
+class _StatBar extends StatelessWidget {
+  const _StatBar({
+    super.key,
     required this.label,
     required this.value,
     required this.max,
     required this.color,
-    this.suffix = '',
   });
 
   final String label;
   final int value;
   final int max;
   final Color color;
-  final String suffix;
 
   @override
   Widget build(BuildContext context) {
@@ -820,10 +837,6 @@ class _StatLine extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(label, style: theme.textTheme.labelSmall),
-              ),
-              Text(
-                '$value$suffix/$max$suffix',
-                style: theme.textTheme.labelSmall,
               ),
             ],
           ),
