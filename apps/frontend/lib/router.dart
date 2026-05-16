@@ -7,8 +7,8 @@
 // Route summary:
 //   /sign-in          → SignInScreen          (public — no guard)
 //   /home             → HomeScreen            (guarded)
-//   /character-select → CharacterSelectScreen (guarded — mode via extra)
-//   /result           → ResultScreen          (guarded — MatchResult via extra)
+//   /character-select → CharacterSelectScreen (guarded — solo/pve only)
+//   /pvp              → PvpScreen             (guarded — PvP flow)
 //   /account          → AccountScreen         (guarded)
 //   /legal/privacy    → PrivacyScreen         (public — no guard)
 //   /legal/terms      → TermsScreen           (public — no guard)
@@ -31,17 +31,15 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import 'models/match_result.dart';
 import 'models/user_profile.dart';
 import 'net/board_delta_socket_client.dart';
 import 'screens/account_screen.dart';
 import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/online_game_screen.dart';
 import 'screens/practice_game_screen.dart';
+import 'screens/pvp_screen.dart';
 import 'screens/pve_game_screen.dart';
 import 'screens/privacy_screen.dart';
-import 'screens/result_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/terms_screen.dart';
@@ -62,8 +60,7 @@ abstract final class Routes {
   static const characterSelect = 'character-select';
   static const practice = 'practice';
   static const pve = 'pve';
-  static const onlineMatch = 'online-match';
-  static const result = 'result';
+  static const pvp = 'pvp';
   static const account = 'account';
   static const privacy = 'privacy';
   static const terms = 'terms';
@@ -352,7 +349,7 @@ GoRouter createRouter({
             }
             if (mode == 'turn_based') {
               ctx.goNamed(
-                Routes.onlineMatch,
+                Routes.pvp,
                 extra: _OnlineMatchLaunch(
                   characterId: characterId,
                   resumeRoomId: resumeRoomId,
@@ -388,10 +385,8 @@ GoRouter createRouter({
                   context.goNamed(Routes.characterSelect, extra: 'solo'),
               onVsBotPressed: () async =>
                   context.goNamed(Routes.characterSelect, extra: 'pve'),
-              onVsHumanPressed: () async => context.goNamed(
-                Routes.characterSelect,
-                extra: 'turn_based',
-              ),
+              onVsHumanPressed: () async =>
+                  context.goNamed(Routes.pvp),
               onAccountPressed: () => context.goNamed(Routes.account),
               onAutoResumeCheck: autoResumeCheck,
               onAutoResumeModeLaunch: (mode) => launchGame(
@@ -452,10 +447,6 @@ GoRouter createRouter({
               ctx.goNamed(Routes.pve, extra: selectedCharacterId);
               return;
             }
-            if (mode == 'turn_based') {
-              ctx.goNamed(Routes.onlineMatch, extra: selectedCharacterId);
-              return;
-            }
           }
 
           return _buildPage(
@@ -509,11 +500,11 @@ GoRouter createRouter({
       ),
 
       // -----------------------------------------------------------------------
-      // /online-match — guarded — Flutter-native board-delta online match
+      // /pvp — guarded — PvP flow (character-select → game → result)
       // -----------------------------------------------------------------------
       GoRoute(
-        path: '/online-match',
-        name: Routes.onlineMatch,
+        path: '/pvp',
+        name: Routes.pvp,
         pageBuilder: (context, state) {
           final tok = auth.sessionToken;
           if (tok == null) {
@@ -531,51 +522,20 @@ GoRouter createRouter({
           final extra = state.extra;
           final characterId = extra is _OnlineMatchLaunch
               ? extra.characterId
-              : extra as String? ?? 'cat';
+              : extra as String?;
           final resumeRoomId =
               extra is _OnlineMatchLaunch ? extra.resumeRoomId : null;
           return _buildPage(
             context,
             state,
-            OnlineGameScreen(
+            PvpScreen(
               sessionToken: tok,
               backendUrl: backendUrl,
-              mode: MatchmakingMode.turnBased,
-              characterId: characterId,
-              resumeRoomId: resumeRoomId,
               matchmaking: mm,
               connectionFactory: boardDeltaConnectionFactory,
               onLeave: () => context.goNamed(Routes.home),
-              onMatchComplete: (result) =>
-                  context.goNamed(Routes.result, extra: result),
-            ),
-          );
-        },
-      ),
-
-      // -----------------------------------------------------------------------
-      // /result — guarded — MatchResult passed via GoRouter extra
-      // -----------------------------------------------------------------------
-      GoRoute(
-        path: '/result',
-        name: Routes.result,
-        pageBuilder: (context, state) {
-          final result = state.extra as MatchResult? ??
-              const MatchResult(
-                outcome: MatchOutcome.draw,
-                selfScore: 0,
-                opponentScore: 0,
-              );
-          return _buildPage(
-            context,
-            state,
-            ResultScreen(
-              result: result,
-              onPlayAgainPressed: () {
-                // Return to home — user selects mode again to start a new match.
-                developer.log('Play again pressed', name: 'router');
-                context.goNamed(Routes.home);
-              },
+              characterId: characterId,
+              resumeRoomId: resumeRoomId,
             ),
           );
         },
