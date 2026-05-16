@@ -1,7 +1,0 @@
-startMatch
-startLocalMatch
-appLifecycle
-requestLeaveMatch
-ready
-authTokenRejected
-matchEnded

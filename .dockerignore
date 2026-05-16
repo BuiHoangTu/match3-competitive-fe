@@ -1,9 +1,7 @@
 .git
 .gitignore
-node_modules
-be/dist
-fe/dist
-shell/build
+.dart_tool
+build
 .claude
 .vscode
 .idea
