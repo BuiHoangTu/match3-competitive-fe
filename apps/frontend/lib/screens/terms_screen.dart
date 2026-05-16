@@ -9,7 +9,7 @@
 // Route: /legal/terms  (see router.dart)
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 /// Scrollable terms of service screen rendered from Markdown.
 ///

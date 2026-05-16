@@ -2,7 +2,7 @@
 ///
 /// These tests focus on:
 ///   1. Stub mode: getGoogleCredential() returns non-null GoogleOAuthTokens.
-///   2. Cancellation contract: a null return from GoogleSignIn.signIn()
+///   2. Cancellation contract: a GoogleSignInException with code 'canceled'
 ///      propagates as null (no throw).
 ///   3. AuthProviderError wrapping: unexpected plugin errors become typed.
 ///   4. The stub token is JWT-shaped.
@@ -60,11 +60,14 @@ void main() {
   // injectable [GoogleSignIn] that simulates cancellation. They must run
   // WITHOUT AUTH_MODE=stub because in stub mode getGoogleCredential() bypasses
   // the real path entirely (returns the stub credential unconditionally).
+  //
+  // In v7, authenticate() throws GoogleSignInException with code 'canceled'
+  // on user cancellation. Our service catches this and returns null.
   // ---------------------------------------------------------------------------
 
   group('cancellation contract (real path, no AUTH_MODE=stub)', () {
     test(
-        'getGoogleCredential returns null when signIn() returns null (user cancelled)',
+        'getGoogleCredential returns null when authenticate() throws canceled',
         () async {
       final credential = await getGoogleCredential(
         googleSignIn: _CancellingGoogleSignIn(),
@@ -169,38 +172,58 @@ void main() {
 }
 
 // ---------------------------------------------------------------------------
-// Test doubles — minimal [GoogleSignIn] implementations
+// Test doubles — minimal [GoogleSignIn] implementations (v7 API)
 // ---------------------------------------------------------------------------
 
-/// A [GoogleSignIn]-like class whose [signIn] returns null (user cancelled).
+/// A [GoogleSignIn]-like class whose [authenticate] throws a canceled
+/// [GoogleSignInException] (user cancelled).
 class _CancellingGoogleSignIn implements GoogleSignIn {
   @override
-  Future<GoogleSignInAccount?> signOut() async => null;
+  Future<void> initialize({
+    String? clientId,
+    String? serverClientId,
+    String? nonce,
+    String? hostedDomain,
+  }) async {}
 
   @override
-  Future<GoogleSignInAccount?> signIn() async => null;
+  Future<GoogleSignInAccount> authenticate(
+      {List<String>? scopeHint}) async {
+    throw GoogleSignInException(
+      code: GoogleSignInExceptionCode.canceled,
+      description: 'User cancelled sign-in',
+    );
+  }
 
   @override
-  List<String> get scopes => const ['email', 'profile'];
+  Future<void> signOut() async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(
       '_CancellingGoogleSignIn.${invocation.memberName} not implemented');
 }
 
-/// A [GoogleSignIn]-like class whose [signIn] throws [error].
+/// A [GoogleSignIn]-like class whose [authenticate] throws [error].
 class _FailingGoogleSignIn implements GoogleSignIn {
   _FailingGoogleSignIn(this._error);
   final Object _error;
 
   @override
-  Future<GoogleSignInAccount?> signOut() async => null;
+  Future<void> initialize({
+    String? clientId,
+    String? serverClientId,
+    String? nonce,
+    String? hostedDomain,
+  }) async {}
 
   @override
-  Future<GoogleSignInAccount?> signIn() async => throw _error;
+  Future<GoogleSignInAccount> authenticate(
+      {List<String>? scopeHint}) async {
+    throw _error;
+  }
 
   @override
-  List<String> get scopes => const ['email', 'profile'];
+  Future<void> signOut() async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError(

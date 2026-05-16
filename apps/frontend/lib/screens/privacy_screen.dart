@@ -9,7 +9,7 @@
 // Route: /legal/privacy  (see router.dart)
 
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 /// Scrollable privacy policy screen rendered from Markdown.
 ///

@@ -18,13 +18,13 @@ dependencies:
   flame: ^1.23.0
 
   # Navigation
-  go_router: ^14.0.0
+  go_router: ^17.0.0
 
   # Legal / markdown screens
-  flutter_markdown: ^0.7.0
+  flutter_markdown_plus: ^1.0.0
 
   # Optional Google OAuth provider. App sessions still come from backend local auth.
-  google_sign_in: ^6.2.2
+  google_sign_in: ^7.0.0
 
   # Hashing for non-sensitive token log correlation.
   crypto: ^3.0.5
@@ -42,7 +42,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

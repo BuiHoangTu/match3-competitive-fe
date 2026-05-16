@@ -26,15 +26,19 @@ class GoogleOAuthTokens {
   final String? accessToken;
 }
 
-/// Singleton GoogleSignIn client.
+/// Singleton GoogleSignIn client (v7 API).
 ///
 /// Injectable for testing — pass a custom [GoogleSignIn] instance via the
 /// factory in [AuthService] if you need to override the client ID.
-GoogleSignIn _defaultGoogleSignIn() => GoogleSignIn(
-      scopes: ['email', 'profile'],
-      // Configure platform OAuth client IDs through normal Google Sign-In
-      // platform setup. Provider credentials must be exchanged with our backend.
-    );
+final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
+bool _isInitialized = false;
+
+Future<void> _ensureInitialized() async {
+  if (!_isInitialized) {
+    await _googleSignIn.initialize();
+    _isInitialized = true;
+  }
+}
 
 /// Obtains Google OAuth tokens via Google Sign-In.
 ///
@@ -49,7 +53,13 @@ Future<GoogleOAuthTokens?> getGoogleCredential({
   if (kAuthStubMode) {
     return _stubGoogleCredential();
   }
-  return _realGoogleCredential(googleSignIn ?? _defaultGoogleSignIn());
+  final client = googleSignIn ?? _googleSignIn;
+  if (client != _googleSignIn) {
+    await client.initialize();
+  } else {
+    await _ensureInitialized();
+  }
+  return _realGoogleCredential(client);
 }
 
 // ---------------------------------------------------------------------------
@@ -63,13 +73,13 @@ Future<GoogleOAuthTokens?> _realGoogleCredential(GoogleSignIn client) async {
     // always wants an explicit, fresh sign-in gesture.
     await client.signOut();
 
-    final account = await client.signIn();
-    if (account == null) {
-      // User dismissed the picker — not an error.
-      return null;
-    }
+    final account = await client.authenticate(
+      scopeHint: ['email', 'profile'],
+    );
 
-    final auth = await account.authentication;
+    // In v7, authentication is synchronous; accessToken comes from
+    // authorizationClient.authorizeScopes.
+    final auth = account.authentication;
     final idToken = auth.idToken;
     if (idToken == null) {
       throw AuthProviderError(
@@ -78,12 +88,24 @@ Future<GoogleOAuthTokens?> _realGoogleCredential(GoogleSignIn client) async {
       );
     }
 
+    final authorization = await account.authorizationClient
+        .authorizeScopes(['email', 'profile']);
+
     return GoogleOAuthTokens(
       idToken: idToken,
-      accessToken: auth.accessToken,
+      accessToken: authorization.accessToken,
     );
   } on AuthProviderError {
     rethrow;
+  } on GoogleSignInException catch (e) {
+    if (e.code.name == 'canceled') {
+      return null;
+    }
+    throw AuthProviderError(
+      'Google Sign-In failed: ${e.description}',
+      providerCode: e.code.name,
+      cause: e,
+    );
   } catch (e) {
     // google_sign_in does not expose a stable exception hierarchy across
     // platforms, so we catch broadly and wrap.
