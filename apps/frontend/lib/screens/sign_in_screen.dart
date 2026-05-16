@@ -173,8 +173,8 @@ class _SignInScreenState extends State<SignInScreen> {
                     ),
 
                     const SizedBox(height: 24),
-                    Row(
-                      children: const [
+                    const Row(
+                      children: [
                         Expanded(child: Divider()),
                         Padding(
                           padding: EdgeInsets.symmetric(horizontal: 12),

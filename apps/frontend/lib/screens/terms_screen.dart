@@ -22,10 +22,10 @@ class TermsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Terms of Service')),
-      body: Markdown(
-        key: const Key('terms_markdown'),
+      body: const Markdown(
+        key: Key('terms_markdown'),
         data: _kTermsMarkdown,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       ),
     );
   }

@@ -1,13 +1,3 @@
-/// Typed error hierarchy for [AuthService].
-///
-/// The service never throws raw exceptions — it either returns null (for
-/// cancellation) or throws one of these typed classes so callers can
-/// pattern-match without depending on provider plugin error codes.
-///
-/// All classes extend [AuthError], which extends [Error] (not [Exception])
-/// because these represent programming-domain failures, not expected
-/// control-flow outcomes. Cancellation is NOT an error — it returns null.
-
 /// Base class for all auth errors surfaced by [AuthService].
 sealed class AuthError extends Error {
   final String message;
@@ -22,8 +12,8 @@ sealed class AuthError extends Error {
 /// The device had no network connection when
 /// sign-in or token refresh was attempted.
 final class AuthNetworkError extends AuthError {
-  AuthNetworkError([String message = 'No network connection during auth', Object? cause])
-      : super(message, cause: cause);
+  AuthNetworkError([super.message = 'No network connection during auth', Object? cause])
+      : super(cause: cause);
 }
 
 /// The identity provider (Apple or Google) returned an error — for example,
@@ -43,25 +33,25 @@ final class AuthProviderError extends AuthError {
 /// The backend rejected a provider credential that was presented to it.
 final class AuthInvalidCredentialError extends AuthError {
   AuthInvalidCredentialError([
-    String message = 'The sign-in credential was rejected',
+    super.message = 'The sign-in credential was rejected',
     Object? cause,
-  ]) : super(message, cause: cause);
+  ]) : super(cause: cause);
 }
 
 /// A token refresh cycle failed — the existing session could not be extended.
 /// The caller should treat this as a sign-out event.
 final class AuthRefreshFailedError extends AuthError {
   AuthRefreshFailedError([
-    String message = 'Token refresh failed; session expired',
+    super.message = 'Token refresh failed; session expired',
     Object? cause,
-  ]) : super(message, cause: cause);
+  ]) : super(cause: cause);
 }
 
 /// The platform does not support the requested sign-in method.
 /// For example: Sign in with Apple on Android without a web-flow configured.
 final class AuthUnsupportedPlatformError extends AuthError {
   AuthUnsupportedPlatformError([
-    String message = 'Sign-in method not supported on this platform',
+    super.message = 'Sign-in method not supported on this platform',
     Object? cause,
-  ]) : super(message, cause: cause);
+  ]) : super(cause: cause);
 }

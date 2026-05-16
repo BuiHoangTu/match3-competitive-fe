@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/game_core/board.dart';
-import '../../lib/net/protocol.dart';
+import 'package:shell/game_core/board.dart';
+import 'package:shell/net/protocol.dart';
 
 Map<String, dynamic> _fixture(String name) {
   final file = File('../../specification/fixtures/board-delta/$name.json');

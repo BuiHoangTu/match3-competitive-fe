@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../lib/services/local_auth_service.dart';
+import 'package:shell/services/local_auth_service.dart';
 
 LocalAuthService _make({required HttpPoster postFn}) {
   // Tests don't need persistence; provide an empty in-memory prefs.

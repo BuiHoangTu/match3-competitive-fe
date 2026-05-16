@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/game_core/generator.dart';
-import '../../lib/screens/practice_game_screen.dart';
+import 'package:shell/game_core/generator.dart';
+import 'package:shell/screens/practice_game_screen.dart';
 
 void main() {
   testWidgets('Practice screen is score-only and has no result language',

@@ -4,7 +4,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
-import '../../lib/services/account_client.dart';
+import 'package:shell/services/account_client.dart';
 
 void main() {
   group('AccountClient.delete', () {

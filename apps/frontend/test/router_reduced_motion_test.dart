@@ -14,8 +14,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
-import '../lib/models/user_profile.dart';
-import '../lib/router.dart';
+import 'package:shell/models/user_profile.dart';
+import 'package:shell/router.dart';
 
 // ---------------------------------------------------------------------------
 // Fake auth implementations

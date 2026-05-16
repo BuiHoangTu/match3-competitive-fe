@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../lib/game_core/board.dart';
-import '../../lib/game_core/generator.dart';
-import '../../lib/game_core/judge.dart';
-import '../../lib/game_core/legal_moves.dart';
+import 'package:shell/game_core/board.dart';
+import 'package:shell/game_core/generator.dart';
+import 'package:shell/game_core/judge.dart';
+import 'package:shell/game_core/legal_moves.dart';
 
 void main() {
   test('GameBoard stores tiles as a flat row-major array', () {

@@ -1,15 +1,15 @@
 /// Unit tests for [MatchmakingClient].
 ///
 /// Uses an injected HttpPoster stub — no real network, no backend dependency.
+library;
 
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
-import '../../lib/errors/matchmaking_errors.dart';
-import '../../lib/services/matchmaking_client.dart';
+import 'package:shell/errors/matchmaking_errors.dart';
+import 'package:shell/services/matchmaking_client.dart';
 
 class _Stub {
   _Stub({required this.status, required this.body});

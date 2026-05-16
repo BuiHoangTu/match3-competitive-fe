@@ -22,10 +22,10 @@ class PrivacyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Privacy Policy')),
-      body: Markdown(
-        key: const Key('privacy_markdown'),
+      body: const Markdown(
+        key: Key('privacy_markdown'),
         data: _kPrivacyMarkdown,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       ),
     );
   }
