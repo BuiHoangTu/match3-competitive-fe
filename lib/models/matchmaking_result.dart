@@ -1,8 +1,8 @@
 /// Result of a successful matchmaking request (join or resume).
 ///
 /// Shape mirrors the backend's response from POST /matchmaking/{join,resume}
-/// in `be/src/matchmakingHttp.ts`. The [roomToken] is opaque here — the game
-/// view treats it as a string and only the server can decode its claims.
+/// in `be/backend/src/matchmakingHttp.ts`. The [roomToken] is opaque — only
+/// the server can decode its claims.
 class MatchmakingResult {
   const MatchmakingResult({
     required this.roomToken,
@@ -13,8 +13,8 @@ class MatchmakingResult {
     this.opponent,
   });
 
-  /// Server-issued room-scoped JWT. Must be passed verbatim to the game view
-  /// via the bridge `startMatch` message.
+  /// Server-issued room-scoped JWT. Passed to the Socket.IO connection for
+  /// online play.
   final String roomToken;
 
   /// Unix timestamp (ms) when the room token expires. Shell scheduling for

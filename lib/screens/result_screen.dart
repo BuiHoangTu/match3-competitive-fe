@@ -2,9 +2,8 @@
 // T-v0.7-01 — Keyboard focus + tab order
 //
 // Displays WIN / LOSE / DRAW after a match. Score rows are hidden for
-// competitive modes that do not expose point scores.
-// Receives data from the `matchEnded` bridge message (T-v0.6-B09) via
-// the typed [MatchResult] model.
+// competitive modes that do not expose point scores. Receives a typed
+// [MatchResult] model from the PvP screen on match completion.
 //
 // "Play again" dispatches a stub callback; real navigation wiring lands with
 // T-v0.6-A08 once the game view is available.

@@ -5,7 +5,7 @@
 // user profile header (display name + avatar placeholder).
 //
 // Mode button handlers are stubs. Real navigation to the embedded game view
-// lands once T-v0.6-A08a/b/c and the bridge are complete.
+// lands once T-v0.6-A08a/b/c are complete.
 //
 // Tab order: account button (AppBar) → Practice → vs Bot → vs Human.
 //
@@ -18,7 +18,7 @@ import '../models/user_profile.dart';
 ///
 /// Accepts [profile] for display and three stub callbacks for the game modes.
 /// Each callback is expected to navigate to the game view screen; the actual
-/// navigation and bridge initialisation is wired by sub-tracks A08 + B.
+/// navigation is wired by sub-tracks A08 + B.
 ///
 /// On first mount, optionally calls [onAutoResumeCheck] to detect an active
 /// server-side match (set by the router; calls /matchmaking/status). When

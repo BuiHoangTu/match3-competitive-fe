@@ -6,9 +6,8 @@
 /// - POST /matchmaking/join   — find an opponent, receive a room token
 /// - POST /matchmaking/resume — reissue a token for an existing slot
 ///
-/// Auth: app session token in `Authorization: Bearer <token>` header. The
-/// session token never crosses the shell/game bridge (AR-3); online gameplay
-/// sockets use room tokens instead.
+/// Auth: app session token in `Authorization: Bearer <token>` header. Online
+/// gameplay sockets use room tokens instead.
 library;
 
 import 'dart:async';
@@ -37,9 +36,8 @@ class ActiveSession {
 
 /// Mode selector for [MatchmakingClient.join].
 ///
-/// `solo` is intentionally absent: solo matches are now driven entirely
-/// client-side (no server room). The shell sends [StartLocalMatchMessage]
-/// over the bridge instead of calling /matchmaking/join.
+/// `solo` is intentionally absent: solo matches are driven entirely
+/// client-side (no server room, no matchmaking call).
 enum MatchmakingMode {
   turnBased('turn_based'),
   pve('pve');
