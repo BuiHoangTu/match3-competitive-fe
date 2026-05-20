@@ -99,6 +99,8 @@ class OnlineGameScreen extends StatefulWidget {
     required this.matchmaking,
     required this.onLeave,
     this.resumeRoomId,
+    this.roomToken,
+    this.roomTokenExpiresAt,
     this.onMatchComplete,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
   });
@@ -110,6 +112,8 @@ class OnlineGameScreen extends StatefulWidget {
   final MatchmakingClient matchmaking;
   final VoidCallback onLeave;
   final String? resumeRoomId;
+  final String? roomToken;
+  final int? roomTokenExpiresAt;
   final ValueChanged<MatchResult>? onMatchComplete;
   final BoardDeltaConnectionFactory connectionFactory;
 
@@ -149,12 +153,21 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
 
   Future<void> _start() async {
     try {
-      final result = await _joinOrResume();
-      if (!mounted) return;
+      final roomToken = widget.roomToken;
+      final String token;
+      if (roomToken != null && roomToken.isNotEmpty) {
+        // Room token provided by PvpScreen (non-blocking matchmaking flow).
+        token = roomToken;
+      } else {
+        // Legacy path: HTTP matchmaking call.
+        final result = await _joinOrResume();
+        if (!mounted) return;
+        token = result.roomToken;
+      }
       setState(() => _status = 'Connecting...');
       final connection = widget.connectionFactory(
         serverUrl: widget.backendUrl,
-        roomToken: result.roomToken,
+        roomToken: token,
       );
       _connection = connection;
       _listen(connection);

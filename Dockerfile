@@ -18,4 +18,5 @@ FROM nginx:alpine
 COPY --from=shell-builder /app/fe/build/web      /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+RUN sed -i 's/worker_processes auto;/worker_processes 2;/' /etc/nginx/nginx.conf
 CMD ["nginx", "-g", "daemon off;"]

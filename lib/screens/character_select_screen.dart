@@ -23,6 +23,7 @@
 //
 // Route: /character-select  (see router.dart)
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ class CharacterSelectScreen extends StatefulWidget {
     required this.onLoadDefault,
     required this.onConfirm,
     required this.onBack,
+    this.autoConfirmSeconds,
   });
 
   /// Called once on init; should return the previously-stored character ID or
@@ -127,6 +129,10 @@ class CharacterSelectScreen extends StatefulWidget {
   /// Called when the player taps the AppBar back button (or system back).
   final VoidCallback onBack;
 
+  /// If set, auto-confirm with the first character after this many seconds.
+  /// Shows a countdown on the Continue button.
+  final int? autoConfirmSeconds;
+
   @override
   State<CharacterSelectScreen> createState() => _CharacterSelectScreenState();
 }
@@ -138,10 +144,37 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
   /// True while [onConfirm] future is in flight. Disables all interaction.
   bool _busy = false;
 
+  Timer? _autoConfirmTimer;
+  int _secondsRemaining = 0;
+
   @override
   void initState() {
     super.initState();
     _loadDefault();
+    if (widget.autoConfirmSeconds != null) {
+      _secondsRemaining = widget.autoConfirmSeconds!;
+      _autoConfirmTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          _secondsRemaining--;
+          if (_secondsRemaining <= 0) {
+            timer.cancel();
+            _autoConfirm();
+          }
+        });
+      });
+    }
+  }
+
+  void _autoConfirm() {
+    if (_busy) return;
+    // Auto-select the first character if none selected.
+    final id = _selected ?? _kRoster.first.id;
+    _selected = id;
+    _handleConfirm();
   }
 
   Future<void> _loadDefault() async {
@@ -153,6 +186,12 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
     setState(() {
       _selected = (valid && id != null) ? id : _kRoster.first.id;
     });
+  }
+
+  @override
+  void dispose() {
+    _autoConfirmTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _handleConfirm() async {
@@ -245,7 +284,11 @@ class _CharacterSelectScreenState extends State<CharacterSelectScreen> {
                                 color: theme.colorScheme.onPrimary,
                               ),
                             )
-                          : const Text('Continue'),
+                          : Text(
+                              widget.autoConfirmSeconds != null
+                                  ? 'Continue ($_secondsRemaining)'
+                                  : 'Continue',
+                            ),
                     ),
                   ),
                 ),
