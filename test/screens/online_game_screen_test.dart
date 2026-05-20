@@ -29,10 +29,15 @@ class _FakeConnection implements BoardDeltaConnection {
   final moveRejectedController = StreamController<MoveRejectedDto>.broadcast();
   final gameOverController = StreamController<GameOverDto>.broadcast();
   final errorsController = StreamController<String>.broadcast();
+  final skillResolvedController =
+      StreamController<SkillResolvedDto>.broadcast();
+  final skillRejectedController =
+      StreamController<SkillRejectedDto>.broadcast();
 
   bool connected = false;
   bool forfeited = false;
   Map<String, Object?>? submittedMove;
+  Map<String, Object?>? submittedSkill;
 
   @override
   Stream<BoardDeltaMatchFoundDto> get matchFound => matchFoundController.stream;
@@ -51,6 +56,12 @@ class _FakeConnection implements BoardDeltaConnection {
 
   @override
   Stream<GameOverDto> get gameOver => gameOverController.stream;
+
+  @override
+  Stream<SkillResolvedDto> get skillResolved => skillResolvedController.stream;
+
+  @override
+  Stream<SkillRejectedDto> get skillRejected => skillRejectedController.stream;
 
   @override
   Stream<String> get errors => errorsController.stream;
@@ -76,6 +87,21 @@ class _FakeConnection implements BoardDeltaConnection {
   }
 
   @override
+  void submitSkill({
+    required String roomId,
+    required String skillId,
+    int? targetRow,
+    int? targetCol,
+  }) {
+    submittedSkill = {
+      'roomId': roomId,
+      'skillId': skillId,
+      if (targetRow != null) 'targetRow': targetRow,
+      if (targetCol != null) 'targetCol': targetCol,
+    };
+  }
+
+  @override
   void forfeit() => forfeited = true;
 
   @override
@@ -86,6 +112,8 @@ class _FakeConnection implements BoardDeltaConnection {
     turnChangedController.close();
     moveRejectedController.close();
     gameOverController.close();
+    skillResolvedController.close();
+    skillRejectedController.close();
     errorsController.close();
   }
 }
@@ -132,7 +160,7 @@ void main() {
     expect(find.byKey(const Key('online_tile_2_1')), findsOneWidget);
     expect(find.byKey(const Key('online_player_state')), findsOneWidget);
     expect(find.byKey(const Key('online_opponent_state')), findsOneWidget);
-    expect(find.text('You (turn)'), findsOneWidget);
+    expect(find.text('You'), findsOneWidget);
     expect(find.text('Opponent'), findsOneWidget);
     expect(find.byKey(const Key('online_player_health_bar')), findsOneWidget);
     expect(find.byKey(const Key('online_player_stamina_bar')), findsOneWidget);
@@ -141,6 +169,36 @@ void main() {
     expect(find.text('300s/300s'), findsNothing);
     expect(find.text('100/100'), findsNothing);
     expect(find.textContaining('Score'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('online_player_state')));
+    await tester.pumpAndSettle();
+    final detailDialog = find.byType(AlertDialog);
+    expect(detailDialog, findsOneWidget);
+    expect(find.text('You — Cat'), findsOneWidget);
+    expect(
+      find.descendant(of: detailDialog, matching: find.text('HP')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: detailDialog, matching: find.text('100/100')),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.descendant(of: detailDialog, matching: find.text('Mana')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: detailDialog, matching: find.text('Level')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: detailDialog, matching: find.text('ATK')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('You — Cat'), findsNothing);
 
     expect(
       tester.getTopLeft(find.byKey(const Key('online_opponent_state'))).dy,

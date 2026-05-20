@@ -13,6 +13,8 @@ abstract class BoardDeltaConnection {
   Stream<TurnChangedDto> get turnChanged;
   Stream<MoveRejectedDto> get moveRejected;
   Stream<GameOverDto> get gameOver;
+  Stream<SkillResolvedDto> get skillResolved;
+  Stream<SkillRejectedDto> get skillRejected;
   Stream<String> get errors;
 
   void connect();
@@ -23,6 +25,13 @@ abstract class BoardDeltaConnection {
     required int c1,
     required int r2,
     required int c2,
+  });
+
+  void submitSkill({
+    required String roomId,
+    required String skillId,
+    int? targetRow,
+    int? targetCol,
   });
 
   void forfeit();
@@ -56,6 +65,8 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
   final _turnChanged = StreamController<TurnChangedDto>.broadcast();
   final _moveRejected = StreamController<MoveRejectedDto>.broadcast();
   final _gameOver = StreamController<GameOverDto>.broadcast();
+  final _skillResolved = StreamController<SkillResolvedDto>.broadcast();
+  final _skillRejected = StreamController<SkillRejectedDto>.broadcast();
   final _errors = StreamController<String>.broadcast();
 
   @override
@@ -75,6 +86,12 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
 
   @override
   Stream<GameOverDto> get gameOver => _gameOver.stream;
+
+  @override
+  Stream<SkillResolvedDto> get skillResolved => _skillResolved.stream;
+
+  @override
+  Stream<SkillRejectedDto> get skillRejected => _skillRejected.stream;
 
   @override
   Stream<String> get errors => _errors.stream;
@@ -103,6 +120,14 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     });
     _socket.on('game_over', (data) {
       _decode(data, (json) => _gameOver.add(GameOverDto.fromJson(json)));
+    });
+    _socket.on('skill_resolved', (data) {
+      _decode(
+          data, (json) => _skillResolved.add(SkillResolvedDto.fromJson(json)));
+    });
+    _socket.on('skill_rejected', (data) {
+      _decode(
+          data, (json) => _skillRejected.add(SkillRejectedDto.fromJson(json)));
     });
     _socket.on('connect_error', (data) {
       final message = data.toString();
@@ -144,6 +169,22 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
   }
 
   @override
+  void submitSkill({
+    required String roomId,
+    required String skillId,
+    int? targetRow,
+    int? targetCol,
+  }) {
+    final data = <String, dynamic>{
+      'roomId': roomId,
+      'skillId': skillId,
+    };
+    if (targetRow != null) data['targetRow'] = targetRow;
+    if (targetCol != null) data['targetCol'] = targetCol;
+    _socket.emit('skill', data);
+  }
+
+  @override
   void forfeit() => _socket.emit('forfeit');
 
   @override
@@ -155,6 +196,8 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     unawaited(_turnChanged.close());
     unawaited(_moveRejected.close());
     unawaited(_gameOver.close());
+    unawaited(_skillResolved.close());
+    unawaited(_skillRejected.close());
     unawaited(_errors.close());
   }
 }

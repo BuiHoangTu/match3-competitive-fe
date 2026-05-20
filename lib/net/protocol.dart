@@ -230,6 +230,43 @@ class GameOverDto {
       );
 }
 
+class SkillResolvedDto {
+  const SkillResolvedDto({
+    required this.playerId,
+    required this.skillId,
+    required this.damageDealt,
+    required this.healedAmount,
+    required this.consumedTurn,
+    required this.playerStates,
+  });
+
+  final String playerId;
+  final String skillId;
+  final int damageDealt;
+  final int healedAmount;
+  final bool consumedTurn;
+  final Map<String, PlayerStateDto> playerStates;
+
+  factory SkillResolvedDto.fromJson(Map<String, dynamic> json) =>
+      SkillResolvedDto(
+        playerId: json['playerId'] as String,
+        skillId: json['skillId'] as String,
+        damageDealt: _readInt(json, 'damageDealt'),
+        healedAmount: _readInt(json, 'healedAmount'),
+        consumedTurn: json['consumedTurn'] as bool? ?? true,
+        playerStates: _parsePlayerStates(json['playerStates']),
+      );
+}
+
+class SkillRejectedDto {
+  const SkillRejectedDto({required this.reason});
+
+  final String reason;
+
+  factory SkillRejectedDto.fromJson(Map<String, dynamic> json) =>
+      SkillRejectedDto(reason: json['reason']?.toString() ?? 'rejected');
+}
+
 Map<String, PlayerStateDto> _parsePlayerStates(Object? raw) {
   if (raw == null) return const {};
   final map = raw as Map<String, dynamic>;

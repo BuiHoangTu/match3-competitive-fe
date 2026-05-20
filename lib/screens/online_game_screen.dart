@@ -19,6 +19,76 @@ import '../net/board_delta_socket_client.dart';
 import '../net/protocol.dart';
 import '../services/matchmaking_client.dart';
 
+// ---------------------------------------------------------------------------
+// Character skill data (mirrors be/backend/src/character/cat.ts)
+// ---------------------------------------------------------------------------
+
+class _SkillData {
+  const _SkillData({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.manaCost,
+    required this.consumesTurn,
+    required this.targetingKind,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final int manaCost;
+  final bool consumesTurn;
+  final String targetingKind; // "none", "single-tile", "area"
+}
+
+class _CharacterData {
+  const _CharacterData({
+    required this.id,
+    required this.displayName,
+    required this.icon,
+    required this.skills,
+  });
+
+  final String id;
+  final String displayName;
+  final IconData icon;
+  final List<_SkillData> skills;
+}
+
+const Map<String, _CharacterData> _kCharacterData = {
+  'cat': _CharacterData(
+    id: 'cat',
+    displayName: 'Cat',
+    icon: Icons.pets,
+    skills: [
+      _SkillData(
+        id: 'scratch',
+        name: 'Scratch',
+        description: '4× ATK damage to opponent',
+        manaCost: 5,
+        consumesTurn: false,
+        targetingKind: 'none',
+      ),
+      _SkillData(
+        id: 'strong_bite',
+        name: 'Strong Bite',
+        description: '8× ATK damage + 50% lifesteal',
+        manaCost: 25,
+        consumesTurn: true,
+        targetingKind: 'single-tile',
+      ),
+      _SkillData(
+        id: 'board_strike',
+        name: 'Board Strike',
+        description: '20× ATK damage, full board',
+        manaCost: 60,
+        consumesTurn: true,
+        targetingKind: 'area',
+      ),
+    ],
+  ),
+};
+
 class OnlineGameScreen extends StatefulWidget {
   const OnlineGameScreen({
     super.key,
@@ -212,7 +282,37 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           return;
         }
         setState(() => _notice = message);
+      }))
+      ..add(connection.skillResolved.listen((dto) {
+        setState(() {
+          _acceptPlayerStates(dto.playerStates);
+          final name = _skillDisplayName(dto.skillId);
+          final parts = <String>[];
+          if (dto.damageDealt > 0) parts.add('${dto.damageDealt} dmg');
+          if (dto.healedAmount > 0) parts.add('+${dto.healedAmount} HP');
+          _notice =
+              '$name${parts.isNotEmpty ? ': ${parts.join(', ')}' : ' activated'}';
+          if (dto.consumedTurn) {
+            _pendingMove = false;
+            _boardAnimating = false;
+            _boardAnimation = null;
+            _selected = null;
+          }
+        });
+        _syncStaminaTicker();
+      }))
+      ..add(connection.skillRejected.listen((dto) {
+        setState(() => _notice = 'Skill failed: ${dto.reason}');
       }));
+  }
+
+  String _skillDisplayName(String skillId) {
+    for (final char in _kCharacterData.values) {
+      for (final skill in char.skills) {
+        if (skill.id == skillId) return skill.name;
+      }
+    }
+    return skillId;
   }
 
   String _hashBoard(int boardVersion, GameBoard board) {
@@ -470,6 +570,37 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     });
   }
 
+  void _showPlayerDetail(
+    BuildContext context, {
+    required String label,
+    required PlayerStateDto state,
+    required String characterId,
+    required bool isSelf,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => _PlayerDetailDialog(
+        label: label,
+        state: state,
+        characterId: characterId,
+        isSelf: isSelf,
+        isMyTurn: _isMyTurn,
+        onActivateSkill: (skill) {
+          Navigator.of(context).pop();
+          _handleSkillActivate(skill);
+        },
+      ),
+    );
+  }
+
+  void _handleSkillActivate(_SkillData skill) {
+    if (!_isMyTurn || _roomId == null) return;
+    _connection?.submitSkill(
+      roomId: _roomId!,
+      skillId: skill.id,
+    );
+  }
+
   void _handleSelectionChanged(BoardPosition? selected) {
     if (_pendingMove || _boardAnimating) return;
     if (!_isMyTurn) {
@@ -594,6 +725,15 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                     label: 'Opponent',
                     state: _opponentState,
                     active: !_isMyTurn,
+                    onTap: _opponentState != null
+                        ? () => _showPlayerDetail(
+                              context,
+                              label: 'Opponent',
+                              state: _opponentState!,
+                              characterId: widget.characterId,
+                              isSelf: false,
+                            )
+                        : null,
                   ),
                   _BoardVersionLabel(boardVersion: _boardVersion),
                   Expanded(
@@ -624,6 +764,15 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                     label: 'You',
                     state: _myState,
                     active: _isMyTurn,
+                    onTap: _myState != null
+                        ? () => _showPlayerDetail(
+                              context,
+                              label: 'You',
+                              state: _myState!,
+                              characterId: widget.characterId,
+                              isSelf: true,
+                            )
+                        : null,
                   ),
                 ],
               ),
@@ -720,12 +869,14 @@ class _PlayerStatePanel extends StatelessWidget {
     required this.label,
     required this.state,
     required this.active,
+    this.onTap,
   });
 
   final String keyPrefix;
   final String label;
   final PlayerStateDto? state;
   final bool active;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -742,62 +893,79 @@ class _PlayerStatePanel extends StatelessWidget {
         alignment: Alignment.center,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
-          child: Semantics(
-            label: '$label combat stats',
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: active
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.outlineVariant,
-                ),
-                borderRadius: BorderRadius.circular(8),
+          child: Card(
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(
+                color: active
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outlineVariant,
               ),
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: InkWell(
+              onTap: onTap,
+              mouseCursor: onTap == null
+                  ? SystemMouseCursors.basic
+                  : SystemMouseCursors.click,
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: state == null
                     ? Text('$label  --', style: titleStyle)
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  active ? '$label (turn)' : label,
-                                  style: titleStyle,
+                    : Semantics(
+                        button: onTap != null,
+                        label: '$label details',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    label,
+                                    style: titleStyle,
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                'Lv ${state.lv}  Atk ${state.atk}',
-                                style: theme.textTheme.labelMedium,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _StatBar(
-                            key: Key('${keyPrefix}_health_bar'),
-                            label: 'HP',
-                            value: state.health,
-                            max: state.maxHealth,
-                            color: Colors.redAccent,
-                          ),
-                          _StatBar(
-                            key: Key('${keyPrefix}_stamina_bar'),
-                            label: 'Stamina',
-                            value: state.stamina,
-                            max: state.maxStamina,
-                            color: Colors.orangeAccent,
-                          ),
-                          _StatBar(
-                            key: Key('${keyPrefix}_mana_bar'),
-                            label: 'Mana',
-                            value: state.mana,
-                            max: state.maxMana,
-                            color: Colors.lightBlueAccent,
-                          ),
-                        ],
+                                Text(
+                                  'Lv ${state.lv}  Atk ${state.atk}',
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                                if (onTap != null) ...[
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    Icons.info_outline,
+                                    size: 18,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            _StatBar(
+                              key: Key('${keyPrefix}_health_bar'),
+                              label: 'HP',
+                              value: state.health,
+                              max: state.maxHealth,
+                              color: Colors.redAccent,
+                            ),
+                            _StatBar(
+                              key: Key('${keyPrefix}_stamina_bar'),
+                              label: 'Stamina',
+                              value: state.stamina,
+                              max: state.maxStamina,
+                              color: Colors.orangeAccent,
+                            ),
+                            _StatBar(
+                              key: Key('${keyPrefix}_mana_bar'),
+                              label: 'Mana',
+                              value: state.mana,
+                              max: state.maxMana,
+                              color: Colors.lightBlueAccent,
+                            ),
+                          ],
+                        ),
                       ),
               ),
             ),
@@ -848,6 +1016,194 @@ class _StatBar extends StatelessWidget {
             backgroundColor: theme.colorScheme.surfaceContainerHighest,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Player detail dialog
+// ---------------------------------------------------------------------------
+
+class _PlayerDetailDialog extends StatelessWidget {
+  const _PlayerDetailDialog({
+    required this.label,
+    required this.state,
+    required this.characterId,
+    required this.isSelf,
+    required this.isMyTurn,
+    required this.onActivateSkill,
+  });
+
+  final String label;
+  final PlayerStateDto state;
+  final String characterId;
+  final bool isSelf;
+  final bool isMyTurn;
+  final void Function(_SkillData skill) onActivateSkill;
+
+  String _formatStamina(int ms) {
+    final totalSec = (ms / 1000).round();
+    final min = totalSec ~/ 60;
+    final sec = totalSec % 60;
+    return '$min:${sec.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final character = _kCharacterData[characterId];
+    final charName = character?.displayName ?? characterId;
+    final charIcon = character?.icon ?? Icons.person;
+    final skills = character?.skills ?? const [];
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(charIcon, size: 28),
+          const SizedBox(width: 10),
+          Expanded(child: Text('$label — $charName')),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Numeric stats
+            _DetailStatRow(
+                label: 'HP', value: '${state.health}/${state.maxHealth}'),
+            _DetailStatRow(
+                label: 'Stamina',
+                value:
+                    '${_formatStamina(state.stamina)} / ${_formatStamina(state.maxStamina)}'),
+            _DetailStatRow(
+                label: 'Mana', value: '${state.mana}/${state.maxMana}'),
+            _DetailStatRow(label: 'Level', value: '${state.lv}'),
+            _DetailStatRow(label: 'ATK', value: '${state.atk}'),
+            _DetailStatRow(
+                label: 'EXP', value: '${state.exp}/${state.expToNext}'),
+
+            if (skills.isNotEmpty) ...[
+              const Divider(height: 24),
+              Text('Skills', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 8),
+              for (final skill in skills)
+                _SkillDetailRow(
+                  skill: skill,
+                  currentMana: state.mana,
+                  enabled: isSelf && isMyTurn && state.mana >= skill.manaCost,
+                  onActivate: () => onActivateSkill(skill),
+                ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailStatRow extends StatelessWidget {
+  const _DetailStatRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(label,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkillDetailRow extends StatelessWidget {
+  const _SkillDetailRow({
+    required this.skill,
+    required this.currentMana,
+    required this.enabled,
+    required this.onActivate,
+  });
+
+  final _SkillData skill;
+  final int currentMana;
+  final bool enabled;
+  final VoidCallback onActivate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canAfford = currentMana >= skill.manaCost;
+    final targetingLabel = skill.targetingKind == 'single-tile'
+        ? ' (pick tile)'
+        : skill.targetingKind == 'area'
+            ? ' (area)'
+            : '';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    skill.name,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Text(
+                  '${skill.manaCost} MP$targetingLabel',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: canAfford
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.error,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${skill.description}${skill.consumesTurn ? ' (costs turn)' : ''}',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: enabled ? onActivate : null,
+                child: const Text('Activate'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
