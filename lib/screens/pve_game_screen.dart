@@ -36,6 +36,7 @@ class _PveGameScreenState extends State<PveGameScreen> {
   bool _pendingBotTurn = false;
   bool _replaceAfterAnimation = false;
   bool _botThinking = false;
+  int _extraTurnsRemaining = 0;
   String? _notice;
 
   @override
@@ -85,6 +86,11 @@ class _PveGameScreenState extends State<PveGameScreen> {
         _boardAnimating = true;
         return;
       }
+
+      final earned = result.extraTurnsEarned;
+      _extraTurnsRemaining =
+          (_extraTurnsRemaining - 1).clamp(0, 9999) + earned;
+
       final shouldReplace =
           !hasLegalMove(result.finalBoard, judge: widget.judge);
       _board = result.finalBoard;
@@ -96,12 +102,21 @@ class _PveGameScreenState extends State<PveGameScreen> {
         result: result,
       );
       _boardAnimating = _boardAnimation != null;
-      _botThinking = true;
-      _pendingBotTurn = true;
       _replaceAfterAnimation = shouldReplace;
-      _notice = null;
+
+      if (_extraTurnsRemaining > 0) {
+        // Extra turn: human plays again, no bot turn
+        _botThinking = false;
+        _pendingBotTurn = false;
+        _notice = 'Extra turn!';
+      } else {
+        // Normal: hand off to bot
+        _botThinking = true;
+        _pendingBotTurn = true;
+        _notice = null;
+      }
     });
-    if (!_boardAnimating) {
+    if (!_boardAnimating && _extraTurnsRemaining <= 0) {
       Future<void>.delayed(const Duration(milliseconds: 250), _playBotTurn);
     }
   }
@@ -146,6 +161,10 @@ class _PveGameScreenState extends State<PveGameScreen> {
     );
     setState(() {
       if (result.accepted && !result.fizzle) {
+        final earned = result.extraTurnsEarned;
+        _extraTurnsRemaining =
+            (_extraTurnsRemaining - 1).clamp(0, 9999) + earned;
+
         final shouldReplace =
             !hasLegalMove(result.finalBoard, judge: widget.judge);
         _board = result.finalBoard;
@@ -158,7 +177,14 @@ class _PveGameScreenState extends State<PveGameScreen> {
         );
         _boardAnimating = _boardAnimation != null;
         _replaceAfterAnimation = shouldReplace;
-        _notice = null;
+
+        if (_extraTurnsRemaining > 0) {
+          _pendingBotTurn = true;
+          _notice = 'Bot extra turn!';
+        } else {
+          _pendingBotTurn = false;
+          _notice = null;
+        }
       } else {
         _notice = 'Your turn';
         _botThinking = false;
@@ -218,8 +244,12 @@ class _PveGameScreenState extends State<PveGameScreen> {
         _replaceAfterAnimation = false;
         _board = _replaceBoard(width: _board.width, height: _board.height);
         _notice = 'No moves available. Board swapped.';
+      } else if (_extraTurnsRemaining > 0 && !_botThinking) {
+        _notice = 'Extra turn! ($_extraTurnsRemaining remaining)';
+      } else if (_pendingBotTurn) {
+        _notice = 'Bot turn';
       } else {
-        _notice = _pendingBotTurn ? 'Bot turn' : 'Your turn';
+        _notice = 'Your turn';
       }
 
       if (_pendingBotTurn) {

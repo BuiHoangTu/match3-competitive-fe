@@ -139,6 +139,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   bool _pendingMove = false;
   bool _loading = true;
   bool _matchCompleteReported = false;
+  int _extraTurnsRemaining = 0;
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
@@ -221,6 +222,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _opponentPlayerId = dto.opponentId;
           _activePlayerId = dto.activePlayerId;
           _boardVersion = dto.boardVersion;
+          _extraTurnsRemaining = 0;
           _acceptPlayerStates(dto.playerStates);
           _board = GameBoard.fromFlat(
             width: dto.width,
@@ -296,24 +298,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         }
         setState(() => _notice = message);
       }))
-      ..add(connection.skillResolved.listen((dto) {
-        setState(() {
-          _acceptPlayerStates(dto.playerStates);
-          final name = _skillDisplayName(dto.skillId);
-          final parts = <String>[];
-          if (dto.damageDealt > 0) parts.add('${dto.damageDealt} dmg');
-          if (dto.healedAmount > 0) parts.add('+${dto.healedAmount} HP');
-          _notice =
-              '$name${parts.isNotEmpty ? ': ${parts.join(', ')}' : ' activated'}';
-          if (dto.consumedTurn) {
-            _pendingMove = false;
-            _boardAnimating = false;
-            _boardAnimation = null;
-            _selected = null;
-          }
-        });
-        _syncStaminaTicker();
-      }))
+      // skillResolved is no longer emitted — skills now use move_resolved
+      // with moveType "skill". skillRejected still fires for validation.
       ..add(connection.skillRejected.listen((dto) {
         setState(() => _notice = 'Skill failed: ${dto.reason}');
       }));
@@ -341,13 +327,28 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     if (board == null) {
       throw const FormatException('move_resolved arrived before board state');
     }
-    final generator = TileStreamGenerator(dto.generatedTiles);
+    if (dto.r1 == null || dto.c1 == null || dto.r2 == null || dto.c2 == null) {
+      throw const FormatException('move_resolved missing swap coordinates');
+    }
+    final generatedTiles = dto.generatedTiles;
+    if (generatedTiles == null) {
+      throw const FormatException('move_resolved missing generatedTiles');
+    }
+    final boardVersion = dto.boardVersion;
+    if (boardVersion == null) {
+      throw const FormatException('move_resolved missing boardVersion');
+    }
+    final boardHash = dto.boardHash;
+    if (boardHash == null) {
+      throw const FormatException('move_resolved missing boardHash');
+    }
+    final generator = TileStreamGenerator(generatedTiles);
     final resolution = const LocalJudge().resolveSwap(
       board: board,
-      r1: dto.r1,
-      c1: dto.c1,
-      r2: dto.r2,
-      c2: dto.c2,
+      r1: dto.r1!,
+      c1: dto.c1!,
+      r2: dto.r2!,
+      c2: dto.c2!,
       generator: generator,
     );
     if (generator.remaining != 0) {
@@ -355,10 +356,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         'move_resolved generatedTiles has ${generator.remaining} unused tiles',
       );
     }
-    final localHash = _hashBoard(dto.boardVersion, resolution.finalBoard);
-    if (localHash != dto.boardHash) {
+    final localHash = _hashBoard(boardVersion, resolution.finalBoard);
+    if (localHash != boardHash) {
       throw FormatException(
-        'move_resolved boardHash mismatch: expected ${dto.boardHash}, '
+        'move_resolved boardHash mismatch: expected $boardHash, '
         'computed $localHash',
       );
     }
@@ -374,6 +375,29 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   }
 
   void _applyMoveResolved(MoveResolvedDto dto) {
+    // Update active player from move_resolved (replaces turn_changed).
+    if (dto.activePlayerId != null) {
+      _activePlayerId = dto.activePlayerId;
+    }
+
+    if (dto.isSkill) {
+      // Skill activation — no board animation, just update states and notice.
+      setState(() {
+        _acceptPlayerStates(dto.playerStates);
+        _pendingMove = false;
+        _selected = null;
+        final name = _skillDisplayName(dto.skillId ?? '');
+        final parts = <String>[];
+        if ((dto.damageDealt ?? 0) > 0) parts.add('${dto.damageDealt} dmg');
+        if ((dto.healedAmount ?? 0) > 0) parts.add('+${dto.healedAmount} HP');
+        final suffix = parts.isNotEmpty ? ': ${parts.join(", ")}' : '';
+        _notice = '$name$suffix activated';
+      });
+      _syncStaminaTicker();
+      return;
+    }
+
+    // Normal move — re-derive resolution locally and animate.
     late final MoveResolution resolution;
     try {
       resolution = _resolutionFromResolved(dto);
@@ -392,17 +416,28 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       );
       return;
     }
+
+    final earned = dto.extraTurnsEarned ?? resolution.extraTurnsEarned;
+    _extraTurnsRemaining =
+        (_extraTurnsRemaining - 1).clamp(0, 9999) + earned;
+
     final animation = _animationFromResolution(dto, resolution);
     setState(() {
       _board = resolution.finalBoard;
       _boardAnimation = animation;
       _boardAnimating = true;
-      _boardVersion = dto.boardVersion;
+      if (dto.boardVersion != null) _boardVersion = dto.boardVersion;
       _acceptPlayerStates(dto.playerStates);
       _pendingMove = false;
       _selected = null;
-      _notice =
-          resolution.fizzle && dto.playerId == _myPlayerId ? 'No match' : null;
+      if (earned > 0 && dto.playerId == _myPlayerId) {
+        _notice = 'Extra turn!';
+      } else if (earned > 0) {
+        _notice = 'Opponent extra turn!';
+      } else {
+        _notice =
+            resolution.fizzle && dto.playerId == _myPlayerId ? 'No match' : null;
+      }
     });
     _syncStaminaTicker();
   }
@@ -413,7 +448,12 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _applyMoveResolved(_queuedResolvedMoves.removeFirst());
       return;
     }
-    setState(() => _boardAnimating = false);
+    setState(() {
+      _boardAnimating = false;
+      if (_extraTurnsRemaining > 0 && _isMyTurn) {
+        _notice = 'Extra turn! ($_extraTurnsRemaining remaining)';
+      }
+    });
   }
 
   BoardMoveAnimation _animationFromResolution(
@@ -422,10 +462,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   ) {
     return BoardMoveAnimation(
       id: ++_boardAnimationId,
-      r1: dto.r1,
-      c1: dto.c1,
-      r2: dto.r2,
-      c2: dto.c2,
+      r1: dto.r1!,
+      c1: dto.c1!,
+      r2: dto.r2!,
+      c2: dto.c2!,
       finalBoard: resolution.finalBoard,
       revert: resolution.fizzle,
       steps: [

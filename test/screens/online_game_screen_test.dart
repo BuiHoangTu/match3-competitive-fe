@@ -522,7 +522,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 10));
 
     final payload = Map<String, dynamic>.from(_payload('move_resolved'))
-      ..['playerId'] = 'player-b';
+      ..['playerId'] = 'player-b'
+      ..['extraTurnsEarned'] = 0;
     fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
     await tester.pump(const Duration(milliseconds: 10));
 

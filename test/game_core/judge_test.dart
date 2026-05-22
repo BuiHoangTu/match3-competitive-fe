@@ -84,6 +84,85 @@ void main() {
     expect(result.finalBoard.tiles, board.tiles);
   });
 
+  test('extraTurnsFromMatches counts 4+ horizontal lines', () {
+    final match = MatchGroup([
+      const BoardPosition(2, 1),
+      const BoardPosition(2, 2),
+      const BoardPosition(2, 3),
+      const BoardPosition(2, 4),
+    ]);
+    expect(extraTurnsFromMatches([match]), 1);
+  });
+
+  test('extraTurnsFromMatches counts 4+ vertical lines', () {
+    final match = MatchGroup([
+      const BoardPosition(0, 3),
+      const BoardPosition(1, 3),
+      const BoardPosition(2, 3),
+      const BoardPosition(3, 3),
+    ]);
+    expect(extraTurnsFromMatches([match]), 1);
+  });
+
+  test('extraTurnsFromMatches returns 0 for 3-match', () {
+    final match = MatchGroup([
+      const BoardPosition(2, 1),
+      const BoardPosition(2, 2),
+      const BoardPosition(2, 3),
+    ]);
+    expect(extraTurnsFromMatches([match]), 0);
+  });
+
+  test('resolveBoard with 4-match earns 1 extra turn', () {
+    const judge = LocalJudge();
+    // Board already has a 4-in-a-row at row 0: [1, 1, 1, 1, 2]
+    final board = GameBoard.fromRows([
+      [1, 1, 1, 1, 2],
+      [3, 4, 0, 3, 4],
+      [4, 0, 3, 4, 0],
+      [0, 3, 4, 0, 3],
+      [3, 4, 0, 3, 4],
+    ]);
+    final matches = judge.findMatches(board);
+    expect(matches.length, greaterThanOrEqualTo(1),
+        reason: 'Board should have at least 1 match (4-in-a-row at row 0)');
+
+    final result = judge.resolveBoard(
+      board: board,
+      generator: SequenceTileGenerator([5, 5, 5, 5, 5, 5, 5, 5, 5, 5]),
+    );
+    expect(result.accepted, true);
+    expect(result.extraTurnsEarned, greaterThanOrEqualTo(1),
+        reason: 'A 4-in-a-row match should earn at least 1 extra turn. '
+            'matches: ${result.steps.map((s) => s.matches.length).toList()}, '
+            'extraTurnsEarned: ${result.extraTurnsEarned}');
+  });
+
+  test('resolveSwap with 4-match earns 1 extra turn', () {
+    const judge = LocalJudge();
+    // Swap (0,3)↔(0,4) creates [1,1,1,1,2] at row 0 → 4-match
+    final board = GameBoard.fromRows([
+      [1, 1, 1, 2, 1],
+      [3, 4, 0, 3, 4],
+      [4, 0, 3, 4, 0],
+      [0, 3, 4, 0, 3],
+      [3, 4, 0, 3, 4],
+    ]);
+    final result = judge.resolveSwap(
+      board: board,
+      r1: 0,
+      c1: 3,
+      r2: 0,
+      c2: 4,
+      generator: SequenceTileGenerator([5, 5, 5, 5, 5, 5, 5, 5, 5, 5]),
+    );
+    expect(result.accepted, true);
+    expect(result.fizzle, false);
+    expect(result.extraTurnsEarned, greaterThanOrEqualTo(1),
+        reason: 'A 4-in-a-row match should earn at least 1 extra turn. '
+            'extraTurnsEarned: ${result.extraTurnsEarned}');
+  });
+
   test('replaceBoardWithLegalMove creates a playable board', () {
     final replacement = replaceBoardWithLegalMove(
       generator: SequenceTileGenerator([0, 1, 2, 3, 4, 2, 1, 0]),
