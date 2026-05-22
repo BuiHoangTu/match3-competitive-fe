@@ -56,6 +56,7 @@ class MoveResolution {
     required this.finalBoard,
     required this.steps,
     required this.scoreDelta,
+    this.extraTurnsEarned = 0,
   });
 
   final bool accepted;
@@ -63,6 +64,28 @@ class MoveResolution {
   final GameBoard finalBoard;
   final List<CascadeStep> steps;
   final int scoreDelta;
+  final int extraTurnsEarned;
+}
+
+/// Count extra turns from 4+ match lines across all matches.
+/// Each row or column with 4+ cells in a single MatchGroup contributes +1.
+int extraTurnsFromMatches(List<MatchGroup> matches) {
+  var extra = 0;
+  for (final match in matches) {
+    final byRow = <int, int>{};
+    final byCol = <int, int>{};
+    for (final cell in match.cells) {
+      byRow[cell.row] = (byRow[cell.row] ?? 0) + 1;
+      byCol[cell.col] = (byCol[cell.col] ?? 0) + 1;
+    }
+    for (final count in byRow.values) {
+      if (count >= 4) extra += 1;
+    }
+    for (final count in byCol.values) {
+      if (count >= 4) extra += 1;
+    }
+  }
+  return extra;
 }
 
 class LocalJudge {
@@ -160,12 +183,16 @@ class LocalJudge {
       current = refill.board;
     }
 
+    final allMatches = steps.expand((step) => step.matches).toList();
+    final extraTurns = extraTurnsFromMatches(allMatches);
+
     return MoveResolution(
       accepted: true,
       fizzle: false,
       finalBoard: current,
       steps: List.unmodifiable(steps),
       scoreDelta: score,
+      extraTurnsEarned: extraTurns,
     );
   }
 

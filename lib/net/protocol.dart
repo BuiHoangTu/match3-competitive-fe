@@ -150,40 +150,67 @@ class BoardReplacedDto extends FlatBoardDto {
 
 class MoveResolvedDto {
   const MoveResolvedDto({
-    required this.boardVersion,
+    this.moveType,
     required this.playerId,
-    required this.r1,
-    required this.c1,
-    required this.r2,
-    required this.c2,
-    required this.generatedTiles,
+    this.activePlayerId,
+    this.extraTurnsEarned,
+    this.boardVersion,
+    this.r1,
+    this.c1,
+    this.r2,
+    this.c2,
+    this.generatedTiles,
     required this.playerStates,
-    required this.boardHash,
+    this.boardHash,
+    this.skillId,
+    this.damageDealt,
+    this.healedAmount,
   });
 
-  final int boardVersion;
+  /// "normal" for board moves, "skill" for skill activations.
+  final String? moveType;
   final String playerId;
-  final int r1;
-  final int c1;
-  final int r2;
-  final int c2;
-  final List<int> generatedTiles;
+  /// Whose turn it is after this resolution. Replaces turn_changed.
+  final String? activePlayerId;
+  /// Number of 4+ match lines earned this resolution.
+  final int? extraTurnsEarned;
+  final int? boardVersion;
+  final int? r1;
+  final int? c1;
+  final int? r2;
+  final int? c2;
+  final List<int>? generatedTiles;
   final Map<String, PlayerStateDto> playerStates;
-  final String boardHash;
+  final String? boardHash;
+  // Skill-specific fields
+  final String? skillId;
+  final int? damageDealt;
+  final int? healedAmount;
+
+  bool get isSkill => moveType == 'skill';
+  bool get isNormal => moveType != 'skill';
 
   factory MoveResolvedDto.fromJson(Map<String, dynamic> json) {
-    final generatedTiles = _readIntList(json, 'generatedTiles');
+    final gt = json['generatedTiles'];
+    final List<int>? generatedTiles =
+        gt is List ? gt.cast<int>() : null;
 
     return MoveResolvedDto(
-      boardVersion: _readInt(json, 'boardVersion'),
+      moveType: json['moveType'] as String?,
       playerId: json['playerId'] as String,
-      r1: _readInt(json, 'r1'),
-      c1: _readInt(json, 'c1'),
-      r2: _readInt(json, 'r2'),
-      c2: _readInt(json, 'c2'),
+      activePlayerId: json['activePlayerId'] as String?,
+      extraTurnsEarned: json['extraTurnsEarned'] as int?,
+      boardVersion: json['boardVersion'] as int?,
+      r1: json['r1'] as int?,
+      c1: json['c1'] as int?,
+      r2: json['r2'] as int?,
+      c2: json['c2'] as int?,
       generatedTiles: generatedTiles,
       playerStates: _parsePlayerStates(json['playerStates']),
-      boardHash: json['boardHash'] as String,
+      boardHash: json['boardHash'] as String?,
+      skillId: json['skillId'] as String?,
+      damageDealt: json['damageDealt'] as int?,
+      healedAmount: json['healedAmount'] as int?,
     );
   }
 }
