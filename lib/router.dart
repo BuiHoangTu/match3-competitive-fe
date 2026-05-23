@@ -25,14 +25,16 @@
 //   MediaQuery.disableAnimations is true, otherwise [MaterialPage].
 //   Shell-side transitions (page route animations) become instant.
 
-import 'dart:async' show StreamSubscription, unawaited;
+import 'dart:async' show Completer, StreamSubscription, unawaited;
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'errors/matchmaking_errors.dart';
 import 'models/user_profile.dart';
 import 'net/board_delta_socket_client.dart';
+import 'net/matchmaking_socket_client.dart';
 import 'screens/account_screen.dart';
 import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
@@ -70,10 +72,18 @@ class _OnlineMatchLaunch {
   const _OnlineMatchLaunch({
     required this.characterId,
     this.resumeRoomId,
+    this.roomToken,
+    this.roomTokenExpiresAt,
   });
 
   final String characterId;
   final String? resumeRoomId;
+  final String? roomToken;
+  final int? roomTokenExpiresAt;
+}
+
+class _PvpQueueCancelled implements Exception {
+  const _PvpQueueCancelled();
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +262,145 @@ GoRouter createRouter({
     }
   }
 
+  Future<void> launchQueuedPvp(
+    BuildContext ctx, {
+    required void Function(VoidCallback? cancel) onCancelReady,
+  }) async {
+    final tok = auth.sessionToken;
+    if (tok == null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Please sign in first')),
+      );
+      return;
+    }
+
+    final characterId =
+        await characterPreference.getDefaultCharacter() ?? 'cat';
+    if (!ctx.mounted) return;
+
+    final completer = Completer<_OnlineMatchLaunch>();
+    unawaited(completer.future.then<void>((_) {}, onError: (_, __) {}));
+    final mmSocket = MatchmakingSocketClient(
+      serverUrl: backendUrl,
+      sessionToken: tok,
+    );
+    final subs = <StreamSubscription<dynamic>>[];
+    var cleanedUp = false;
+
+    void cleanup() {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      onCancelReady(null);
+      for (final sub in subs) {
+        unawaited(sub.cancel());
+      }
+      mmSocket.dispose();
+    }
+
+    void completeError(Object error) {
+      if (!completer.isCompleted) completer.completeError(error);
+    }
+
+    onCancelReady(() {
+      mmSocket.cancel();
+      completeError(const _PvpQueueCancelled());
+    });
+
+    subs
+      ..add(mmSocket.matchReady.listen((event) {
+        mmSocket.confirmCharacter(characterId);
+      }))
+      ..add(mmSocket.matchConfirmed.listen((event) {
+        if (completer.isCompleted) return;
+        completer.complete(
+          _OnlineMatchLaunch(
+            characterId: characterId,
+            resumeRoomId: event.roomId,
+            roomToken: event.roomToken,
+            roomTokenExpiresAt: event.expiresAt,
+          ),
+        );
+      }))
+      ..add(mmSocket.matchCancelled.listen((_) {
+        completeError(const _PvpQueueCancelled());
+      }))
+      ..add(mmSocket.matchError.listen((error) {
+        completeError(MatchmakingTransportError(error));
+      }));
+
+    try {
+      mmSocket.connect();
+      await mmSocket.connected.timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
+
+      final immediate = await mm.joinQueue(
+        sessionToken: tok,
+        mode: MatchmakingMode.turnBased,
+        characterId: characterId,
+      );
+      if (immediate != null &&
+          immediate.reconnected &&
+          !completer.isCompleted) {
+        completer.complete(
+          _OnlineMatchLaunch(
+            characterId: characterId,
+            roomToken: immediate.roomToken,
+            roomTokenExpiresAt: immediate.expiresAt,
+          ),
+        );
+      } else if (immediate != null) {
+        developer.log(
+          'Ignoring immediate PvP join response; waiting for socket confirmation',
+          name: 'router',
+        );
+      }
+
+      final launch = await completer.future;
+      cleanup();
+      if (!ctx.mounted) return;
+      ctx.goNamed(Routes.pvp, extra: launch);
+    } on _PvpQueueCancelled {
+      cleanup();
+    } on MatchmakingActiveRoom catch (e) {
+      cleanup();
+      if (!ctx.mounted) return;
+      ctx.goNamed(
+        Routes.pvp,
+        extra: _OnlineMatchLaunch(
+          characterId: characterId,
+          resumeRoomId: e.roomId,
+        ),
+      );
+    } on MatchmakingAuthRejected {
+      cleanup();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Please sign in again.')),
+      );
+    } on MatchmakingAccountInUse catch (e) {
+      cleanup();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } on MatchmakingError catch (e) {
+      cleanup();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text('Matchmaking failed: ${e.message}')),
+      );
+    } catch (e) {
+      cleanup();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(content: Text('Matchmaking failed: $e')),
+      );
+    }
+  }
+
+  VoidCallback? activePvpQueueCancel;
+
   return GoRouter(
     initialLocation: auth.isSignedIn ? '/home' : '/sign-in',
     refreshListenable: auth is Listenable ? auth as Listenable : null,
@@ -385,8 +534,11 @@ GoRouter createRouter({
                   context.goNamed(Routes.characterSelect, extra: 'solo'),
               onVsBotPressed: () async =>
                   context.goNamed(Routes.characterSelect, extra: 'pve'),
-              onVsHumanPressed: () async =>
-                  context.goNamed(Routes.pvp),
+              onVsHumanPressed: () => launchQueuedPvp(
+                context,
+                onCancelReady: (cancel) => activePvpQueueCancel = cancel,
+              ),
+              onVsHumanQueueCancel: () => activePvpQueueCancel?.call(),
               onAccountPressed: () => context.goNamed(Routes.account),
               onAutoResumeCheck: autoResumeCheck,
               onAutoResumeModeLaunch: (mode) => launchGame(
@@ -525,6 +677,10 @@ GoRouter createRouter({
               : extra as String?;
           final resumeRoomId =
               extra is _OnlineMatchLaunch ? extra.resumeRoomId : null;
+          final roomToken =
+              extra is _OnlineMatchLaunch ? extra.roomToken : null;
+          final roomTokenExpiresAt =
+              extra is _OnlineMatchLaunch ? extra.roomTokenExpiresAt : null;
           return _buildPage(
             context,
             state,
@@ -536,6 +692,8 @@ GoRouter createRouter({
               onLeave: () => context.goNamed(Routes.home),
               characterId: characterId,
               resumeRoomId: resumeRoomId,
+              roomToken: roomToken,
+              roomTokenExpiresAt: roomTokenExpiresAt,
             ),
           );
         },

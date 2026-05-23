@@ -21,6 +21,7 @@ Widget _buildSubject({
   Future<void> Function()? onPractice,
   Future<void> Function()? onVsBot,
   Future<void> Function()? onVsHuman,
+  VoidCallback? onVsHumanCancel,
 }) {
   return MaterialApp(
     home: HomeScreen(
@@ -29,28 +30,38 @@ Widget _buildSubject({
       onPracticePressed: onPractice ?? () async {},
       onVsBotPressed: onVsBot ?? () async {},
       onVsHumanPressed: onVsHuman ?? () async {},
+      onVsHumanQueueCancel: onVsHumanCancel,
     ),
   );
 }
 
 void main() {
   group('HomeScreen — matchmaking idempotency (T-...)', () {
-    testWidgets('vs Human shows the searching dialog while launching',
+    testWidgets('vs Human shows the floating queue panel while launching',
         (tester) async {
       // Hold the launch open with a Completer so we can inspect mid-launch UI.
       final completer = Completer<void>();
+      var launchStarted = false;
       await tester.pumpWidget(
-        _buildSubject(onVsHuman: () => completer.future),
+        _buildSubject(onVsHuman: () {
+          launchStarted = true;
+          return completer.future;
+        }),
       );
 
       // Tap the vs Human button.
       await tester.tap(find.byKey(const Key('vs_human_button')));
       await tester.pump(); // start the launch
-      await tester.pump(); // build the dialog
+      await tester.pump(); // build the queue panel
 
-      // Searching dialog is visible.
-      expect(find.byKey(const Key('matchmaking_dialog')), findsOneWidget);
-      expect(find.text('Searching for match…'), findsOneWidget);
+      // Floating queue panel is visible and Home remains on screen.
+      expect(find.byKey(const Key('pvp_queue_panel')), findsOneWidget);
+      expect(find.text('Queuing for vs Human'), findsOneWidget);
+      expect(find.text('Choose a mode'), findsOneWidget);
+      expect(launchStarted, true);
+
+      // The queue panel gets a frame before the router can navigate.
+      expect(find.byKey(const Key('matchmaking_dialog')), findsNothing);
 
       // Wrap up so the test doesn't leak a pending future.
       completer.complete();
@@ -85,7 +96,8 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('dialog is dismissed and buttons re-enabled after launch resolves',
+    testWidgets(
+        'queue panel is dismissed and buttons re-enabled after launch resolves',
         (tester) async {
       final completer = Completer<void>();
       await tester.pumpWidget(
@@ -95,13 +107,13 @@ void main() {
       await tester.tap(find.byKey(const Key('vs_human_button')));
       await tester.pump();
       await tester.pump();
-      expect(find.byKey(const Key('matchmaking_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('pvp_queue_panel')), findsOneWidget);
 
-      // Resolve the launch — the dialog should disappear.
+      // Resolve the launch — the panel should disappear.
       completer.complete();
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('matchmaking_dialog')), findsNothing);
+      expect(find.byKey(const Key('pvp_queue_panel')), findsNothing);
 
       // After the launch finishes, re-tapping should fire again (button no
       // longer disabled, _launching reset).
@@ -115,14 +127,14 @@ void main() {
     });
 
     testWidgets(
-        'dialog is dismissed when the launch future completes with an error',
+        'queue panel is dismissed when the launch future completes with an error',
         (tester) async {
       // Production launch handlers wrap their own try/catch (the shell's
       // error reporter handles surfaces like network failures). What
-      // matters here is that _runLaunch's `finally` closes the dialog and
+      // matters here is that _runPvpLaunch's `finally` closes the panel and
       // re-enables the buttons regardless of how `launch()` settled. We
       // model the post-error state by having the launch swallow internally
-      // before returning, then verify the dialog has been dismissed and a
+      // before returning, then verify the panel has been dismissed and a
       // subsequent tap can launch again.
       Future<void> wrappingLaunch() async {
         try {
@@ -138,12 +150,12 @@ void main() {
       await tester.tap(find.byKey(const Key('vs_human_button')));
       await tester.pump();
       await tester.pump();
-      expect(find.byKey(const Key('matchmaking_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('pvp_queue_panel')), findsOneWidget);
 
       // Pump until wrappingLaunch resolves and finally runs.
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('matchmaking_dialog')), findsNothing);
+      expect(find.byKey(const Key('pvp_queue_panel')), findsNothing);
 
       // Buttons re-enabled: a second tap fires the handler again.
       var second = 0;
@@ -188,6 +200,128 @@ void main() {
       // PvP-specific copy must NOT leak into the vs-Bot path.
       expect(find.text('Searching for match…'), findsNothing);
       expect(find.text('Finding bot opponent…'), findsOneWidget);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('outside tap shrinks PvP queue panel into elapsed-time bubble',
+        (tester) async {
+      final completer = Completer<void>();
+      await tester.pumpWidget(
+        _buildSubject(onVsHuman: () => completer.future),
+      );
+
+      await tester.tap(find.byKey(const Key('vs_human_button')));
+      await tester.pump();
+      expect(find.byKey(const Key('pvp_queue_panel')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pvp_queue_outside_tap_area')));
+      await tester.pump();
+
+      expect(find.byKey(const Key('pvp_queue_panel')), findsNothing);
+      expect(find.byKey(const Key('pvp_queue_bubble')), findsOneWidget);
+      expect(find.text('Queuing for vs Human'), findsNothing);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('shrink button collapses PvP queue panel into time circle',
+        (tester) async {
+      final completer = Completer<void>();
+      await tester.pumpWidget(
+        _buildSubject(onVsHuman: () => completer.future),
+      );
+
+      await tester.tap(find.byKey(const Key('vs_human_button')));
+      await tester.pump();
+      expect(find.byKey(const Key('pvp_queue_panel')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pvp_queue_shrink')));
+      await tester.pump();
+
+      expect(find.byKey(const Key('pvp_queue_panel')), findsNothing);
+      expect(find.byKey(const Key('pvp_queue_bubble')), findsOneWidget);
+      expect(find.text('00:00'), findsOneWidget);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('queue timer keeps counting across shrink and expand',
+        (tester) async {
+      final completer = Completer<void>();
+      await tester.pumpWidget(
+        _buildSubject(onVsHuman: () => completer.future),
+      );
+
+      await tester.tap(find.byKey(const Key('vs_human_button')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('Waiting 00:02'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pvp_queue_shrink')));
+      await tester.pump();
+      expect(find.text('00:02'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('00:03'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('pvp_queue_bubble')));
+      await tester.pump();
+      expect(find.text('Waiting 00:03'), findsOneWidget);
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('compact PvP queue circle is draggable', (tester) async {
+      final completer = Completer<void>();
+      await tester.pumpWidget(
+        _buildSubject(onVsHuman: () => completer.future),
+      );
+
+      await tester.tap(find.byKey(const Key('vs_human_button')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('pvp_queue_shrink')));
+      await tester.pump();
+
+      final before =
+          tester.getTopLeft(find.byKey(const Key('pvp_queue_bubble')));
+      await tester.drag(
+        find.byKey(const Key('pvp_queue_bubble_drag_area')),
+        const Offset(-48, -36),
+      );
+      await tester.pump();
+      final after =
+          tester.getTopLeft(find.byKey(const Key('pvp_queue_bubble')));
+
+      expect(after.dx, lessThan(before.dx));
+      expect(after.dy, lessThan(before.dy));
+
+      completer.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('cancel button hides PvP queue panel and calls cancel callback',
+        (tester) async {
+      var cancelled = false;
+      final completer = Completer<void>();
+      await tester.pumpWidget(
+        _buildSubject(
+          onVsHuman: () => completer.future,
+          onVsHumanCancel: () => cancelled = true,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('vs_human_button')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('pvp_queue_cancel')));
+      await tester.pump();
+
+      expect(cancelled, true);
+      expect(find.byKey(const Key('pvp_queue_panel')), findsNothing);
 
       completer.complete();
       await tester.pumpAndSettle();

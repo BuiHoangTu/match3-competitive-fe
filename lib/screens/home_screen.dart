@@ -11,8 +11,11 @@
 //
 // Route: /home  (see router.dart)
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
+import '../widgets/matchmaking_waiting_panel.dart';
 
 /// Home / lobby screen.
 ///
@@ -35,6 +38,7 @@ class HomeScreen extends StatefulWidget {
     required this.onVsBotPressed,
     required this.onVsHumanPressed,
     required this.onAccountPressed,
+    this.onVsHumanQueueCancel,
     this.onAutoResumeCheck,
     this.onAutoResumeModeLaunch,
   });
@@ -50,6 +54,9 @@ class HomeScreen extends StatefulWidget {
 
   /// Starts PvP matchmaking. Returns when launch completes.
   final Future<void> Function() onVsHumanPressed;
+
+  /// Cancels an in-flight PvP matchmaking request.
+  final VoidCallback? onVsHumanQueueCancel;
 
   /// Navigates to the account screen.
   final VoidCallback onAccountPressed;
@@ -72,9 +79,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const double _pvpQueueBubbleSize = 72;
+  static const double _pvpQueueBubbleMargin = 16;
+
   /// True while a launch is in flight. Subsequent taps are ignored —
   /// matchmaking is idempotent per home-screen session.
   bool _launching = false;
+  bool _pvpQueueVisible = false;
+  bool _pvpQueueExpanded = true;
+  int _pvpQueueElapsedSeconds = 0;
+  int _pvpLaunchGeneration = 0;
+  Timer? _pvpQueueTimer;
+  Offset? _pvpQueueBubbleOffset;
 
   @override
   void initState() {
@@ -106,6 +122,12 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _pvpQueueTimer?.cancel();
+    super.dispose();
   }
 
   /// Gate a launch behind [_launching] so duplicate taps no-op, and show a
@@ -158,6 +180,118 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _runPvpLaunch() async {
+    if (_launching) return;
+    final generation = ++_pvpLaunchGeneration;
+    _startPvpQueueTimer();
+    setState(() {
+      _launching = true;
+      _pvpQueueVisible = true;
+      _pvpQueueExpanded = true;
+      _pvpQueueElapsedSeconds = 0;
+      _pvpQueueBubbleOffset = null;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || generation != _pvpLaunchGeneration) return;
+
+    try {
+      await widget.onVsHumanPressed();
+    } finally {
+      if (mounted && generation == _pvpLaunchGeneration) {
+        setState(() {
+          _launching = false;
+          _pvpQueueVisible = false;
+        });
+        _stopPvpQueueTimer();
+      }
+    }
+  }
+
+  void _cancelPvpLaunch() {
+    if (!_pvpQueueVisible) return;
+    _pvpLaunchGeneration++;
+    widget.onVsHumanQueueCancel?.call();
+    setState(() {
+      _launching = false;
+      _pvpQueueVisible = false;
+    });
+    _stopPvpQueueTimer();
+  }
+
+  void _startPvpQueueTimer() {
+    _pvpQueueTimer?.cancel();
+    _pvpQueueTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _pvpQueueElapsedSeconds++);
+    });
+  }
+
+  void _stopPvpQueueTimer() {
+    _pvpQueueTimer?.cancel();
+    _pvpQueueTimer = null;
+  }
+
+  void _shrinkPvpQueuePanel() {
+    if (!_pvpQueueVisible || !_pvpQueueExpanded) return;
+    setState(() {
+      _pvpQueueExpanded = false;
+      _pvpQueueBubbleOffset ??= _defaultPvpQueueBubbleOffset(context);
+    });
+  }
+
+  void _expandPvpQueuePanel() {
+    if (!_pvpQueueVisible || _pvpQueueExpanded) return;
+    setState(() => _pvpQueueExpanded = true);
+  }
+
+  void _dragPvpQueueBubble(DragUpdateDetails details) {
+    setState(() {
+      final current =
+          _pvpQueueBubbleOffset ?? _defaultPvpQueueBubbleOffset(context);
+      _pvpQueueBubbleOffset =
+          _clampPvpQueueBubbleOffset(context, current + details.delta);
+    });
+  }
+
+  Offset _defaultPvpQueueBubbleOffset(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final padding = MediaQuery.paddingOf(context);
+    return _clampPvpQueueBubbleOffset(
+      context,
+      Offset(
+        size.width -
+            padding.right -
+            _pvpQueueBubbleMargin -
+            _pvpQueueBubbleSize,
+        size.height -
+            padding.bottom -
+            _pvpQueueBubbleMargin -
+            _pvpQueueBubbleSize,
+      ),
+    );
+  }
+
+  Offset _clampPvpQueueBubbleOffset(BuildContext context, Offset offset) {
+    final size = MediaQuery.sizeOf(context);
+    final padding = MediaQuery.paddingOf(context);
+    final minX = padding.left + _pvpQueueBubbleMargin;
+    final rawMaxX = size.width -
+        padding.right -
+        _pvpQueueBubbleMargin -
+        _pvpQueueBubbleSize;
+    final minY = padding.top + _pvpQueueBubbleMargin;
+    final rawMaxY = size.height -
+        padding.bottom -
+        _pvpQueueBubbleMargin -
+        _pvpQueueBubbleSize;
+    final maxX = rawMaxX < minX ? minX : rawMaxX;
+    final maxY = rawMaxY < minY ? minY : rawMaxY;
+    return Offset(
+      offset.dx.clamp(minX, maxX).toDouble(),
+      offset.dy.clamp(minY, maxY).toDouble(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -167,93 +301,139 @@ class _HomeScreenState extends State<HomeScreen> {
     // get 2–4 in document order.
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Match-3 Competitive'),
-          actions: [
-            FocusTraversalOrder(
-              order: const NumericFocusOrder(1),
-              child: Semantics(
-                label: 'Account settings',
-                button: true,
-                child: IconButton(
-                  key: const Key('account_button'),
-                  icon: const Icon(Icons.account_circle_outlined),
-                  tooltip: 'Account',
-                  onPressed: widget.onAccountPressed,
-                ),
-              ),
-            ),
-          ],
-        ),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // User profile header (not interactive)
-                _ProfileHeader(profile: widget.profile),
-                const SizedBox(height: 32),
-
-                Text(
-                  'Choose a mode',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Practice — focus order 2
+      child: Stack(
+        children: [
+          Scaffold(
+            appBar: AppBar(
+              title: const Text('Match-3 Competitive'),
+              actions: [
                 FocusTraversalOrder(
-                  order: const NumericFocusOrder(2),
-                  child: _ModeCard(
-                    key: const Key('practice_button'),
-                    title: 'Practice',
-                    subtitle: 'Solo play — no timer, no opponent',
-                    icon: Icons.self_improvement_rounded,
-                    enabled: !_launching,
-                    onPressed: () => _runLaunch(widget.onPracticePressed),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // vs Bot — focus order 3
-                FocusTraversalOrder(
-                  order: const NumericFocusOrder(3),
-                  child: _ModeCard(
-                    key: const Key('vs_bot_button'),
-                    title: 'vs Bot',
-                    subtitle: 'Turn-based match against the AI',
-                    icon: Icons.smart_toy_outlined,
-                    enabled: !_launching,
-                    onPressed: () => _runLaunch(
-                      widget.onVsBotPressed,
-                      dialogLabel: 'Finding bot opponent…',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // vs Human — focus order 4
-                FocusTraversalOrder(
-                  order: const NumericFocusOrder(4),
-                  child: _ModeCard(
-                    key: const Key('vs_human_button'),
-                    title: 'vs Human',
-                    subtitle: 'Online PvP — find an opponent',
-                    icon: Icons.people_alt_outlined,
-                    enabled: !_launching,
-                    onPressed: () => _runLaunch(
-                      widget.onVsHumanPressed,
-                      dialogLabel: 'Searching for match…',
+                  order: const NumericFocusOrder(1),
+                  child: Semantics(
+                    label: 'Account settings',
+                    button: true,
+                    child: IconButton(
+                      key: const Key('account_button'),
+                      icon: const Icon(Icons.account_circle_outlined),
+                      tooltip: 'Account',
+                      onPressed: widget.onAccountPressed,
                     ),
                   ),
                 ),
               ],
             ),
+            body: SafeArea(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // User profile header (not interactive)
+                    _ProfileHeader(profile: widget.profile),
+                    const SizedBox(height: 32),
+
+                    Text(
+                      'Choose a mode',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Practice — focus order 2
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(2),
+                      child: _ModeCard(
+                        key: const Key('practice_button'),
+                        title: 'Practice',
+                        subtitle: 'Solo play — no timer, no opponent',
+                        icon: Icons.self_improvement_rounded,
+                        enabled: !_launching,
+                        onPressed: () => _runLaunch(widget.onPracticePressed),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // vs Bot — focus order 3
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(3),
+                      child: _ModeCard(
+                        key: const Key('vs_bot_button'),
+                        title: 'vs Bot',
+                        subtitle: 'Turn-based match against the AI',
+                        icon: Icons.smart_toy_outlined,
+                        enabled: !_launching,
+                        onPressed: () => _runLaunch(
+                          widget.onVsBotPressed,
+                          dialogLabel: 'Finding bot opponent…',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // vs Human — focus order 4
+                    FocusTraversalOrder(
+                      order: const NumericFocusOrder(4),
+                      child: _ModeCard(
+                        key: const Key('vs_human_button'),
+                        title: 'vs Human',
+                        subtitle: 'Online PvP — find an opponent',
+                        icon: Icons.people_alt_outlined,
+                        enabled: !_launching,
+                        onPressed: _runPvpLaunch,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
+          if (_pvpQueueVisible && _pvpQueueExpanded)
+            Positioned.fill(
+              child: GestureDetector(
+                key: const Key('pvp_queue_outside_tap_area'),
+                behavior: HitTestBehavior.translucent,
+                onTap: _shrinkPvpQueuePanel,
+              ),
+            ),
+          if (_pvpQueueVisible && _pvpQueueExpanded)
+            Positioned(
+              right: 12,
+              bottom: 18,
+              child: SafeArea(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 340),
+                  child: MatchmakingWaitingPanel(
+                    modeLabel: 'vs Human',
+                    elapsedSeconds: _pvpQueueElapsedSeconds,
+                    onShrink: _shrinkPvpQueuePanel,
+                    onCancel: _cancelPvpLaunch,
+                  ),
+                ),
+              ),
+            ),
+          if (_pvpQueueVisible && !_pvpQueueExpanded)
+            Positioned(
+              left: (_pvpQueueBubbleOffset ??
+                      _defaultPvpQueueBubbleOffset(context))
+                  .dx,
+              top: (_pvpQueueBubbleOffset ??
+                      _defaultPvpQueueBubbleOffset(context))
+                  .dy,
+              child: GestureDetector(
+                key: const Key('pvp_queue_bubble_drag_area'),
+                onPanUpdate: _dragPvpQueueBubble,
+                child: MatchmakingWaitingPanel(
+                  modeLabel: 'vs Human',
+                  compact: true,
+                  elapsedSeconds: _pvpQueueElapsedSeconds,
+                  onExpand: _expandPvpQueuePanel,
+                  onCancel: _cancelPvpLaunch,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -28,6 +28,8 @@ class PvpScreen extends StatefulWidget {
     required this.onLeave,
     this.resumeRoomId,
     this.characterId,
+    this.roomToken,
+    this.roomTokenExpiresAt,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
   });
 
@@ -37,6 +39,8 @@ class PvpScreen extends StatefulWidget {
   final VoidCallback onLeave;
   final String? resumeRoomId;
   final String? characterId;
+  final String? roomToken;
+  final int? roomTokenExpiresAt;
   final BoardDeltaConnectionFactory connectionFactory;
 
   @override
@@ -64,7 +68,12 @@ class _PvpScreenState extends State<PvpScreen> {
     super.initState();
     _characterId = widget.characterId;
 
-    if (widget.resumeRoomId != null) {
+    if (widget.roomToken != null && widget.roomToken!.isNotEmpty) {
+      _roomToken = widget.roomToken;
+      _roomTokenExpiresAt = widget.roomTokenExpiresAt;
+      _roomId = widget.resumeRoomId;
+      _phase = _PvpPhase.playing;
+    } else if (widget.resumeRoomId != null) {
       // Reconnecting to an existing match — skip to playing.
       _roomId = widget.resumeRoomId;
       _phase = _PvpPhase.playing;
@@ -115,32 +124,7 @@ class _PvpScreenState extends State<PvpScreen> {
       sessionToken: widget.sessionToken,
     );
 
-    _matchReadySub = _mmSocket!.matchReady.listen((event) {
-      if (!mounted) return;
-      setState(() => _phase = _PvpPhase.selecting);
-    });
-
-    _matchConfirmedSub = _mmSocket!.matchConfirmed.listen((event) {
-      if (!mounted) return;
-      setState(() {
-        _roomToken = event.roomToken;
-        _roomTokenExpiresAt = event.expiresAt;
-        _roomId = event.roomId;
-        _phase = _PvpPhase.playing;
-      });
-    });
-
-    _matchCancelledSub = _mmSocket!.matchCancelled.listen((_) {
-      // Already handled by cancel button.
-    });
-
-    _matchErrorSub = _mmSocket!.matchError.listen((error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Matchmaking error: $error')),
-      );
-    });
-
+    _listenMatchmakingSocket();
     _mmSocket!.connect();
 
     // Fire HTTP join (non-blocking). Server will emit match_ready via socket.
@@ -162,6 +146,37 @@ class _PvpScreenState extends State<PvpScreen> {
     }).catchError((err) {
       // ALREADY_QUEUED or other error — socket will handle the flow.
       debugPrint('Matchmaking join: $err');
+    });
+  }
+
+  void _listenMatchmakingSocket() {
+    final socket = _mmSocket;
+    if (socket == null) return;
+
+    _matchReadySub = socket.matchReady.listen((event) {
+      if (!mounted) return;
+      setState(() => _phase = _PvpPhase.selecting);
+    });
+
+    _matchConfirmedSub = socket.matchConfirmed.listen((event) {
+      if (!mounted) return;
+      setState(() {
+        _roomToken = event.roomToken;
+        _roomTokenExpiresAt = event.expiresAt;
+        _roomId = event.roomId;
+        _phase = _PvpPhase.playing;
+      });
+    });
+
+    _matchCancelledSub = socket.matchCancelled.listen((_) {
+      // Already handled by cancel button.
+    });
+
+    _matchErrorSub = socket.matchError.listen((error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Matchmaking error: $error')),
+      );
     });
   }
 

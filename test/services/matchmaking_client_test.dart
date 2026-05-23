@@ -107,6 +107,16 @@ void main() {
       expect(result.reconnected, true);
     });
 
+    test('joinQueue returns null when server accepts queue entry', () async {
+      final stub = _Stub(status: 200, body: {'queued': true});
+      final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);
+      final result = await client.joinQueue(
+        sessionToken: 'session-alice',
+        mode: MatchmakingMode.turnBased,
+      );
+      expect(result, isNull);
+    });
+
     test('401 throws MatchmakingAuthRejected', () async {
       final stub = _Stub(status: 401, body: {'code': 'AUTH_INVALID_TOKEN'});
       final client = MatchmakingClient(baseUrl: baseUrl, postFn: stub.call);

@@ -101,6 +101,25 @@ class MatchmakingClient {
     String characterId = 'cat',
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/join');
+    return (await _send(
+      uri: uri,
+      sessionToken: sessionToken,
+      body: {
+        'mode': mode.wire,
+        'characterId': characterId,
+      },
+    ))!;
+  }
+
+  /// Enqueue for matchmaking. Returns null when the server accepted the user
+  /// into the queue and will deliver match readiness over the matchmaking
+  /// socket. Older/blocking servers may still return a [MatchmakingResult].
+  Future<MatchmakingResult?> joinQueue({
+    required String sessionToken,
+    required MatchmakingMode mode,
+    String characterId = 'cat',
+  }) async {
+    final uri = Uri.parse('$baseUrl/matchmaking/join');
     return _send(
       uri: uri,
       sessionToken: sessionToken,
@@ -108,6 +127,7 @@ class MatchmakingClient {
         'mode': mode.wire,
         'characterId': characterId,
       },
+      allowQueued: true,
     );
   }
 
@@ -121,11 +141,11 @@ class MatchmakingClient {
     required String roomId,
   }) async {
     final uri = Uri.parse('$baseUrl/matchmaking/resume');
-    return _send(
+    return (await _send(
       uri: uri,
       sessionToken: sessionToken,
       body: {'roomId': roomId},
-    );
+    ))!;
   }
 
   /// GET /matchmaking/status — query the backend for the user's currently
@@ -185,10 +205,11 @@ class MatchmakingClient {
     }
   }
 
-  Future<MatchmakingResult> _send({
+  Future<MatchmakingResult?> _send({
     required Uri uri,
     required String sessionToken,
     required Map<String, Object?> body,
+    bool allowQueued = false,
   }) async {
     late http.Response response;
     try {
@@ -217,6 +238,9 @@ class MatchmakingClient {
     switch (response.statusCode) {
       case 200:
       case 201:
+        if (allowQueued && decoded['queued'] == true) {
+          return null;
+        }
         try {
           return MatchmakingResult.fromJson(decoded);
         } catch (e) {

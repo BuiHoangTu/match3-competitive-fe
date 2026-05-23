@@ -70,11 +70,13 @@ class MatchmakingSocketClient {
   final _matchConfirmed = StreamController<MatchConfirmedEvent>.broadcast();
   final _matchCancelled = StreamController<void>.broadcast();
   final _matchError = StreamController<String>.broadcast();
+  final _connected = Completer<void>();
 
   Stream<MatchReadyEvent> get matchReady => _matchReady.stream;
   Stream<MatchConfirmedEvent> get matchConfirmed => _matchConfirmed.stream;
   Stream<void> get matchCancelled => _matchCancelled.stream;
   Stream<String> get matchError => _matchError.stream;
+  Future<void> get connected => _connected.future;
 
   void connect() => _socket.connect();
 
@@ -95,6 +97,10 @@ class MatchmakingSocketClient {
   }
 
   void _wireEvents() {
+    _socket.on('connect', (_) {
+      if (!_connected.isCompleted) _connected.complete();
+    });
+
     _socket.on('match_ready', (data) {
       if (data is Map) {
         _matchReady.add(MatchReadyEvent(
@@ -119,9 +125,8 @@ class MatchmakingSocketClient {
     });
 
     _socket.on('matchmaking_error', (data) {
-      final reason = data is Map
-          ? data['reason']?.toString() ?? 'unknown'
-          : 'unknown';
+      final reason =
+          data is Map ? data['reason']?.toString() ?? 'unknown' : 'unknown';
       _matchError.add(reason);
     });
 
