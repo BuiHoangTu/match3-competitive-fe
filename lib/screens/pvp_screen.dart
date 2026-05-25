@@ -30,6 +30,7 @@ class PvpScreen extends StatefulWidget {
     this.characterId,
     this.roomToken,
     this.roomTokenExpiresAt,
+    this.awaitingCharacterSelection = false,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
   });
 
@@ -41,6 +42,7 @@ class PvpScreen extends StatefulWidget {
   final String? characterId;
   final String? roomToken;
   final int? roomTokenExpiresAt;
+  final bool awaitingCharacterSelection;
   final BoardDeltaConnectionFactory connectionFactory;
 
   @override
@@ -77,6 +79,9 @@ class _PvpScreenState extends State<PvpScreen> {
       // Reconnecting to an existing match — skip to playing.
       _roomId = widget.resumeRoomId;
       _phase = _PvpPhase.playing;
+    } else if (widget.awaitingCharacterSelection) {
+      _phase = _PvpPhase.selecting;
+      _startCharacterConfirmation();
     } else {
       _phase = _PvpPhase.statusCheck;
       _checkStatus();
@@ -178,6 +183,15 @@ class _PvpScreenState extends State<PvpScreen> {
         SnackBar(content: Text('Matchmaking error: $error')),
       );
     });
+  }
+
+  void _startCharacterConfirmation() {
+    _mmSocket = MatchmakingSocketClient(
+      serverUrl: widget.backendUrl,
+      sessionToken: widget.sessionToken,
+    );
+    _listenMatchmakingSocket();
+    _mmSocket!.connect();
   }
 
   void _cancelMatchmaking() {

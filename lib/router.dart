@@ -70,16 +70,18 @@ abstract final class Routes {
 
 class _OnlineMatchLaunch {
   const _OnlineMatchLaunch({
-    required this.characterId,
+    this.characterId,
     this.resumeRoomId,
     this.roomToken,
     this.roomTokenExpiresAt,
+    this.awaitingCharacterSelection = false,
   });
 
-  final String characterId;
+  final String? characterId;
   final String? resumeRoomId;
   final String? roomToken;
   final int? roomTokenExpiresAt;
+  final bool awaitingCharacterSelection;
 }
 
 class _PvpQueueCancelled implements Exception {
@@ -308,7 +310,10 @@ GoRouter createRouter({
 
     subs
       ..add(mmSocket.matchReady.listen((event) {
-        mmSocket.confirmCharacter(characterId);
+        if (completer.isCompleted) return;
+        completer.complete(
+          const _OnlineMatchLaunch(awaitingCharacterSelection: true),
+        );
       }))
       ..add(mmSocket.matchConfirmed.listen((event) {
         if (completer.isCompleted) return;
@@ -681,6 +686,9 @@ GoRouter createRouter({
               extra is _OnlineMatchLaunch ? extra.roomToken : null;
           final roomTokenExpiresAt =
               extra is _OnlineMatchLaunch ? extra.roomTokenExpiresAt : null;
+          final awaitingCharacterSelection = extra is _OnlineMatchLaunch
+              ? extra.awaitingCharacterSelection
+              : false;
           return _buildPage(
             context,
             state,
@@ -694,6 +702,7 @@ GoRouter createRouter({
               resumeRoomId: resumeRoomId,
               roomToken: roomToken,
               roomTokenExpiresAt: roomTokenExpiresAt,
+              awaitingCharacterSelection: awaitingCharacterSelection,
             ),
           );
         },
