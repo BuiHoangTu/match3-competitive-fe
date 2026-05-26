@@ -70,6 +70,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   bool _pendingMove = false;
   bool _loading = true;
   bool _matchCompleteReported = false;
+  bool _boardRefreshRequested = false;
   int _extraTurnsRemaining = 0;
   String _status = 'Finding opponent...';
   String? _notice;
@@ -166,6 +167,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _boardAnimation = null;
           _queuedResolvedMoves.clear();
           _boardAnimating = false;
+          _boardRefreshRequested = false;
           _loading = false;
           _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
           _notice = null;
@@ -194,8 +196,11 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _boardVersion = dto.boardVersion;
           _acceptPlayerStates(dto.playerStates);
           _pendingMove = false;
+          _boardRefreshRequested = false;
           _selected = null;
-          _notice = 'No moves available. Board swapped.';
+          _notice = dto.reason == 'desync'
+              ? 'Board resynced.'
+              : 'No moves available. Board swapped.';
         });
         _syncStaminaTicker();
       }))
@@ -361,7 +366,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         if ((dto.damageDealt ?? 0) > 0) parts.add('${dto.damageDealt} dmg');
         if ((dto.healedAmount ?? 0) > 0) parts.add('+${dto.healedAmount} HP');
         final suffix = parts.isNotEmpty ? ': ${parts.join(", ")}' : '';
-        _notice = '$name$suffix resolved';
+        _notice = _boardRefreshRequested
+            ? 'Board sync error'
+            : '$name$suffix resolved';
       });
       _syncStaminaTicker();
       return;
@@ -372,6 +379,11 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     try {
       resolution = _resolutionFromResolved(dto);
     } catch (e) {
+      _requestFullBoard(
+        reason: 'normal_move_desync',
+        clientBoardHash: dto.boardHash,
+        detail: e,
+      );
       setState(() {
         _queuedResolvedMoves.clear();
         _pendingMove = false;
@@ -450,12 +462,45 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       }
       return effect;
     } catch (e) {
+      _requestFullBoard(
+        reason: 'skill_desync',
+        clientBoardHash: dto.boardHash,
+        detail: e,
+      );
       developer.log(
         'Failed to apply skill move_resolved: $e',
         name: 'board_delta_socket',
       );
       return null;
     }
+  }
+
+  void _requestFullBoard({
+    required String reason,
+    String? clientBoardHash,
+    Object? detail,
+  }) {
+    final roomId = _roomId;
+    final connection = _connection;
+    if (roomId == null || connection == null || _boardRefreshRequested) return;
+
+    final board = _board;
+    final boardVersion = _boardVersion;
+    final computedBoardHash = board != null && boardVersion != null
+        ? _hashBoard(boardVersion, board)
+        : null;
+    _boardRefreshRequested = true;
+    connection.requestFullBoard(
+      roomId: roomId,
+      reason: reason,
+      clientBoardVersion: boardVersion,
+      clientBoardHash: clientBoardHash,
+      computedBoardHash: computedBoardHash,
+    );
+    developer.log(
+      'Requested full board after $reason: ${detail ?? ""}',
+      name: 'board_delta_socket',
+    );
   }
 
   void _handleBoardAnimationComplete() {

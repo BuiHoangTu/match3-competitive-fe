@@ -37,6 +37,7 @@ class _FakeConnection implements BoardDeltaConnection {
   bool forfeited = false;
   Map<String, Object?>? submittedMove;
   Map<String, Object?>? submittedSkill;
+  Map<String, Object?>? fullBoardRequest;
 
   @override
   Stream<BoardDeltaMatchFoundDto> get matchFound => matchFoundController.stream;
@@ -97,6 +98,23 @@ class _FakeConnection implements BoardDeltaConnection {
       'skillId': skillId,
       if (targetRow != null) 'targetRow': targetRow,
       if (targetCol != null) 'targetCol': targetCol,
+    };
+  }
+
+  @override
+  void requestFullBoard({
+    required String roomId,
+    required String reason,
+    int? clientBoardVersion,
+    String? clientBoardHash,
+    String? computedBoardHash,
+  }) {
+    fullBoardRequest = {
+      'roomId': roomId,
+      'reason': reason,
+      if (clientBoardVersion != null) 'clientBoardVersion': clientBoardVersion,
+      if (clientBoardHash != null) 'clientBoardHash': clientBoardHash,
+      if (computedBoardHash != null) 'computedBoardHash': computedBoardHash,
     };
   }
 
@@ -579,6 +597,60 @@ void main() {
     await tester.pump();
 
     expect(find.text('Board 3'), findsOneWidget);
+  });
+
+  testWidgets('online screen requests full board after hash desync',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final matchFound = _payload('match_found');
+    fake.matchFoundController.add(BoardDeltaMatchFoundDto.fromJson(matchFound));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final badResolved = Map<String, dynamic>.from(_payload('move_resolved'))
+      ..['boardHash'] = 'bad-hash';
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson(badResolved));
+    await tester.pump();
+
+    expect(fake.fullBoardRequest, containsPair('roomId', 'room-1'));
+    expect(fake.fullBoardRequest, containsPair('reason', 'normal_move_desync'));
+    expect(fake.fullBoardRequest, containsPair('clientBoardHash', 'bad-hash'));
+    expect(find.text('Board sync error'), findsOneWidget);
+
+    fake.boardReplacedController.add(BoardReplacedDto.fromJson({
+      'reason': 'desync',
+      'boardVersion': 9,
+      'board': matchFound['board'],
+      'playerStates': matchFound['playerStates'],
+    }));
+    await tester.pump();
+
+    expect(find.text('Board 9'), findsOneWidget);
+    expect(find.text('Board resynced.'), findsOneWidget);
   });
 
   testWidgets('online screen reports score-free result on game over',

@@ -34,6 +34,14 @@ abstract class BoardDeltaConnection {
     int? targetCol,
   });
 
+  void requestFullBoard({
+    required String roomId,
+    required String reason,
+    int? clientBoardVersion,
+    String? clientBoardHash,
+    String? computedBoardHash,
+  });
+
   void forfeit();
 
   void dispose();
@@ -181,6 +189,23 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     if (targetRow != null) data['targetRow'] = targetRow;
     if (targetCol != null) data['targetCol'] = targetCol;
     _socket.emit('skill', data);
+  }
+
+  @override
+  void requestFullBoard({
+    required String roomId,
+    required String reason,
+    int? clientBoardVersion,
+    String? clientBoardHash,
+    String? computedBoardHash,
+  }) {
+    _socket.emit('request_full_board', {
+      'roomId': roomId,
+      'reason': reason,
+      if (clientBoardVersion != null) 'clientBoardVersion': clientBoardVersion,
+      if (clientBoardHash != null) 'clientBoardHash': clientBoardHash,
+      if (computedBoardHash != null) 'computedBoardHash': computedBoardHash,
+    });
   }
 
   @override
