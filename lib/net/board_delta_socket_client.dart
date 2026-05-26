@@ -12,6 +12,7 @@ abstract class BoardDeltaConnection {
   Stream<BoardReplacedDto> get boardReplaced;
   Stream<TurnChangedDto> get turnChanged;
   Stream<MoveRejectedDto> get moveRejected;
+  Stream<SwapFizzledDto> get swapFizzled;
   Stream<GameOverDto> get gameOver;
   Stream<SkillResolvedDto> get skillResolved;
   Stream<SkillRejectedDto> get skillRejected;
@@ -64,6 +65,7 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
   final _boardReplaced = StreamController<BoardReplacedDto>.broadcast();
   final _turnChanged = StreamController<TurnChangedDto>.broadcast();
   final _moveRejected = StreamController<MoveRejectedDto>.broadcast();
+  final _swapFizzled = StreamController<SwapFizzledDto>.broadcast();
   final _gameOver = StreamController<GameOverDto>.broadcast();
   final _skillResolved = StreamController<SkillResolvedDto>.broadcast();
   final _skillRejected = StreamController<SkillRejectedDto>.broadcast();
@@ -83,6 +85,9 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
 
   @override
   Stream<MoveRejectedDto> get moveRejected => _moveRejected.stream;
+
+  @override
+  Stream<SwapFizzledDto> get swapFizzled => _swapFizzled.stream;
 
   @override
   Stream<GameOverDto> get gameOver => _gameOver.stream;
@@ -117,6 +122,9 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     _socket.on('move_rejected', (data) {
       _decode(
           data, (json) => _moveRejected.add(MoveRejectedDto.fromJson(json)));
+    });
+    _socket.on('swap_fizzled', (data) {
+      _decode(data, (json) => _swapFizzled.add(SwapFizzledDto.fromJson(json)));
     });
     _socket.on('game_over', (data) {
       _decode(data, (json) => _gameOver.add(GameOverDto.fromJson(json)));
@@ -195,6 +203,7 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     unawaited(_boardReplaced.close());
     unawaited(_turnChanged.close());
     unawaited(_moveRejected.close());
+    unawaited(_swapFizzled.close());
     unawaited(_gameOver.close());
     unawaited(_skillResolved.close());
     unawaited(_skillRejected.close());

@@ -146,6 +146,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   Map<String, String> _characters = const {};
   DateTime _playerStatesSyncedAt = DateTime.now();
   Timer? _staminaTicker;
+  _SkillData? _targetingSkill;
 
   @override
   void initState() {
@@ -276,6 +277,33 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _selected = null;
           _notice = dto.reason;
         });
+      }))
+      ..add(connection.swapFizzled.listen((dto) {
+        final currentBoard = _board;
+        setState(() {
+          _queuedResolvedMoves.clear();
+          _pendingMove = false;
+          _boardAnimating = currentBoard != null;
+          _boardAnimation = currentBoard == null
+              ? null
+              : BoardMoveAnimation(
+                  id: ++_boardAnimationId,
+                  r1: dto.r1,
+                  c1: dto.c1,
+                  r2: dto.r2,
+                  c2: dto.c2,
+                  finalBoard: currentBoard,
+                  revert: true,
+                  steps: const [],
+                );
+          _selected = null;
+          _targetingSkill = null;
+          _acceptPlayerStates(dto.playerStates);
+          _notice = dto.playerId == _myPlayerId
+              ? 'No match. Stamina lost.'
+              : 'Opponent fizzled.';
+        });
+        _syncStaminaTicker();
       }))
       ..add(connection.gameOver.listen((dto) {
         final result = _resultFromGameOver(dto);

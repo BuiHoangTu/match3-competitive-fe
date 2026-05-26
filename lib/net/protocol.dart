@@ -129,6 +129,33 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
   }
 }
 
+class SwapFizzledDto {
+  const SwapFizzledDto({
+    required this.playerId,
+    required this.r1,
+    required this.c1,
+    required this.r2,
+    required this.c2,
+    required this.playerStates,
+  });
+
+  final String playerId;
+  final int r1;
+  final int c1;
+  final int r2;
+  final int c2;
+  final Map<String, PlayerStateDto> playerStates;
+
+  factory SwapFizzledDto.fromJson(Map<String, dynamic> json) => SwapFizzledDto(
+        playerId: json['playerId'] as String,
+        r1: _readInt(json, 'r1'),
+        c1: _readInt(json, 'c1'),
+        r2: _readInt(json, 'r2'),
+        c2: _readInt(json, 'c2'),
+        playerStates: _parsePlayerStates(json['playerStates']),
+      );
+}
+
 class BoardReplacedDto extends FlatBoardDto {
   BoardReplacedDto({
     required super.boardVersion,

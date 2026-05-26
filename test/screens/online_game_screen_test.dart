@@ -27,6 +27,7 @@ class _FakeConnection implements BoardDeltaConnection {
       StreamController<BoardReplacedDto>.broadcast();
   final turnChangedController = StreamController<TurnChangedDto>.broadcast();
   final moveRejectedController = StreamController<MoveRejectedDto>.broadcast();
+  final swapFizzledController = StreamController<SwapFizzledDto>.broadcast();
   final gameOverController = StreamController<GameOverDto>.broadcast();
   final errorsController = StreamController<String>.broadcast();
   final skillResolvedController =
@@ -53,6 +54,9 @@ class _FakeConnection implements BoardDeltaConnection {
 
   @override
   Stream<MoveRejectedDto> get moveRejected => moveRejectedController.stream;
+
+  @override
+  Stream<SwapFizzledDto> get swapFizzled => swapFizzledController.stream;
 
   @override
   Stream<GameOverDto> get gameOver => gameOverController.stream;
@@ -111,6 +115,7 @@ class _FakeConnection implements BoardDeltaConnection {
     boardReplacedController.close();
     turnChangedController.close();
     moveRejectedController.close();
+    swapFizzledController.close();
     gameOverController.close();
     skillResolvedController.close();
     skillRejectedController.close();
@@ -629,6 +634,58 @@ void main() {
     expect(completed?.showScores, isFalse);
     expect(completed?.selfScore, 0);
     expect(completed?.opponentScore, 0);
+  });
+
+  testWidgets('online screen handles swap_fizzled broadcast', (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final matchFound = _payload('match_found');
+    fake.matchFoundController.add(BoardDeltaMatchFoundDto.fromJson(matchFound));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final playerStates = Map<String, dynamic>.from(
+      matchFound['playerStates'] as Map,
+    );
+    final states = Map<String, dynamic>.from(playerStates)
+      ..['player-a'] = {
+        ...Map<String, dynamic>.from(playerStates['player-a'] as Map),
+        'stamina': 297000,
+      };
+    fake.swapFizzledController.add(SwapFizzledDto.fromJson({
+      'playerId': 'player-a',
+      'r1': 0,
+      'c1': 0,
+      'r2': 0,
+      'c2': 1,
+      'playerStates': states,
+    }));
+    await tester.pump();
+
+    expect(find.text('No match. Stamina lost.'), findsOneWidget);
   });
 
   testWidgets('online screen submits a swap by dragging between tiles',
