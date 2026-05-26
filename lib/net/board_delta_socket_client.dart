@@ -14,7 +14,6 @@ abstract class BoardDeltaConnection {
   Stream<MoveRejectedDto> get moveRejected;
   Stream<SwapFizzledDto> get swapFizzled;
   Stream<GameOverDto> get gameOver;
-  Stream<SkillResolvedDto> get skillResolved;
   Stream<SkillRejectedDto> get skillRejected;
   Stream<String> get errors;
 
@@ -67,7 +66,6 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
   final _moveRejected = StreamController<MoveRejectedDto>.broadcast();
   final _swapFizzled = StreamController<SwapFizzledDto>.broadcast();
   final _gameOver = StreamController<GameOverDto>.broadcast();
-  final _skillResolved = StreamController<SkillResolvedDto>.broadcast();
   final _skillRejected = StreamController<SkillRejectedDto>.broadcast();
   final _errors = StreamController<String>.broadcast();
 
@@ -91,9 +89,6 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
 
   @override
   Stream<GameOverDto> get gameOver => _gameOver.stream;
-
-  @override
-  Stream<SkillResolvedDto> get skillResolved => _skillResolved.stream;
 
   @override
   Stream<SkillRejectedDto> get skillRejected => _skillRejected.stream;
@@ -128,10 +123,6 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     });
     _socket.on('game_over', (data) {
       _decode(data, (json) => _gameOver.add(GameOverDto.fromJson(json)));
-    });
-    _socket.on('skill_resolved', (data) {
-      _decode(
-          data, (json) => _skillResolved.add(SkillResolvedDto.fromJson(json)));
     });
     _socket.on('skill_rejected', (data) {
       _decode(
@@ -205,7 +196,6 @@ class SocketIoBoardDeltaConnection implements BoardDeltaConnection {
     unawaited(_moveRejected.close());
     unawaited(_swapFizzled.close());
     unawaited(_gameOver.close());
-    unawaited(_skillResolved.close());
     unawaited(_skillRejected.close());
     unawaited(_errors.close());
   }

@@ -328,10 +328,12 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         }
         setState(() => _notice = message);
       }))
-      // skillResolved is no longer emitted — skills now use move_resolved
-      // with moveType "skill". skillRejected still fires for validation.
       ..add(connection.skillRejected.listen((dto) {
-        setState(() => _notice = 'Skill failed: ${dto.reason}');
+        setState(() {
+          _pendingMove = false;
+          _targetingSkill = null;
+          _notice = 'Skill failed: ${dto.reason}';
+        });
       }));
   }
 
@@ -357,9 +359,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     if (board == null) {
       throw const FormatException('move_resolved arrived before board state');
     }
-    if (dto.r1 == null || dto.c1 == null || dto.r2 == null || dto.c2 == null) {
-      throw const FormatException('move_resolved missing swap coordinates');
-    }
+    final input = dto.normalMoveInput;
     final generatedTiles = dto.generatedTiles;
     if (generatedTiles == null) {
       throw const FormatException('move_resolved missing generatedTiles');
@@ -375,10 +375,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     final generator = TileStreamGenerator(generatedTiles);
     final resolution = const LocalJudge().resolveSwap(
       board: board,
-      r1: dto.r1!,
-      c1: dto.c1!,
-      r2: dto.r2!,
-      c2: dto.c2!,
+      r1: input.r1,
+      c1: input.c1,
+      r2: input.r2,
+      c2: input.c2,
       generator: generator,
     );
     if (generator.remaining != 0) {
@@ -416,12 +416,16 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         _acceptPlayerStates(dto.playerStates);
         _pendingMove = false;
         _selected = null;
-        final name = _skillDisplayName(dto.skillId ?? '');
+        _targetingSkill = null;
+        if (dto.turnsRemaining != null) {
+          _extraTurnsRemaining = dto.turnsRemaining!;
+        }
+        final name = _skillDisplayName(dto.skillActionId ?? '');
         final parts = <String>[];
         if ((dto.damageDealt ?? 0) > 0) parts.add('${dto.damageDealt} dmg');
         if ((dto.healedAmount ?? 0) > 0) parts.add('+${dto.healedAmount} HP');
         final suffix = parts.isNotEmpty ? ': ${parts.join(", ")}' : '';
-        _notice = '$name$suffix activated';
+        _notice = '$name$suffix resolved';
       });
       _syncStaminaTicker();
       return;
@@ -448,14 +452,15 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     }
 
     final earned = dto.extraTurnsEarned ?? resolution.extraTurnsEarned;
-    _extraTurnsRemaining =
-        (_extraTurnsRemaining - 1).clamp(0, 9999) + earned;
+    final turnsRemaining = dto.turnsRemaining ??
+        ((_extraTurnsRemaining - 1).clamp(0, 9999) + earned);
 
     final animation = _animationFromResolution(dto, resolution);
     setState(() {
       _board = resolution.finalBoard;
       _boardAnimation = animation;
       _boardAnimating = true;
+      _extraTurnsRemaining = turnsRemaining;
       if (dto.boardVersion != null) _boardVersion = dto.boardVersion;
       _acceptPlayerStates(dto.playerStates);
       _pendingMove = false;
@@ -465,8 +470,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       } else if (earned > 0) {
         _notice = 'Opponent extra turn!';
       } else {
-        _notice =
-            resolution.fizzle && dto.playerId == _myPlayerId ? 'No match' : null;
+        _notice = resolution.fizzle && dto.playerId == _myPlayerId
+            ? 'No match'
+            : null;
       }
     });
     _syncStaminaTicker();
@@ -492,10 +498,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   ) {
     return BoardMoveAnimation(
       id: ++_boardAnimationId,
-      r1: dto.r1!,
-      c1: dto.c1!,
-      r2: dto.r2!,
-      c2: dto.c2!,
+      r1: dto.normalMoveInput.r1,
+      c1: dto.normalMoveInput.c1,
+      r2: dto.normalMoveInput.r2,
+      c2: dto.normalMoveInput.c2,
       finalBoard: resolution.finalBoard,
       revert: resolution.fizzle,
       steps: [
@@ -678,16 +684,44 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
 
   void _handleSkillActivate(_SkillData skill) {
     if (!_isMyTurn || _roomId == null) return;
+    if (skill.targetingKind == 'single-tile') {
+      setState(() {
+        _targetingSkill = skill;
+        _selected = null;
+        _notice = 'Pick a tile for ${skill.name}';
+      });
+      return;
+    }
     _connection?.submitSkill(
       roomId: _roomId!,
       skillId: skill.id,
     );
+    setState(() {
+      _pendingMove = true;
+      _notice = 'Casting ${skill.name}...';
+    });
   }
 
   void _handleSelectionChanged(BoardPosition? selected) {
     if (_pendingMove || _boardAnimating) return;
     if (!_isMyTurn) {
       setState(() => _notice = 'Opponent turn');
+      return;
+    }
+    final targetingSkill = _targetingSkill;
+    if (targetingSkill != null && selected != null && _roomId != null) {
+      _connection?.submitSkill(
+        roomId: _roomId!,
+        skillId: targetingSkill.id,
+        targetRow: selected.row,
+        targetCol: selected.col,
+      );
+      setState(() {
+        _pendingMove = true;
+        _targetingSkill = null;
+        _selected = null;
+        _notice = 'Casting ${targetingSkill.name}...';
+      });
       return;
     }
     setState(() => _selected = selected);

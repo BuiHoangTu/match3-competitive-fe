@@ -31,6 +31,11 @@ void main() {
 
   test('decodes compact generatedTiles stream and boardHash', () {
     final dto = MoveResolvedDto.fromJson(_payload('move_resolved'));
+    expect(dto.type, 'normal_move');
+    expect(dto.skillId, normalMoveSkillId);
+    expect(dto.actionInput, [1, 2, 2, 2]);
+    expect(dto.normalMoveInput.c1, 1);
+    expect(dto.normalMoveInput.r1, 2);
     expect(dto.generatedTiles, [0, 1, 2, 3]);
     expect(dto.boardHash, hasLength(64));
   });

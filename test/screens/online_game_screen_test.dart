@@ -30,8 +30,6 @@ class _FakeConnection implements BoardDeltaConnection {
   final swapFizzledController = StreamController<SwapFizzledDto>.broadcast();
   final gameOverController = StreamController<GameOverDto>.broadcast();
   final errorsController = StreamController<String>.broadcast();
-  final skillResolvedController =
-      StreamController<SkillResolvedDto>.broadcast();
   final skillRejectedController =
       StreamController<SkillRejectedDto>.broadcast();
 
@@ -60,9 +58,6 @@ class _FakeConnection implements BoardDeltaConnection {
 
   @override
   Stream<GameOverDto> get gameOver => gameOverController.stream;
-
-  @override
-  Stream<SkillResolvedDto> get skillResolved => skillResolvedController.stream;
 
   @override
   Stream<SkillRejectedDto> get skillRejected => skillRejectedController.stream;
@@ -117,7 +112,6 @@ class _FakeConnection implements BoardDeltaConnection {
     moveRejectedController.close();
     swapFizzledController.close();
     gameOverController.close();
-    skillResolvedController.close();
     skillRejectedController.close();
     errorsController.close();
   }
@@ -634,6 +628,84 @@ void main() {
     expect(completed?.showScores, isFalse);
     expect(completed?.selfScore, 0);
     expect(completed?.opponentScore, 0);
+  });
+
+  testWidgets('online screen submits immediate and targeted skills',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final matchFound = Map<String, dynamic>.from(_payload('match_found'))
+      ..['characters'] = {'player-a': 'cat', 'player-b': 'cat'};
+    fake.matchFoundController.add(BoardDeltaMatchFoundDto.fromJson(matchFound));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    await tester.tap(find.byKey(const Key('online_player_state')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Activate').first);
+    await tester.pump();
+
+    expect(fake.submittedSkill, {
+      'roomId': 'room-1',
+      'skillId': 'scratch',
+    });
+
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson({
+      'type': 'skill',
+      'skillId': 'scratch',
+      'actionInput': [],
+      'playerId': 'player-a',
+      'activePlayerId': 'player-a',
+      'extraTurnsEarned': 0,
+      'damageDealt': 40,
+      'healedAmount': 0,
+      'consumedTurn': false,
+      'playerStates': matchFound['playerStates'],
+    }));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('online_player_state')));
+    await tester.pumpAndSettle();
+    final strongBiteButton =
+        find.widgetWithText(FilledButton, 'Activate').at(1);
+    await tester.ensureVisible(strongBiteButton);
+    await tester.pumpAndSettle();
+    await tester.tap(strongBiteButton);
+    await tester.pump();
+    expect(find.text('Pick a tile for Strong Bite'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('online_tile_0_0')));
+    await tester.pump();
+
+    expect(fake.submittedSkill, {
+      'roomId': 'room-1',
+      'skillId': 'strong_bite',
+      'targetRow': 0,
+      'targetCol': 0,
+    });
   });
 
   testWidgets('online screen handles swap_fizzled broadcast', (tester) async {

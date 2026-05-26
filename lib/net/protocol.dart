@@ -2,6 +2,22 @@ library;
 
 import '../game_core/board.dart';
 
+const normalMoveSkillId = 0;
+
+class NormalMoveActionInput {
+  const NormalMoveActionInput({
+    required this.c1,
+    required this.r1,
+    required this.c2,
+    required this.r2,
+  });
+
+  final int c1;
+  final int r1;
+  final int c2;
+  final int r2;
+}
+
 class PlayerStateDto {
   const PlayerStateDto({
     required this.stamina,
@@ -180,67 +196,97 @@ class BoardReplacedDto extends FlatBoardDto {
 
 class MoveResolvedDto {
   const MoveResolvedDto({
-    this.moveType,
+    this.type,
+    required this.skillId,
+    required this.actionInput,
     required this.playerId,
     this.activePlayerId,
+    this.turnsRemaining,
     this.extraTurnsEarned,
     this.boardVersion,
-    this.r1,
-    this.c1,
-    this.r2,
-    this.c2,
     this.generatedTiles,
     required this.playerStates,
     this.boardHash,
-    this.skillId,
     this.damageDealt,
     this.healedAmount,
+    this.consumedTurn,
   });
 
-  /// "normal" for board moves, "skill" for skill activations.
-  final String? moveType;
+  /// "normal_move" for board swaps, "skill" for skill activations.
+  final String? type;
+  final Object skillId;
+  final List<int> actionInput;
+
   final String playerId;
+
   /// Whose turn it is after this resolution. Replaces turn_changed.
   final String? activePlayerId;
+
+  /// Extra turns still available to the active player after this resolution.
+  final int? turnsRemaining;
+
   /// Number of 4+ match lines earned this resolution.
   final int? extraTurnsEarned;
   final int? boardVersion;
-  final int? r1;
-  final int? c1;
-  final int? r2;
-  final int? c2;
   final List<int>? generatedTiles;
   final Map<String, PlayerStateDto> playerStates;
   final String? boardHash;
   // Skill-specific fields
-  final String? skillId;
   final int? damageDealt;
   final int? healedAmount;
+  final bool? consumedTurn;
 
-  bool get isSkill => moveType == 'skill';
-  bool get isNormal => moveType != 'skill';
+  bool get isSkill => type == 'skill';
+  bool get isNormal => !isSkill;
+
+  NormalMoveActionInput get normalMoveInput {
+    if (type != 'normal_move' ||
+        skillId != normalMoveSkillId ||
+        actionInput.length != 4) {
+      throw const FormatException(
+        'normal_move requires skillId 0 and actionInput [c1, r1, c2, r2]',
+      );
+    }
+    return NormalMoveActionInput(
+      c1: actionInput[0],
+      r1: actionInput[1],
+      c2: actionInput[2],
+      r2: actionInput[3],
+    );
+  }
+
+  BoardPosition? get singleTileActionTarget {
+    if (type != 'skill' || actionInput.length < 2) return null;
+    return BoardPosition(actionInput[1], actionInput[0]);
+  }
+
+  String? get skillActionId => skillId is String ? skillId as String : null;
 
   factory MoveResolvedDto.fromJson(Map<String, dynamic> json) {
     final gt = json['generatedTiles'];
-    final List<int>? generatedTiles =
-        gt is List ? gt.cast<int>() : null;
+    final List<int>? generatedTiles = gt is List ? gt.cast<int>() : null;
+    final rawActionInput = json['actionInput'];
+    final actionInput = rawActionInput is List<dynamic>
+        ? rawActionInput.map(_readIntValue).toList(growable: false)
+        : const <int>[];
+    final rawSkillId = json['skillId'] ?? normalMoveSkillId;
+    final skillId = rawSkillId is num ? rawSkillId.toInt() : rawSkillId;
 
     return MoveResolvedDto(
-      moveType: json['moveType'] as String?,
+      type: json['type'] as String?,
+      skillId: skillId,
+      actionInput: List.unmodifiable(actionInput),
       playerId: json['playerId'] as String,
       activePlayerId: json['activePlayerId'] as String?,
+      turnsRemaining: json['turnsRemaining'] as int?,
       extraTurnsEarned: json['extraTurnsEarned'] as int?,
       boardVersion: json['boardVersion'] as int?,
-      r1: json['r1'] as int?,
-      c1: json['c1'] as int?,
-      r2: json['r2'] as int?,
-      c2: json['c2'] as int?,
       generatedTiles: generatedTiles,
       playerStates: _parsePlayerStates(json['playerStates']),
       boardHash: json['boardHash'] as String?,
-      skillId: json['skillId'] as String?,
       damageDealt: json['damageDealt'] as int?,
       healedAmount: json['healedAmount'] as int?,
+      consumedTurn: json['consumedTurn'] as bool?,
     );
   }
 }
@@ -283,34 +329,6 @@ class GameOverDto {
   factory GameOverDto.fromJson(Map<String, dynamic> json) => GameOverDto(
         loserId: json['loserId'] as String?,
         loserReason: json['loserReason'] as String?,
-        playerStates: _parsePlayerStates(json['playerStates']),
-      );
-}
-
-class SkillResolvedDto {
-  const SkillResolvedDto({
-    required this.playerId,
-    required this.skillId,
-    required this.damageDealt,
-    required this.healedAmount,
-    required this.consumedTurn,
-    required this.playerStates,
-  });
-
-  final String playerId;
-  final String skillId;
-  final int damageDealt;
-  final int healedAmount;
-  final bool consumedTurn;
-  final Map<String, PlayerStateDto> playerStates;
-
-  factory SkillResolvedDto.fromJson(Map<String, dynamic> json) =>
-      SkillResolvedDto(
-        playerId: json['playerId'] as String,
-        skillId: json['skillId'] as String,
-        damageDealt: _readInt(json, 'damageDealt'),
-        healedAmount: _readInt(json, 'healedAmount'),
-        consumedTurn: json['consumedTurn'] as bool? ?? true,
         playerStates: _parsePlayerStates(json['playerStates']),
       );
 }
