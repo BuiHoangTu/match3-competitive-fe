@@ -8,6 +8,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 
+import '../characters/character_registry.dart';
 import '../errors/matchmaking_errors.dart';
 import '../game_core/board.dart';
 import '../game_core/generator.dart';
@@ -18,76 +19,6 @@ import '../models/matchmaking_result.dart';
 import '../net/board_delta_socket_client.dart';
 import '../net/protocol.dart';
 import '../services/matchmaking_client.dart';
-
-// ---------------------------------------------------------------------------
-// Character skill data (mirrors be/backend/src/character/cat.ts)
-// ---------------------------------------------------------------------------
-
-class _SkillData {
-  const _SkillData({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.manaCost,
-    required this.consumesTurn,
-    required this.targetingKind,
-  });
-
-  final String id;
-  final String name;
-  final String description;
-  final int manaCost;
-  final bool consumesTurn;
-  final String targetingKind; // "none", "single-tile", "area"
-}
-
-class _CharacterData {
-  const _CharacterData({
-    required this.id,
-    required this.displayName,
-    required this.icon,
-    required this.skills,
-  });
-
-  final String id;
-  final String displayName;
-  final IconData icon;
-  final List<_SkillData> skills;
-}
-
-const Map<String, _CharacterData> _kCharacterData = {
-  'cat': _CharacterData(
-    id: 'cat',
-    displayName: 'Cat',
-    icon: Icons.pets,
-    skills: [
-      _SkillData(
-        id: 'scratch',
-        name: 'Scratch',
-        description: '4× ATK damage to opponent',
-        manaCost: 5,
-        consumesTurn: false,
-        targetingKind: 'none',
-      ),
-      _SkillData(
-        id: 'strong_bite',
-        name: 'Strong Bite',
-        description: '8× ATK damage + 50% lifesteal',
-        manaCost: 25,
-        consumesTurn: true,
-        targetingKind: 'single-tile',
-      ),
-      _SkillData(
-        id: 'board_strike',
-        name: 'Board Strike',
-        description: '20× ATK damage, full board',
-        manaCost: 60,
-        consumesTurn: true,
-        targetingKind: 'area',
-      ),
-    ],
-  ),
-};
 
 class OnlineGameScreen extends StatefulWidget {
   const OnlineGameScreen({
@@ -146,7 +77,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   Map<String, String> _characters = const {};
   DateTime _playerStatesSyncedAt = DateTime.now();
   Timer? _staminaTicker;
-  _SkillData? _targetingSkill;
+  CharacterSkill? _targetingSkill;
 
   @override
   void initState() {
@@ -338,10 +269,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   }
 
   String _skillDisplayName(String skillId) {
-    for (final char in _kCharacterData.values) {
-      for (final skill in char.skills) {
-        if (skill.id == skillId) return skill.name;
-      }
+    for (final char in characterRegistry.values) {
+      final skill = char.skillById(skillId);
+      if (skill != null) return skill.name;
     }
     return skillId;
   }
@@ -411,8 +341,14 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     }
 
     if (dto.isSkill) {
-      // Skill activation — no board animation, just update states and notice.
+      final effect = _skillBoardEffectFromResolved(dto);
       setState(() {
+        if (effect != null) {
+          _board = effect.resolution.finalBoard;
+          _boardAnimation = _animationFromSkillEffect(effect);
+          _boardAnimating = true;
+          if (dto.boardVersion != null) _boardVersion = dto.boardVersion;
+        }
         _acceptPlayerStates(dto.playerStates);
         _pendingMove = false;
         _selected = null;
@@ -478,6 +414,50 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     _syncStaminaTicker();
   }
 
+  SkillBoardEffect? _skillBoardEffectFromResolved(MoveResolvedDto dto) {
+    final board = _board;
+    final skillId = dto.skillActionId;
+    if (board == null || skillId == null) return null;
+    final generatedTiles = dto.generatedTiles;
+    if (generatedTiles == null) return null;
+
+    final playerCharacterId = _characters[dto.playerId] ?? widget.characterId;
+    try {
+      final generator = TileStreamGenerator(generatedTiles);
+      final effect =
+          characterById(playerCharacterId).handler.resolveBoardEffect(
+                dto: dto,
+                board: board,
+                generator: generator,
+              );
+      if (effect == null) return null;
+      if (generator.remaining != 0) {
+        throw FormatException(
+          'move_resolved generatedTiles has ${generator.remaining} unused tiles',
+        );
+      }
+      final boardVersion = dto.boardVersion;
+      final boardHash = dto.boardHash;
+      if (boardVersion != null && boardHash != null) {
+        final localHash =
+            _hashBoard(boardVersion, effect.resolution.finalBoard);
+        if (localHash != boardHash) {
+          throw FormatException(
+            'move_resolved boardHash mismatch: expected $boardHash, '
+            'computed $localHash',
+          );
+        }
+      }
+      return effect;
+    } catch (e) {
+      developer.log(
+        'Failed to apply skill move_resolved: $e',
+        name: 'board_delta_socket',
+      );
+      return null;
+    }
+  }
+
   void _handleBoardAnimationComplete() {
     if (!mounted) return;
     if (_queuedResolvedMoves.isNotEmpty) {
@@ -504,6 +484,46 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       c2: dto.normalMoveInput.c2,
       finalBoard: resolution.finalBoard,
       revert: resolution.fizzle,
+      steps: [
+        for (final step in resolution.steps)
+          BoardCascadeAnimationStep(
+            matchedCells: [
+              for (final match in step.matches)
+                for (final cell in match.cells) cell,
+            ],
+            movements: [
+              for (final movement in step.movements)
+                BoardTileMovement(
+                  col: movement.col,
+                  fromRow: movement.fromRow,
+                  toRow: movement.toRow,
+                ),
+            ],
+            generatedTiles: [
+              for (final generated in step.generatedTiles)
+                BoardGeneratedTile(
+                  row: generated.row,
+                  col: generated.col,
+                  tile: generated.tile,
+                ),
+            ],
+            afterRefill: step.afterRefill,
+          ),
+      ],
+    );
+  }
+
+  BoardMoveAnimation _animationFromSkillEffect(SkillBoardEffect effect) {
+    final primary = effect.primaryCell;
+    final resolution = effect.resolution;
+    return BoardMoveAnimation(
+      id: ++_boardAnimationId,
+      r1: primary.row,
+      c1: primary.col,
+      r2: primary.row,
+      c2: primary.col,
+      finalBoard: resolution.finalBoard,
+      skipSwap: true,
       steps: [
         for (final step in resolution.steps)
           BoardCascadeAnimationStep(
@@ -682,9 +702,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     );
   }
 
-  void _handleSkillActivate(_SkillData skill) {
+  void _handleSkillActivate(CharacterSkill skill) {
     if (!_isMyTurn || _roomId == null) return;
-    if (skill.targetingKind == 'single-tile') {
+    if (skill.needsTarget) {
       setState(() {
         _targetingSkill = skill;
         _selected = null;
@@ -1159,7 +1179,7 @@ class _PlayerDetailDialog extends StatelessWidget {
   final String characterId;
   final bool isSelf;
   final bool isMyTurn;
-  final void Function(_SkillData skill) onActivateSkill;
+  final void Function(CharacterSkill skill) onActivateSkill;
 
   String _formatStamina(int ms) {
     final totalSec = (ms / 1000).round();
@@ -1171,10 +1191,10 @@ class _PlayerDetailDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final character = _kCharacterData[characterId];
-    final charName = character?.displayName ?? characterId;
-    final charIcon = character?.icon ?? Icons.person;
-    final skills = character?.skills ?? const [];
+    final character = characterById(characterId);
+    final charName = character.displayName;
+    final charIcon = character.icon;
+    final skills = character.skills;
 
     return AlertDialog(
       title: Row(
@@ -1266,7 +1286,7 @@ class _SkillDetailRow extends StatelessWidget {
     required this.onActivate,
   });
 
-  final _SkillData skill;
+  final CharacterSkill skill;
   final int currentMana;
   final bool enabled;
   final VoidCallback onActivate;
@@ -1275,11 +1295,11 @@ class _SkillDetailRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final canAfford = currentMana >= skill.manaCost;
-    final targetingLabel = skill.targetingKind == 'single-tile'
-        ? ' (pick tile)'
-        : skill.targetingKind == 'area'
-            ? ' (area)'
-            : '';
+    final targetingLabel = switch (skill.targetingKind) {
+      SkillTargetingKind.singleTile => ' (pick tile)',
+      SkillTargetingKind.area => ' (area)',
+      SkillTargetingKind.none => '',
+    };
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),

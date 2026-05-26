@@ -196,6 +196,51 @@ class LocalJudge {
     );
   }
 
+  MoveResolution resolveActivatedTiles({
+    required GameBoard board,
+    required Iterable<BoardPosition> cells,
+    required TileGenerator generator,
+  }) {
+    final activatedCells = <BoardPosition>[];
+    var cleared = board;
+    for (final cell in cells) {
+      if (!board.contains(cell.row, cell.col)) continue;
+      if (cleared.tileAt(cell.row, cell.col) == emptyTile) continue;
+      activatedCells.add(cell);
+      cleared = cleared.withTile(cell.row, cell.col, emptyTile);
+    }
+
+    if (activatedCells.isEmpty) {
+      return MoveResolution(
+        accepted: true,
+        fizzle: false,
+        finalBoard: board,
+        steps: const [],
+        scoreDelta: 0,
+      );
+    }
+
+    final gravity = _applyGravity(cleared);
+    final refill = _refill(gravity.board, generator);
+    final cascade = resolveBoard(board: refill.board, generator: generator);
+    final activationStep = CascadeStep(
+      matches: [MatchGroup(List<BoardPosition>.unmodifiable(activatedCells))],
+      movements: gravity.movements,
+      generatedTiles: refill.generatedTiles,
+      afterGravity: gravity.board,
+      afterRefill: refill.board,
+    );
+
+    return MoveResolution(
+      accepted: true,
+      fizzle: false,
+      finalBoard: cascade.finalBoard,
+      steps: List.unmodifiable([activationStep, ...cascade.steps]),
+      scoreDelta: cascade.scoreDelta,
+      extraTurnsEarned: cascade.extraTurnsEarned,
+    );
+  }
+
   List<MatchGroup> findMatches(GameBoard board) {
     final runs = <Set<BoardPosition>>[];
 

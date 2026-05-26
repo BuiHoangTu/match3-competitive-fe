@@ -58,6 +58,7 @@ class BoardMoveAnimation {
     required this.steps,
     required this.finalBoard,
     this.revert = false,
+    this.skipSwap = false,
   });
 
   final int id;
@@ -68,6 +69,7 @@ class BoardMoveAnimation {
   final List<BoardCascadeAnimationStep> steps;
   final GameBoard finalBoard;
   final bool revert;
+  final bool skipSwap;
 }
 
 class BoardCascadeAnimationStep {
@@ -716,25 +718,27 @@ class MatchBoardFlameGame extends FlameGame {
     _animating = true;
     _syncTileState();
 
-    await _animateAcceptedSwap(
-      animation,
-      generation,
-      startProgress: swapStartProgress,
-    );
-    if (!_isCurrentAnimation(generation)) return;
-
-    if (animation.revert || animation.steps.isEmpty) {
-      await _animateSwapBack(animation, generation);
+    if (!animation.skipSwap) {
+      await _animateAcceptedSwap(
+        animation,
+        generation,
+        startProgress: swapStartProgress,
+      );
       if (!_isCurrentAnimation(generation)) return;
-      _board = animation.finalBoard;
-      _selected = selected;
-      _disabled = disabled;
-      _highlightTurn = highlightTurn;
-      _animating = false;
-      _applyDeferredLayout();
-      _syncTileState(settleVisuals: true);
-      onAnimationComplete?.call();
-      return;
+
+      if (animation.revert || animation.steps.isEmpty) {
+        await _animateSwapBack(animation, generation);
+        if (!_isCurrentAnimation(generation)) return;
+        _board = animation.finalBoard;
+        _selected = selected;
+        _disabled = disabled;
+        _highlightTurn = highlightTurn;
+        _animating = false;
+        _applyDeferredLayout();
+        _syncTileState(settleVisuals: true);
+        onAnimationComplete?.call();
+        return;
+      }
     }
 
     for (final step in animation.steps) {
