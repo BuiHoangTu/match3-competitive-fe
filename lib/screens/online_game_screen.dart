@@ -71,7 +71,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   bool _loading = true;
   bool _matchCompleteReported = false;
   bool _boardRefreshRequested = false;
-  int _turnsRemaining = 1;
+  int _totalTurnsRemaining = 1;
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
@@ -156,7 +156,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _opponentPlayerId = dto.opponentId;
           _activePlayerId = dto.activePlayerId;
           _boardVersion = dto.boardVersion;
-          _turnsRemaining = 1;
+          _totalTurnsRemaining = 1;
           _acceptPlayerStates(dto.playerStates);
           _characters = dto.characters;
           _board = GameBoard.fromFlat(
@@ -169,7 +169,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _boardAnimating = false;
           _boardRefreshRequested = false;
           _loading = false;
-          _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
+          _status = _turnStatus();
           _notice = null;
         });
         _syncStaminaTicker();
@@ -178,8 +178,9 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       ..add(connection.turnChanged.listen((dto) {
         setState(() {
           _activePlayerId = dto.activePlayerId;
+          _totalTurnsRemaining = 1;
           _acceptPlayerStates(dto.playerStates);
-          _status = _isMyTurn ? 'Your turn' : 'Opponent turn';
+          _status = _turnStatus();
         });
         _syncStaminaTicker();
       }))
@@ -345,7 +346,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         _pendingMove = false;
         _selected = null;
         _targetingSkill = null;
-        _turnsRemaining = dto.turnsRemaining;
+        _totalTurnsRemaining = dto.turnsRemaining;
+        _status = _turnStatus();
         _notice = _boardRefreshRequested ? 'Board sync error' : notice;
       });
       _syncStaminaTicker();
@@ -382,15 +384,16 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       _board = resolution.finalBoard;
       _boardAnimation = animation;
       _boardAnimating = true;
-      _turnsRemaining = dto.turnsRemaining;
+      _totalTurnsRemaining = dto.turnsRemaining;
       _boardVersion = dto.boardVersion;
       _acceptPlayerStates(dto.playerStates);
       _pendingMove = false;
       _selected = null;
+      _status = _turnStatus();
       final gainedTurn =
           dto.nextPlayerId == dto.playerId && dto.turnsRemaining > 1;
       if (gainedTurn && dto.playerId == _myPlayerId) {
-        _notice = _extraTurnNotice(dto.turnsRemaining);
+        _notice = 'Extra turn!';
       } else if (gainedTurn) {
         _notice = 'Opponent extra turn!';
       } else {
@@ -523,16 +526,13 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     }
     setState(() {
       _boardAnimating = false;
-      if (_turnsRemaining > 1 && _isMyTurn) {
-        _notice = _extraTurnNotice(_turnsRemaining);
-      }
     });
   }
 
-  String _extraTurnNotice(int turnsRemaining) {
-    final extraTurns = (turnsRemaining - 1).clamp(1, 9999);
-    final unit = extraTurns == 1 ? 'extra turn' : 'extra turns';
-    return 'Extra turn! ($extraTurns $unit remaining)';
+  String _turnStatus() {
+    final base = _isMyTurn ? 'Your turn' : 'Opponent turn';
+    if (_totalTurnsRemaining <= 1) return base;
+    return '$base ($_totalTurnsRemaining turns remaining)';
   }
 
   BoardMoveAnimation _animationFromResolution(

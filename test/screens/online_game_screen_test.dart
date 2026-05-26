@@ -548,7 +548,7 @@ void main() {
     expect(find.text('Board 2'), findsOneWidget);
   });
 
-  testWidgets('online screen displays bonus turns, not total turns',
+  testWidgets('online screen displays total turns in status, not notice',
       (tester) async {
     final fake = _FakeConnection();
     final matchmaking = MatchmakingClient(
@@ -587,9 +587,54 @@ void main() {
     fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
     await tester.pump(const Duration(seconds: 2));
 
-    expect(find.text('Extra turn! (1 extra turn remaining)'), findsOneWidget);
+    expect(find.text('Your turn (2 turns remaining)'), findsOneWidget);
+    expect(find.text('Extra turn!'), findsOneWidget);
     expect(find.textContaining('2 extra'), findsNothing);
-    expect(find.textContaining('2 turns'), findsNothing);
+  });
+
+  testWidgets('online screen displays opponent total turns in status',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final payload = Map<String, dynamic>.from(_payload('move_resolved'))
+      ..['playerId'] = 'player-b'
+      ..['nextPlayerId'] = 'player-b'
+      ..['turnsRemaining'] = 2;
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(find.text('Opponent turn (2 turns remaining)'), findsOneWidget);
+    expect(find.text('Opponent extra turn!'), findsOneWidget);
+    expect(find.textContaining('2 extra'), findsNothing);
   });
 
   testWidgets('online screen applies rapid resolved moves without sticking',
