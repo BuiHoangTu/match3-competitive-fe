@@ -17,6 +17,12 @@ void main() {
       'skillId': 'scratch',
       'actionInput': [],
       'playerId': 'player-a',
+      'nextPlayerId': 'player-a',
+      'turnsRemaining': 1,
+      'boardVersion': 1,
+      'generatedTiles': [],
+      'boardHash':
+          '0000000000000000000000000000000000000000000000000000000000000000',
       'playerStates': const <String, dynamic>{},
     });
 
@@ -41,6 +47,12 @@ void main() {
       'skillId': 'strong_bite',
       'actionInput': [0, 0],
       'playerId': 'player-a',
+      'nextPlayerId': 'player-b',
+      'turnsRemaining': 1,
+      'boardVersion': 2,
+      'generatedTiles': [4],
+      'boardHash':
+          '0000000000000000000000000000000000000000000000000000000000000000',
       'playerStates': const <String, dynamic>{},
     });
 

@@ -71,7 +71,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   bool _loading = true;
   bool _matchCompleteReported = false;
   bool _boardRefreshRequested = false;
-  int _extraTurnsRemaining = 0;
+  int _turnsRemaining = 1;
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
@@ -156,7 +156,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _opponentPlayerId = dto.opponentId;
           _activePlayerId = dto.activePlayerId;
           _boardVersion = dto.boardVersion;
-          _extraTurnsRemaining = 0;
+          _turnsRemaining = 1;
           _acceptPlayerStates(dto.playerStates);
           _characters = dto.characters;
           _board = GameBoard.fromFlat(
@@ -295,19 +295,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       throw const FormatException('move_resolved arrived before board state');
     }
     final input = dto.normalMoveInput;
-    final generatedTiles = dto.generatedTiles;
-    if (generatedTiles == null) {
-      throw const FormatException('move_resolved missing generatedTiles');
-    }
-    final boardVersion = dto.boardVersion;
-    if (boardVersion == null) {
-      throw const FormatException('move_resolved missing boardVersion');
-    }
-    final boardHash = dto.boardHash;
-    if (boardHash == null) {
-      throw const FormatException('move_resolved missing boardHash');
-    }
-    final generator = TileStreamGenerator(generatedTiles);
+    final generator = TileStreamGenerator(dto.generatedTiles);
     final resolution = const LocalJudge().resolveSwap(
       board: board,
       r1: input.r1,
@@ -321,10 +309,10 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
         'move_resolved generatedTiles has ${generator.remaining} unused tiles',
       );
     }
-    final localHash = _hashBoard(boardVersion, resolution.finalBoard);
-    if (localHash != boardHash) {
+    final localHash = _hashBoard(dto.boardVersion, resolution.finalBoard);
+    if (localHash != dto.boardHash) {
       throw FormatException(
-        'move_resolved boardHash mismatch: expected $boardHash, '
+        'move_resolved boardHash mismatch: expected ${dto.boardHash}, '
         'computed $localHash',
       );
     }
@@ -341,34 +329,24 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
 
   void _applyMoveResolved(MoveResolvedDto dto) {
     // Update active player from move_resolved (replaces turn_changed).
-    if (dto.activePlayerId != null) {
-      _activePlayerId = dto.activePlayerId;
-    }
+    _activePlayerId = dto.nextPlayerId;
 
     if (dto.isSkill) {
       final effect = _skillBoardEffectFromResolved(dto);
+      final notice = _skillResolvedNotice(dto, _playerStates);
       setState(() {
         if (effect != null) {
           _board = effect.resolution.finalBoard;
           _boardAnimation = _animationFromSkillEffect(effect);
           _boardAnimating = true;
-          if (dto.boardVersion != null) _boardVersion = dto.boardVersion;
         }
+        _boardVersion = dto.boardVersion;
         _acceptPlayerStates(dto.playerStates);
         _pendingMove = false;
         _selected = null;
         _targetingSkill = null;
-        if (dto.turnsRemaining != null) {
-          _extraTurnsRemaining = dto.turnsRemaining!;
-        }
-        final name = _skillDisplayName(dto.skillActionId ?? '');
-        final parts = <String>[];
-        if ((dto.damageDealt ?? 0) > 0) parts.add('${dto.damageDealt} dmg');
-        if ((dto.healedAmount ?? 0) > 0) parts.add('+${dto.healedAmount} HP');
-        final suffix = parts.isNotEmpty ? ': ${parts.join(", ")}' : '';
-        _notice = _boardRefreshRequested
-            ? 'Board sync error'
-            : '$name$suffix resolved';
+        _turnsRemaining = dto.turnsRemaining;
+        _notice = _boardRefreshRequested ? 'Board sync error' : notice;
       });
       _syncStaminaTicker();
       return;
@@ -399,23 +377,21 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       return;
     }
 
-    final earned = dto.extraTurnsEarned ?? resolution.extraTurnsEarned;
-    final turnsRemaining = dto.turnsRemaining ??
-        ((_extraTurnsRemaining - 1).clamp(0, 9999) + earned);
-
     final animation = _animationFromResolution(dto, resolution);
     setState(() {
       _board = resolution.finalBoard;
       _boardAnimation = animation;
       _boardAnimating = true;
-      _extraTurnsRemaining = turnsRemaining;
-      if (dto.boardVersion != null) _boardVersion = dto.boardVersion;
+      _turnsRemaining = dto.turnsRemaining;
+      _boardVersion = dto.boardVersion;
       _acceptPlayerStates(dto.playerStates);
       _pendingMove = false;
       _selected = null;
-      if (earned > 0 && dto.playerId == _myPlayerId) {
-        _notice = 'Extra turn!';
-      } else if (earned > 0) {
+      final gainedTurn =
+          dto.nextPlayerId == dto.playerId && dto.turnsRemaining > 1;
+      if (gainedTurn && dto.playerId == _myPlayerId) {
+        _notice = _extraTurnNotice(dto.turnsRemaining);
+      } else if (gainedTurn) {
         _notice = 'Opponent extra turn!';
       } else {
         _notice = resolution.fizzle && dto.playerId == _myPlayerId
@@ -430,35 +406,43 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     final board = _board;
     final skillId = dto.skillActionId;
     if (board == null || skillId == null) return null;
-    final generatedTiles = dto.generatedTiles;
-    if (generatedTiles == null) return null;
 
     final playerCharacterId = _characters[dto.playerId] ?? widget.characterId;
     try {
-      final generator = TileStreamGenerator(generatedTiles);
+      final generator = TileStreamGenerator(dto.generatedTiles);
       final effect =
           characterById(playerCharacterId).handler.resolveBoardEffect(
                 dto: dto,
                 board: board,
                 generator: generator,
               );
-      if (effect == null) return null;
+      if (effect == null) {
+        if (generator.remaining != 0) {
+          throw FormatException(
+            'move_resolved generatedTiles has ${generator.remaining} unused tiles',
+          );
+        }
+        final localHash = _hashBoard(dto.boardVersion, board);
+        if (localHash != dto.boardHash) {
+          throw FormatException(
+            'move_resolved boardHash mismatch: expected ${dto.boardHash}, '
+            'computed $localHash',
+          );
+        }
+        return null;
+      }
       if (generator.remaining != 0) {
         throw FormatException(
           'move_resolved generatedTiles has ${generator.remaining} unused tiles',
         );
       }
-      final boardVersion = dto.boardVersion;
-      final boardHash = dto.boardHash;
-      if (boardVersion != null && boardHash != null) {
-        final localHash =
-            _hashBoard(boardVersion, effect.resolution.finalBoard);
-        if (localHash != boardHash) {
-          throw FormatException(
-            'move_resolved boardHash mismatch: expected $boardHash, '
-            'computed $localHash',
-          );
-        }
+      final localHash =
+          _hashBoard(dto.boardVersion, effect.resolution.finalBoard);
+      if (localHash != dto.boardHash) {
+        throw FormatException(
+          'move_resolved boardHash mismatch: expected ${dto.boardHash}, '
+          'computed $localHash',
+        );
       }
       return effect;
     } catch (e) {
@@ -473,6 +457,34 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
       );
       return null;
     }
+  }
+
+  String _skillResolvedNotice(
+    MoveResolvedDto dto,
+    Map<String, PlayerStateDto> previousStates,
+  ) {
+    final name = _skillDisplayName(dto.skillActionId ?? '');
+    final parts = <String>[];
+    final beforeSelf = previousStates[dto.playerId];
+    final afterSelf = dto.playerStates[dto.playerId];
+    if (beforeSelf != null && afterSelf != null) {
+      final healed = afterSelf.health - beforeSelf.health;
+      if (healed > 0) parts.add('+$healed HP');
+    }
+
+    for (final entry in dto.playerStates.entries) {
+      if (entry.key == dto.playerId) continue;
+      final before = previousStates[entry.key];
+      if (before == null) continue;
+      final damage = before.health - entry.value.health;
+      if (damage > 0) {
+        parts.add('$damage dmg');
+        break;
+      }
+    }
+
+    final suffix = parts.isNotEmpty ? ': ${parts.join(", ")}' : '';
+    return '$name$suffix resolved';
   }
 
   void _requestFullBoard({
@@ -511,10 +523,16 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
     }
     setState(() {
       _boardAnimating = false;
-      if (_extraTurnsRemaining > 0 && _isMyTurn) {
-        _notice = 'Extra turn! ($_extraTurnsRemaining remaining)';
+      if (_turnsRemaining > 1 && _isMyTurn) {
+        _notice = _extraTurnNotice(_turnsRemaining);
       }
     });
+  }
+
+  String _extraTurnNotice(int turnsRemaining) {
+    final extraTurns = (turnsRemaining - 1).clamp(1, 9999);
+    final unit = extraTurns == 1 ? 'extra turn' : 'extra turns';
+    return 'Extra turn! ($extraTurns $unit remaining)';
   }
 
   BoardMoveAnimation _animationFromResolution(

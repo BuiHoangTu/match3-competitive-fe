@@ -539,14 +539,57 @@ void main() {
     await tester.pump(const Duration(milliseconds: 10));
 
     final payload = Map<String, dynamic>.from(_payload('move_resolved'))
-      ..['playerId'] = 'player-b'
-      ..['extraTurnsEarned'] = 0;
+      ..['playerId'] = 'player-b';
     fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
     await tester.pump(const Duration(milliseconds: 10));
 
     expect(find.text('Opponent moved'), findsNothing);
     expect(find.byKey(const Key('online_notice')), findsNothing);
     expect(find.text('Board 2'), findsOneWidget);
+  });
+
+  testWidgets('online screen displays bonus turns, not total turns',
+      (tester) async {
+    final fake = _FakeConnection();
+    final matchmaking = MatchmakingClient(
+      baseUrl: 'http://backend.test',
+      postFn: (_, {headers, body}) async => http.Response(
+        jsonEncode({
+          'roomToken': 'room-token',
+          'expiresAt': 123,
+          'mode': 'turn_based',
+        }),
+        200,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: OnlineGameScreen(
+        sessionToken: 'session-token',
+        backendUrl: 'http://backend.test',
+        mode: MatchmakingMode.turnBased,
+        characterId: 'cat',
+        matchmaking: matchmaking,
+        connectionFactory: ({required roomToken, required serverUrl}) => fake,
+        onLeave: () {},
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    fake.matchFoundController.add(
+      BoardDeltaMatchFoundDto.fromJson(_payload('match_found')),
+    );
+    await tester.pump(const Duration(milliseconds: 10));
+
+    final payload = Map<String, dynamic>.from(_payload('move_resolved'))
+      ..['nextPlayerId'] = 'player-a'
+      ..['turnsRemaining'] = 2;
+    fake.moveResolvedController.add(MoveResolvedDto.fromJson(payload));
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(find.text('Extra turn! (1 extra turn remaining)'), findsOneWidget);
+    expect(find.textContaining('2 extra'), findsNothing);
+    expect(find.textContaining('2 turns'), findsNothing);
   });
 
   testWidgets('online screen applies rapid resolved moves without sticking',
@@ -750,11 +793,12 @@ void main() {
       'skillId': 'scratch',
       'actionInput': [],
       'playerId': 'player-a',
-      'activePlayerId': 'player-a',
-      'extraTurnsEarned': 0,
-      'damageDealt': 40,
-      'healedAmount': 0,
-      'consumedTurn': false,
+      'nextPlayerId': 'player-a',
+      'turnsRemaining': 1,
+      'boardVersion': 1,
+      'generatedTiles': [],
+      'boardHash':
+          '5e025f55843eb568978611dcdbc07977484ce5a0ee2355b35f934e2a5b68499a',
       'playerStates': matchFound['playerStates'],
     }));
     await tester.pump();

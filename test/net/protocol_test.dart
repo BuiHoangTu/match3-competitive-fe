@@ -34,6 +34,8 @@ void main() {
     expect(dto.type, 'normal_move');
     expect(dto.skillId, normalMoveSkillId);
     expect(dto.actionInput, [1, 2, 2, 2]);
+    expect(dto.nextPlayerId, 'player-b');
+    expect(dto.turnsRemaining, 1);
     expect(dto.normalMoveInput.c1, 1);
     expect(dto.normalMoveInput.r1, 2);
     expect(dto.generatedTiles, [0, 1, 2, 3]);
