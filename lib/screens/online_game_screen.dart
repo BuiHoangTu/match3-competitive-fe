@@ -143,6 +143,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
   String _status = 'Finding opponent...';
   String? _notice;
   Map<String, PlayerStateDto> _playerStates = const {};
+  Map<String, String> _characters = const {};
   DateTime _playerStatesSyncedAt = DateTime.now();
   Timer? _staminaTicker;
 
@@ -224,6 +225,7 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
           _boardVersion = dto.boardVersion;
           _extraTurnsRemaining = 0;
           _acceptPlayerStates(dto.playerStates);
+          _characters = dto.characters;
           _board = GameBoard.fromFlat(
             width: dto.width,
             height: dto.height,
@@ -783,7 +785,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                               context,
                               label: 'Opponent',
                               state: _opponentState!,
-                              characterId: widget.characterId,
+                              characterId:
+                                  _characters[_opponentPlayerId] ?? 'cat',
                               isSelf: false,
                             )
                         : null,
@@ -822,7 +825,8 @@ class _OnlineGameScreenState extends State<OnlineGameScreen> {
                               context,
                               label: 'You',
                               state: _myState!,
-                              characterId: widget.characterId,
+                              characterId: _characters[_myPlayerId] ??
+                                  widget.characterId,
                               isSelf: true,
                             )
                         : null,

@@ -51,7 +51,20 @@ int _readInt(Map<String, dynamic> json, String key) {
   return 0;
 }
 
-class MatchmakingSocketClient {
+abstract class MatchmakingQueueConnection {
+  Stream<MatchReadyEvent> get matchReady;
+  Stream<MatchConfirmedEvent> get matchConfirmed;
+  Stream<void> get matchCancelled;
+  Stream<String> get matchError;
+  Future<void> get connected;
+
+  void connect();
+  void confirmCharacter(String characterId);
+  void cancel();
+  void dispose();
+}
+
+class MatchmakingSocketClient implements MatchmakingQueueConnection {
   MatchmakingSocketClient({
     required String serverUrl,
     required String sessionToken,
@@ -72,22 +85,31 @@ class MatchmakingSocketClient {
   final _matchError = StreamController<String>.broadcast();
   final _connected = Completer<void>();
 
+  @override
   Stream<MatchReadyEvent> get matchReady => _matchReady.stream;
+  @override
   Stream<MatchConfirmedEvent> get matchConfirmed => _matchConfirmed.stream;
+  @override
   Stream<void> get matchCancelled => _matchCancelled.stream;
+  @override
   Stream<String> get matchError => _matchError.stream;
+  @override
   Future<void> get connected => _connected.future;
 
+  @override
   void connect() => _socket.connect();
 
+  @override
   void confirmCharacter(String characterId) {
     _socket.emit('matchmaking_confirm', {'characterId': characterId});
   }
 
+  @override
   void cancel() {
     _socket.emit('matchmaking_cancel');
   }
 
+  @override
   void dispose() {
     _socket.dispose();
     unawaited(_matchReady.close());

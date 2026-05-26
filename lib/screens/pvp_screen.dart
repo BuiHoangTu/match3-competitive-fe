@@ -19,6 +19,21 @@ enum _PvpPhase {
   result,
 }
 
+typedef MatchmakingQueueConnectionFactory = MatchmakingQueueConnection
+    Function({
+  required String serverUrl,
+  required String sessionToken,
+});
+
+MatchmakingQueueConnection _defaultQueueConnectionFactory({
+  required String serverUrl,
+  required String sessionToken,
+}) =>
+    MatchmakingSocketClient(
+      serverUrl: serverUrl,
+      sessionToken: sessionToken,
+    );
+
 class PvpScreen extends StatefulWidget {
   const PvpScreen({
     super.key,
@@ -32,6 +47,7 @@ class PvpScreen extends StatefulWidget {
     this.roomTokenExpiresAt,
     this.awaitingCharacterSelection = false,
     this.connectionFactory = createSocketIoBoardDeltaConnection,
+    this.matchmakingQueueConnectionFactory = _defaultQueueConnectionFactory,
   });
 
   final String sessionToken;
@@ -44,6 +60,7 @@ class PvpScreen extends StatefulWidget {
   final int? roomTokenExpiresAt;
   final bool awaitingCharacterSelection;
   final BoardDeltaConnectionFactory connectionFactory;
+  final MatchmakingQueueConnectionFactory matchmakingQueueConnectionFactory;
 
   @override
   State<PvpScreen> createState() => _PvpScreenState();
@@ -59,7 +76,7 @@ class _PvpScreenState extends State<PvpScreen> {
   String? _roomId;
   MatchResult? _result;
 
-  MatchmakingSocketClient? _mmSocket;
+  MatchmakingQueueConnection? _mmSocket;
   StreamSubscription<dynamic>? _matchReadySub;
   StreamSubscription<dynamic>? _matchConfirmedSub;
   StreamSubscription<dynamic>? _matchCancelledSub;
@@ -124,7 +141,7 @@ class _PvpScreenState extends State<PvpScreen> {
 
   void _startMatchmaking() {
     // Connect matchmaking socket for real-time notifications.
-    _mmSocket = MatchmakingSocketClient(
+    _mmSocket = widget.matchmakingQueueConnectionFactory(
       serverUrl: widget.backendUrl,
       sessionToken: widget.sessionToken,
     );
@@ -186,7 +203,7 @@ class _PvpScreenState extends State<PvpScreen> {
   }
 
   void _startCharacterConfirmation() {
-    _mmSocket = MatchmakingSocketClient(
+    _mmSocket = widget.matchmakingQueueConnectionFactory(
       serverUrl: widget.backendUrl,
       sessionToken: widget.sessionToken,
     );

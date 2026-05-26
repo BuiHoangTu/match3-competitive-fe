@@ -102,6 +102,7 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
     required this.myPlayerId,
     required this.opponentId,
     required this.playerStates,
+    required this.characters,
   });
 
   final String roomId;
@@ -110,6 +111,7 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
   final String myPlayerId;
   final String opponentId;
   final Map<String, PlayerStateDto> playerStates;
+  final Map<String, String> characters;
 
   factory BoardDeltaMatchFoundDto.fromJson(Map<String, dynamic> json) {
     final board = FlatBoardDto.fromJson(json);
@@ -122,6 +124,7 @@ class BoardDeltaMatchFoundDto extends FlatBoardDto {
       myPlayerId: json['myPlayerId'] as String,
       opponentId: json['opponentId'] as String,
       playerStates: _parsePlayerStates(json['playerStates']),
+      characters: _parseStringMap(json['characters']),
     );
   }
 }
@@ -302,6 +305,14 @@ Map<String, PlayerStateDto> _parsePlayerStates(Object? raw) {
       key,
       PlayerStateDto.fromJson(value as Map<String, dynamic>),
     ),
+  ));
+}
+
+Map<String, String> _parseStringMap(Object? raw) {
+  if (raw == null) return const {};
+  final map = raw as Map<String, dynamic>;
+  return Map.unmodifiable(map.map(
+    (key, value) => MapEntry(key, value.toString()),
   ));
 }
 
