@@ -1,85 +1,106 @@
 // T-v0.7-01 · Account screen keyboard focus tests
 //
-// Verifies that Tab lands on the Delete Account button and Enter opens the
-// confirmation dialog. The delete button is the sole interactive element in
-// the screen body (AppBar back navigation is handled by the OS/platform).
+// Verifies account actions and fixed-layout match history behavior.
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:shell/models/user_profile.dart';
 import 'package:shell/screens/account_screen.dart';
+import 'package:shell/services/account_client.dart';
 
 const _kProfile = UserProfile(userId: 'u1', displayName: 'Player');
 
-Widget _buildSubject({VoidCallback? onDelete}) {
+Widget _buildSubject({VoidCallback? onLogout}) {
   return MaterialApp(
     home: AccountScreen(
       profile: _kProfile,
-      onDeleteAccountConfirmed: onDelete ?? () {},
+      onBack: () {},
+      onLogout: onLogout ?? () {},
     ),
   );
 }
 
 void main() {
   group('AccountScreen — keyboard focus traversal (T-v0.7-01)', () {
-    testWidgets('delete_account_button renders', (tester) async {
+    testWidgets('back button renders', (tester) async {
       await tester.pumpWidget(_buildSubject());
-      expect(find.byKey(const Key('delete_account_button')), findsOneWidget);
+      expect(find.byKey(const Key('account_back_button')), findsOneWidget);
     });
 
-    testWidgets('Tab×1 → Enter opens delete confirmation dialog',
-        (tester) async {
-      await tester.pumpWidget(_buildSubject());
+    testWidgets('logout button renders and calls onLogout', (tester) async {
+      var logoutCalled = false;
+      await tester.pumpWidget(
+        _buildSubject(onLogout: () => logoutCalled = true),
+      );
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.tap(find.byKey(const Key('logout_button')));
       await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
 
-      expect(find.text('Delete account?'), findsOneWidget,
-          reason: 'Pressing Enter on the focused delete button should open the '
-              'confirmation dialog');
+      expect(logoutCalled, isTrue);
     });
 
-    testWidgets('dialog Cancel dismisses without calling onDeleteAccountConfirmed',
+    testWidgets('latest match history renders character result and time',
         (tester) async {
-      var confirmCalled = false;
-      await tester.pumpWidget(_buildSubject(onDelete: () => confirmCalled = true));
-
-      // Open dialog via keyboard.
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpWidget(MaterialApp(
+        home: AccountScreen(
+          profile: _kProfile,
+          onBack: () {},
+          onLogout: () {},
+          loadMatchHistory: () async => [
+            AccountMatchHistoryEntry(
+              matchId: 'm1',
+              p1UserId: 'u1',
+              p2UserId: 'u2',
+              outcome: 'P1_WIN',
+              endedAt: DateTime.utc(2026, 5, 27, 10, 30),
+              characterId: 'cat',
+            ),
+          ],
+        ),
+      ));
       await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
+      await tester.pump();
 
-      expect(find.text('Delete account?'), findsOneWidget);
-
-      // Cancel via tap.
-      await tester.tap(find.byKey(const Key('delete_cancel_button')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Delete account?'), findsNothing);
-      expect(confirmCalled, isFalse);
+      expect(find.text('Cat'), findsOneWidget);
+      expect(find.text('WIN'), findsOneWidget);
+      expect(find.byKey(const Key('match_history_time')), findsOneWidget);
     });
 
-    testWidgets(
-        'dialog Confirm calls onDeleteAccountConfirmed',
+    testWidgets('long match history scrolls inside fixed account screen',
         (tester) async {
-      var confirmCalled = false;
-      await tester.pumpWidget(_buildSubject(onDelete: () => confirmCalled = true));
-
-      // Open dialog via keyboard.
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpWidget(MaterialApp(
+        home: AccountScreen(
+          profile: _kProfile,
+          onBack: () {},
+          onLogout: () {},
+          loadMatchHistory: () async => [
+            for (var i = 0; i < 20; i++)
+              AccountMatchHistoryEntry(
+                matchId: 'm$i',
+                p1UserId: 'u1',
+                p2UserId: 'u2',
+                outcome: 'P1_WIN',
+                endedAt: DateTime.utc(2026, 5, 27, 10, i),
+                characterId: 'cat_$i',
+              ),
+          ],
+        ),
+      ));
       await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+
+      expect(find.byKey(const Key('logout_button')), findsOneWidget);
+      expect(find.byKey(const Key('match_history_list')), findsOneWidget);
+      expect(find.text('Cat 19'), findsNothing);
+
+      await tester.drag(
+          find.byKey(const Key('match_history_list')), const Offset(0, -1000));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('delete_confirm_button')));
-      await tester.pumpAndSettle();
-
-      expect(confirmCalled, isTrue);
+      expect(find.text('Cat 19'), findsOneWidget);
+      expect(find.byKey(const Key('logout_button')), findsOneWidget);
+      expect(find.byKey(const Key('delete_account_button')), findsNothing);
     });
   });
 }

@@ -1,50 +1,62 @@
-// T-v0.6-A05 — Account screen (deletion UI)
+// T-v0.6-A05 — Account screen
 // T-v0.7-01 — Keyboard focus + tab order
 //
-// Displays signed-in profile information and a delete-account button with a
-// mandatory two-step confirmation dialog.
+// Displays signed-in profile information, recent match history, and logout.
 //
-// The delete handler is stubbed (log + no-op). Real implementation lands in
-// sub-track F (T-v0.6-F06).
-//
-// Deletion flow is reachable in ≤ 3 taps from the home screen (account icon
-// → delete button → confirm dialog) per App Store Guideline 5.1.1(v) and AR-4.
-//
-// Tab order: Delete Account button (single interactive element in body).
+// Tab order: back navigation, then Log Out button.
 //
 // Route: /account  (see router.dart)
 
 import 'package:flutter/material.dart';
 import '../models/user_profile.dart';
+import '../services/account_client.dart';
 
 /// Account settings screen.
 ///
-/// Accepts [profile] for display and [onDeleteAccountConfirmed] as the
-/// deletion handler stub. The actual account deletion is wired by
-/// the auth agent in sub-track F (T-v0.6-F06).
-class AccountScreen extends StatelessWidget {
+/// Accepts [profile] for display and account actions from the router.
+class AccountScreen extends StatefulWidget {
   const AccountScreen({
     super.key,
     required this.profile,
-    required this.onDeleteAccountConfirmed,
+    required this.onBack,
+    required this.onLogout,
+    this.loadMatchHistory,
   });
 
   /// Currently signed-in user.
   final UserProfile profile;
 
-  /// Stub: called after the user confirms account deletion.
-  /// Real implementation: T-v0.6-F06.
-  final VoidCallback onDeleteAccountConfirmed;
+  final VoidCallback onBack;
+  final VoidCallback onLogout;
+  final Future<List<AccountMatchHistoryEntry>> Function()? loadMatchHistory;
+
+  @override
+  State<AccountScreen> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<AccountScreen> {
+  late final Future<List<AccountMatchHistoryEntry>> _historyFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _historyFuture = widget.loadMatchHistory?.call() ??
+        Future.value(const <AccountMatchHistoryEntry>[]);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Account')),
+      appBar: AppBar(
+        leading: IconButton(
+          key: const Key('account_back_button'),
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: widget.onBack,
+        ),
+        title: const Text('Account'),
+      ),
       body: SafeArea(
-        // T-v0.7-01: Single interactive element (delete button) is placed in
-        // its own FocusTraversalGroup so it participates in page tab order.
         child: FocusTraversalGroup(
           policy: OrderedTraversalPolicy(),
           child: Padding(
@@ -52,93 +64,25 @@ class AccountScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Profile card
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundImage: profile.avatarUrl != null
-                              ? NetworkImage(profile.avatarUrl!)
-                              : null,
-                          backgroundColor: theme.colorScheme.primaryContainer,
-                          child: profile.avatarUrl == null
-                              ? Text(
-                                  profile.displayName.isNotEmpty
-                                      ? profile.displayName[0].toUpperCase()
-                                      : '?',
-                                  style: theme.textTheme.headlineSmall?.copyWith(
-                                    color:
-                                        theme.colorScheme.onPrimaryContainer,
-                                  ),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                profile.displayName,
-                                key: const Key('account_display_name'),
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'User ID: ${profile.userId}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                _ProfilePanel(profile: widget.profile),
+                const SizedBox(height: 24),
+                Expanded(
+                  child: _HistorySection(
+                    profile: widget.profile,
+                    historyFuture: _historyFuture,
                   ),
                 ),
-
-                const Spacer(),
-
-                // Danger zone
-                Text(
-                  'Danger Zone',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Delete button — focus order 1 (only interactive element)
+                const SizedBox(height: 24),
                 FocusTraversalOrder(
                   order: const NumericFocusOrder(1),
-                  child: Semantics(
-                    label: 'Delete account',
-                    button: true,
-                    child: OutlinedButton(
-                      key: const Key('delete_account_button'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.error,
-                        side: BorderSide(color: theme.colorScheme.error),
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      onPressed: () => _showDeleteConfirmDialog(context),
-                      child: const Text('Delete Account'),
+                  child: OutlinedButton.icon(
+                    key: const Key('logout_button'),
+                    onPressed: widget.onLogout,
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Log Out'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'This will permanently delete your account and all match history. '
-                  'This action cannot be undone.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -148,56 +92,239 @@ class AccountScreen extends StatelessWidget {
       ),
     );
   }
-
-  void _showDeleteConfirmDialog(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => _DeleteConfirmDialog(
-        onConfirmed: () {
-          Navigator.of(dialogContext).pop();
-          onDeleteAccountConfirmed();
-        },
-        onCancelled: () => Navigator.of(dialogContext).pop(),
-      ),
-    );
-  }
 }
 
-/// Two-step confirmation dialog for account deletion.
-class _DeleteConfirmDialog extends StatelessWidget {
-  const _DeleteConfirmDialog({
-    required this.onConfirmed,
-    required this.onCancelled,
-  });
+class _ProfilePanel extends StatelessWidget {
+  const _ProfilePanel({required this.profile});
 
-  final VoidCallback onConfirmed;
-  final VoidCallback onCancelled;
+  final UserProfile profile;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return AlertDialog(
-      title: const Text('Delete account?'),
-      content: const Text(
-        'All your data, including match history, will be permanently deleted. '
-        'This cannot be undone.',
-      ),
-      actions: [
-        TextButton(
-          key: const Key('delete_cancel_button'),
-          onPressed: onCancelled,
-          child: const Text('Cancel'),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundImage: profile.avatarUrl != null
+                  ? NetworkImage(profile.avatarUrl!)
+                  : null,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              child: profile.avatarUrl == null
+                  ? Text(
+                      profile.displayName.isNotEmpty
+                          ? profile.displayName[0].toUpperCase()
+                          : '?',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    profile.displayName,
+                    key: const Key('account_display_name'),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'User ID: ${profile.userId}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        TextButton(
-          key: const Key('delete_confirm_button'),
-          style: TextButton.styleFrom(
-            foregroundColor: theme.colorScheme.error,
+      ),
+    );
+  }
+}
+
+class _HistorySection extends StatelessWidget {
+  const _HistorySection({
+    required this.profile,
+    required this.historyFuture,
+  });
+
+  final UserProfile profile;
+  final Future<List<AccountMatchHistoryEntry>> historyFuture;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Latest Matches',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          onPressed: onConfirmed,
-          child: const Text('Delete'),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: FutureBuilder<List<AccountMatchHistoryEntry>>(
+            future: historyFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Text(
+                    'Match history unavailable',
+                    key: const Key('match_history_error'),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                );
+              }
+              final rows = snapshot.data ?? const <AccountMatchHistoryEntry>[];
+              if (rows.isEmpty) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Text(
+                    'No completed matches yet.',
+                    key: const Key('match_history_empty'),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                );
+              }
+
+              final visibleCount = rows.length < 20 ? rows.length : 20;
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: ListView.separated(
+                    key: const Key('match_history_list'),
+                    itemCount: visibleCount,
+                    itemBuilder: (context, index) => _HistoryRow(
+                      entry: rows[index],
+                      userId: profile.userId,
+                    ),
+                    separatorBuilder: (context, index) => Divider(
+                      height: 1,
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
         ),
       ],
     );
   }
+}
+
+class _HistoryRow extends StatelessWidget {
+  const _HistoryRow({
+    required this.entry,
+    required this.userId,
+  });
+
+  final AccountMatchHistoryEntry entry;
+  final String userId;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final result = _resultLabel(entry.didUserWin(userId));
+    final character = _characterLabel(entry.characterIdForUser(userId));
+    final time = _formatEndedAt(context, entry.endedAt);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              character,
+              key: const Key('match_history_character'),
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 56,
+            child: Text(
+              result,
+              key: const Key('match_history_result'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: result == 'WIN'
+                    ? Colors.green.shade700
+                    : result == 'LOSE'
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 112,
+            child: Text(
+              time,
+              key: const Key('match_history_time'),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _resultLabel(bool? won) {
+  if (won == null) return 'DRAW';
+  return won ? 'WIN' : 'LOSE';
+}
+
+String _characterLabel(String characterId) {
+  if (characterId.isEmpty) return 'Unknown';
+  return characterId
+      .split('_')
+      .where((part) => part.isNotEmpty)
+      .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+      .join(' ');
+}
+
+String _formatEndedAt(BuildContext context, DateTime endedAt) {
+  final local = endedAt.toLocal();
+  final localizations = MaterialLocalizations.of(context);
+  final date = localizations.formatShortDate(local);
+  final time = localizations.formatTimeOfDay(TimeOfDay.fromDateTime(local));
+  return '$date $time';
 }

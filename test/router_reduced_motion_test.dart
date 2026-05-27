@@ -50,6 +50,28 @@ class _SignedOutAuth implements AuthStateInterface {
   Future<void> signOut() async {}
 }
 
+class _MutableSignedInAuth implements AuthStateInterface {
+  var signedIn = true;
+  var signOutCalls = 0;
+
+  @override
+  bool get isSignedIn => signedIn;
+
+  @override
+  UserProfile? get currentUser => signedIn
+      ? const UserProfile(userId: 'u1', displayName: 'Test Player')
+      : null;
+
+  @override
+  String? get sessionToken => null;
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls++;
+    signedIn = false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helper to pump a router with a given disableAnimations value
 // ---------------------------------------------------------------------------
@@ -132,6 +154,23 @@ void main() {
       router.goNamed(Routes.home);
       await tester.pump();
       expect(find.text('Choose a mode'), findsOneWidget);
+    });
+
+    testWidgets('logout button signs out and routes to /sign-in',
+        (tester) async {
+      final auth = _MutableSignedInAuth();
+      router = createRouter(auth: auth);
+      await tester.pumpWidget(_buildApp(router, disableAnimations: true));
+      await tester.pump();
+
+      router.goNamed(Routes.account);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('logout_button')));
+      await tester.pumpAndSettle();
+
+      expect(auth.signOutCalls, 1);
+      expect(find.text('Sign in to play'), findsOneWidget);
     });
   });
 }

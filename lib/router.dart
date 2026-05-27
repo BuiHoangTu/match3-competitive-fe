@@ -720,24 +720,7 @@ GoRouter createRouter({
                 userId: 'unknown',
                 displayName: 'Player',
               );
-          Future<void> doDelete() async {
-            final tok = auth.sessionToken;
-            if (tok == null) {
-              developer.log('deleteAccount: no sessionToken', name: 'router');
-              if (context.mounted) context.goNamed(Routes.signIn);
-              return;
-            }
-            try {
-              await account.delete(sessionToken: tok);
-            } on AccountDeleteError catch (e) {
-              developer.log('deleteAccount failed: $e', name: 'router');
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                    content: Text('Could not delete account: ${e.message}')),
-              );
-              return;
-            }
+          Future<void> doLogout() async {
             await auth.signOut();
             if (!context.mounted) return;
             context.goNamed(Routes.signIn);
@@ -748,9 +731,16 @@ GoRouter createRouter({
             state,
             AccountScreen(
               profile: profile,
-              onDeleteAccountConfirmed: () {
-                // Fire-and-forget; doDelete handles errors + navigation.
-                unawaited(doDelete());
+              onBack: () => context.goNamed(Routes.home),
+              onLogout: () {
+                unawaited(doLogout());
+              },
+              loadMatchHistory: () {
+                final tok = auth.sessionToken;
+                if (tok == null) {
+                  return Future.value(const []);
+                }
+                return account.history(sessionToken: tok, limit: 20);
               },
             ),
           );
