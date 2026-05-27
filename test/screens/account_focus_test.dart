@@ -65,6 +65,9 @@ void main() {
       expect(find.text('Cat'), findsOneWidget);
       expect(find.text('WIN'), findsOneWidget);
       expect(find.byKey(const Key('match_history_time')), findsOneWidget);
+      final rowSize =
+          tester.getSize(find.byKey(const Key('match_history_row')));
+      expect(rowSize.height, greaterThanOrEqualTo(84));
     });
 
     testWidgets('long match history scrolls inside fixed account screen',
@@ -94,9 +97,16 @@ void main() {
       expect(find.byKey(const Key('match_history_list')), findsOneWidget);
       expect(find.text('Cat 19'), findsNothing);
 
-      await tester.drag(
-          find.byKey(const Key('match_history_list')), const Offset(0, -1000));
-      await tester.pumpAndSettle();
+      final historyScrollable = find.descendant(
+        of: find.byKey(const Key('match_history_list')),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(
+        find.text('Cat 19'),
+        220,
+        scrollable: historyScrollable,
+        maxScrolls: 12,
+      );
 
       expect(find.text('Cat 19'), findsOneWidget);
       expect(find.byKey(const Key('logout_button')), findsOneWidget);

@@ -254,54 +254,81 @@ class _HistoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final result = _resultLabel(entry.didUserWin(userId));
+    final won = entry.didUserWin(userId);
+    final result = _resultLabel(won);
+    final resultColor = _resultColor(theme, won);
+    final icon = _resultIcon(won);
     final character = _characterLabel(entry.characterIdForUser(userId));
     final time = _formatEndedAt(context, entry.endedAt);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              character,
-              key: const Key('match_history_character'),
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+    return SizedBox(
+      key: const Key('match_history_row'),
+      height: 84,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: resultColor.withValues(alpha: 0.08),
+          border: Border(
+            left: BorderSide(color: resultColor, width: 4),
           ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 56,
-            child: Text(
-              result,
-              key: const Key('match_history_result'),
-              textAlign: TextAlign.center,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: result == 'WIN'
-                    ? Colors.green.shade700
-                    : result == 'LOSE'
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.onSurfaceVariant,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: resultColor.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: resultColor, size: 26),
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 112,
-            child: Text(
-              time,
-              key: const Key('match_history_time'),
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      character,
+                      key: const Key('match_history_character'),
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      time,
+                      key: const Key('match_history_time'),
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 92,
+                child: Center(
+                  child: Text(
+                    result,
+                    key: const Key('match_history_result'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: resultColor,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -310,6 +337,16 @@ class _HistoryRow extends StatelessWidget {
 String _resultLabel(bool? won) {
   if (won == null) return 'DRAW';
   return won ? 'WIN' : 'LOSE';
+}
+
+Color _resultColor(ThemeData theme, bool? won) {
+  if (won == null) return theme.colorScheme.onSurfaceVariant;
+  return won ? Colors.green.shade700 : theme.colorScheme.error;
+}
+
+IconData _resultIcon(bool? won) {
+  if (won == null) return Icons.remove_circle_outline;
+  return won ? Icons.emoji_events_rounded : Icons.cancel_rounded;
 }
 
 String _characterLabel(String characterId) {
