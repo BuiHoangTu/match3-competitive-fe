@@ -72,10 +72,8 @@ State is intentionally framework-light: local screen state, `ChangeNotifier` for
 
 ## Try The Android APK
 
-The Android APK is published in the GitHub Releases for this repository:
-
-https://github.com/BuiHoangTu/match3-competitive-fe/releases/latest
-https://github.com/BuiHoangTu/match3-competitive-fe/releases/download/0.10.0/app-release.apk
+The Android APK is published in the [GitHub Releases](https://github.com/BuiHoangTu/match3-competitive-fe/releases/latest) for this repository or the apk directly here:
+<https://github.com/BuiHoangTu/match3-competitive-fe/releases/download/0.10.0/app-release.apk>
 
 1. Download `app-release.apk` from the latest release on an Android device.
 2. Install the APK. If Android blocks it, allow installs from your browser or file manager when prompted.
