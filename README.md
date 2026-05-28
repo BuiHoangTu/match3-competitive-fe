@@ -4,6 +4,15 @@ Match3 Competitive is a production-oriented, cross-platform Flutter game client 
 
 The project is built to demonstrate user-facing application engineering: native mobile/web UI, real-time networking, local persistence, typed API boundaries, reconnect-safe gameplay, and a test suite that covers both game logic and critical user flows.
 
+## Screenshots
+
+<p>
+  <img src="docs/images/login.png" alt="Login screen" width="190">
+  <img src="docs/images/home-waiting-for-match.png" alt="Home screen waiting for a match" width="190">
+  <img src="docs/images/ingame.png" alt="Online match gameplay board" width="190">
+  <img src="docs/images/account-detail.png" alt="Account and match history screen" width="190">
+</p>
+
 ## What in this repo
 
 - Cross-platform application development with Flutter for Android, iOS, and web.
@@ -85,5 +94,6 @@ Password: 123456abc
 
 You can also install the downloaded APK from a computer:
 
-
-
+```bash
+adb install -r app-release.apk
+```
