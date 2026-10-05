@@ -28,6 +28,7 @@
 import 'dart:async' show Completer, StreamSubscription, unawaited;
 import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -38,6 +39,7 @@ import 'net/matchmaking_socket_client.dart';
 import 'screens/account_screen.dart';
 import 'screens/character_select_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/google_auth_callback_screen.dart';
 import 'screens/practice_game_screen.dart';
 import 'screens/pvp_screen.dart';
 import 'screens/pve_game_screen.dart';
@@ -49,6 +51,7 @@ import 'services/account_client.dart';
 import 'services/character_preference.dart';
 import 'services/local_auth_service.dart';
 import 'services/matchmaking_client.dart';
+import 'services/sso/google_auth_client.dart';
 
 // ---------------------------------------------------------------------------
 // Route name constants
@@ -184,12 +187,13 @@ Page<void> _buildPage(BuildContext context, GoRouterState state, Widget child) {
 ///
 /// Accepts an [AuthStateInterface] for the redirect guard. If [localAuth] is
 /// supplied, the sign-in / register screens call its methods to authenticate;
-/// otherwise the screens are inert (useful in tests). Apple + Google buttons
-/// are wired to a "Under development" snackbar until T-v0.6-C03/C04 land.
+/// otherwise the local auth screens are inert (useful in tests). Google auth
+/// is available in web builds; Apple auth remains under development.
 GoRouter createRouter({
   required AuthStateInterface auth,
   AccountClient? accountClient,
   LocalAuthService? localAuth,
+  GoogleAuthClient? googleAuth,
   MatchmakingClient? matchmaking,
   BoardDeltaConnectionFactory boardDeltaConnectionFactory =
       createSocketIoBoardDeltaConnection,
@@ -199,6 +203,7 @@ GoRouter createRouter({
     defaultValue: 'http://localhost:3001',
   );
   final account = accountClient ?? AccountClient(baseUrl: backendUrl);
+  final google = googleAuth ?? GoogleAuthClient(baseUrl: backendUrl);
   final mm = matchmaking ?? MatchmakingClient(baseUrl: backendUrl);
   const characterPreference = CharacterPreference();
 
@@ -260,6 +265,53 @@ GoRouter createRouter({
       if (!ctx.mounted) return;
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(content: Text('Registration failed: ${e.message}')),
+      );
+    }
+  }
+
+  Future<void> startGoogleLogin(BuildContext ctx) async {
+    try {
+      await google.startLogin();
+    } on Exception {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Google sign-in could not be started. Please try again.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> startGoogleLink(BuildContext ctx) async {
+    final sessionToken = auth.sessionToken;
+    if (sessionToken == null) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in again to connect Google.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final authorizationUrl = await google.startLink(
+        sessionToken: sessionToken,
+      );
+      await google.navigateToAuthorizationUrl(authorizationUrl, intent: 'link');
+    } on GoogleAuthError catch (error) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(
+        ctx,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } on Exception {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Google could not be connected. Please try again from Account settings.',
+          ),
+        ),
       );
     }
   }
@@ -413,6 +465,7 @@ GoRouter createRouter({
       // Public paths that do not require sign-in.
       final isPublic = state.matchedLocation == '/sign-in' ||
           state.matchedLocation == '/register' ||
+          state.matchedLocation == '/auth/google/callback' ||
           state.matchedLocation.startsWith('/legal/');
 
       if (!isPublic && !auth.isSignedIn) {
@@ -441,8 +494,8 @@ GoRouter createRouter({
                 unawaited(handleLocalSignIn(context, u, p)),
             onRegisterPressed: () => context.goNamed(Routes.register),
             onAppleSignInPressed: () => showUnderDevelopment(context, 'Apple'),
-            onGoogleSignInPressed: () =>
-                showUnderDevelopment(context, 'Google'),
+            onGoogleSignInPressed: () => unawaited(startGoogleLogin(context)),
+            googleSignInSupported: kIsWeb,
             onPrivacyPressed: () => context.goNamed(Routes.privacy),
             onTermsPressed: () => context.goNamed(Routes.terms),
           ),
@@ -462,8 +515,75 @@ GoRouter createRouter({
             onRegisterPressed: (u, p, e) =>
                 unawaited(handleRegister(context, u, p, e)),
             onCancelPressed: () => context.goNamed(Routes.signIn),
+            onGoogleSignInPressed: () => unawaited(startGoogleLogin(context)),
+            googleSignInSupported: kIsWeb,
           ),
         ),
+      ),
+
+      // -----------------------------------------------------------------------
+      // /auth/google/callback — public, single-use code exchange
+      // -----------------------------------------------------------------------
+      GoRoute(
+        path: '/auth/google/callback',
+        pageBuilder: (context, state) {
+          final code = state.uri.queryParameters['code'];
+          final callbackState = state.uri.queryParameters['state'];
+          final errorCode = state.uri.queryParameters['error'];
+          final pendingIntent = google.pendingIntent;
+          final isLink = pendingIntent == 'link' ||
+              (pendingIntent == null && auth.isSignedIn);
+          final hasPendingIntent = pendingIntent != null || isLink;
+          final linkStateValid = !isLink ||
+              GoogleAuthClient.hasMatchingLinkState(
+                google.pendingState,
+                callbackState,
+              );
+          google.removeCallbackParameters();
+          return _buildPage(
+            context,
+            state,
+            GoogleAuthCallbackScreen(
+              code: code,
+              errorCode: errorCode,
+              isLink: isLink,
+              hasPendingIntent: hasPendingIntent,
+              linkStateValid: linkStateValid,
+              onLoginCode: (code) async {
+                final local = localAuth;
+                if (local == null) {
+                  throw const GoogleAuthError(
+                    'Google sign-in is not configured. Please try again later.',
+                  );
+                }
+                final result = await google.exchangeLoginCode(code);
+                await local.acceptGoogleSession(
+                  sessionToken: result.sessionToken,
+                  userId: result.userId,
+                  expiresAt: result.expiresAt,
+                );
+                if (context.mounted) context.goNamed(Routes.home);
+              },
+              onLinkCode: (code) async {
+                final sessionToken = auth.sessionToken;
+                final userId = auth.currentUser?.userId;
+                if (sessionToken == null || userId == null) {
+                  throw const GoogleAuthError(
+                    'Your session expired. Sign in again, then connect Google from Account settings.',
+                  );
+                }
+                await google.exchangeLinkCode(
+                  code: code,
+                  sessionToken: sessionToken,
+                  userId: userId,
+                );
+              },
+              onConsumeIntent: google.clearPendingIntent,
+              onReturn: () =>
+                  context.goNamed(isLink ? Routes.account : Routes.signIn),
+            ),
+          );
+        },
       ),
 
       // -----------------------------------------------------------------------
@@ -732,6 +852,8 @@ GoRouter createRouter({
             AccountScreen(
               profile: profile,
               onBack: () => context.goNamed(Routes.home),
+              onGoogleLinkPressed: () => unawaited(startGoogleLink(context)),
+              googleLinkSupported: kIsWeb,
               onLogout: () {
                 unawaited(doLogout());
               },

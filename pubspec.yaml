@@ -23,7 +23,7 @@ dependencies:
   # Legal / markdown screens
   flutter_markdown_plus: ^1.0.0
 
-  # Optional Google OAuth provider. App sessions still come from backend local auth.
+  # Retained for legacy native token-collector tests; web auth uses backend codes.
   google_sign_in: ^7.0.0
 
   # Hashing for non-sensitive token log correlation.
@@ -37,6 +37,9 @@ dependencies:
 
   # Persistent local storage for the session token (T-Local-09).
   shared_preferences: ^2.3.0
+
+  # Standard web platform bindings for the conditional browser auth helper.
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

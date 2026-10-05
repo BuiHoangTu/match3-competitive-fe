@@ -24,6 +24,7 @@ class SignInScreen extends StatefulWidget {
     required this.onGoogleSignInPressed,
     required this.onPrivacyPressed,
     required this.onTermsPressed,
+    this.googleSignInSupported = true,
   });
 
   /// Called with (username, password) when the user submits the form.
@@ -36,6 +37,7 @@ class SignInScreen extends StatefulWidget {
   /// once T-v0.6-C03/C04 land they become real provider calls.
   final VoidCallback onAppleSignInPressed;
   final VoidCallback onGoogleSignInPressed;
+  final bool googleSignInSupported;
 
   final VoidCallback onPrivacyPressed;
   final VoidCallback onTermsPressed;
@@ -202,21 +204,23 @@ class _SignInScreenState extends State<SignInScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    FocusTraversalOrder(
-                      order: const NumericFocusOrder(6),
-                      child: Semantics(
-                        label: 'Sign in with Google',
-                        button: true,
-                        child: _ProviderButton(
-                          key: const Key('google_sign_in_button'),
-                          label: 'Sign in with Google',
-                          icon: Icons.g_mobiledata_rounded,
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black87,
-                          onPressed: widget.onGoogleSignInPressed,
+                    if (widget.googleSignInSupported) ...[
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(6),
+                        child: Semantics(
+                          label: 'Continue with Google',
+                          button: true,
+                          child: _ProviderButton(
+                            key: const Key('google_sign_in_button'),
+                            label: 'Continue with Google',
+                            icon: Icons.g_mobiledata_rounded,
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black87,
+                            onPressed: widget.onGoogleSignInPressed,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
 
                     const SizedBox(height: 40),
                     Row(
