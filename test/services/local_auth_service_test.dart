@@ -22,7 +22,6 @@ void main() {
   group('LocalAuthService.register', () {
     test('201 sets isSignedIn true and emits profile on stream', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async => http.Response(
           '{"sessionToken":"a.b","userId":"local:1","username":"alice","expiresAt":${DateTime.now().millisecondsSinceEpoch + 60000}}',
           201,
@@ -41,7 +40,6 @@ void main() {
 
     test('400 BAD_USERNAME maps to LocalAuthBadRequest', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async =>
             http.Response('{"code":"BAD_USERNAME","message":"oops"}', 400),
       );
@@ -54,7 +52,6 @@ void main() {
 
     test('409 USERNAME_TAKEN maps to LocalAuthUsernameTaken', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async =>
             http.Response('{"code":"USERNAME_TAKEN","message":"taken"}', 409),
       );
@@ -66,9 +63,10 @@ void main() {
 
     test('503 LOCAL_AUTH_DISABLED maps to LocalAuthDisabled', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async => http.Response(
-            '{"code":"LOCAL_AUTH_DISABLED","message":"off"}', 503),
+          '{"code":"LOCAL_AUTH_DISABLED","message":"off"}',
+          503,
+        ),
       );
       await expectLater(
         svc.register(username: 'alice', password: 'secret123'),
@@ -78,7 +76,6 @@ void main() {
 
     test('network exception maps to LocalAuthTransport', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async {
           throw Exception('connection refused');
         },
@@ -93,7 +90,6 @@ void main() {
   group('LocalAuthService.login', () {
     test('200 yields session token + profile', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async => http.Response(
           '{"sessionToken":"a.b","userId":"local:2","username":"bob","expiresAt":${DateTime.now().millisecondsSinceEpoch + 60000}}',
           200,
@@ -104,9 +100,30 @@ void main() {
       expect(svc.currentUser?.displayName, equals('bob'));
     });
 
+    test(
+      'Google app session is persisted using the normal auth state path',
+      () async {
+        final svc = _make(
+          postFn: (_, {headers, body}) async => http.Response('', 500),
+        );
+
+        await svc.acceptGoogleSession(
+          sessionToken: 'backend-app-session',
+          userId: 'google-user-1',
+          expiresAt: DateTime.now().millisecondsSinceEpoch + 60000,
+        );
+
+        expect(svc.isSignedIn, isTrue);
+        expect(svc.sessionToken, 'backend-app-session');
+        expect(svc.currentUser?.userId, 'google-user-1');
+        expect(svc.currentUser?.displayName, 'Player');
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('auth.sessionToken'), 'backend-app-session');
+      },
+    );
+
     test('401 maps to LocalAuthInvalidCredentials', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async =>
             http.Response('{"code":"INVALID_CREDENTIALS"}', 401),
       );
@@ -120,7 +137,6 @@ void main() {
   group('LocalAuthService.signOut', () {
     test('clears state and emits null', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async => http.Response(
           '{"sessionToken":"a.b","userId":"local:3","username":"c","expiresAt":${DateTime.now().millisecondsSinceEpoch + 60000}}',
           200,
@@ -196,7 +212,6 @@ void main() {
   group('isSignedIn expiry guard', () {
     test('returns false when expiresAt is in the past', () async {
       final svc = _make(
-        
         postFn: (_, {headers, body}) async => http.Response(
           '{"sessionToken":"a.b","userId":"local:4","username":"d","expiresAt":1}',
           200,

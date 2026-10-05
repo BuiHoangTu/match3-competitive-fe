@@ -204,6 +204,31 @@ class LocalAuthService {
     return _profile!;
   }
 
+  /// Persists the app session returned by the backend's Google code exchange.
+  ///
+  /// The Google authorization code is not an app session token. Only the
+  /// backend-issued [sessionToken] is accepted here.
+  Future<UserProfile> acceptGoogleSession({
+    required String sessionToken,
+    required String userId,
+    required int expiresAt,
+  }) async {
+    if (sessionToken.isEmpty ||
+        userId.isEmpty ||
+        expiresAt <= DateTime.now().millisecondsSinceEpoch) {
+      throw const LocalAuthTransport('Google session response was incomplete');
+    }
+    await _setAuthState(
+      _AuthResult(
+        sessionToken: sessionToken,
+        userId: userId,
+        username: 'Player',
+        expiresAt: expiresAt,
+      ),
+    );
+    return _profile!;
+  }
+
   Future<void> signOut() async {
     _sessionToken = null;
     _profile = null;

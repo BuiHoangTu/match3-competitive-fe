@@ -11,12 +11,14 @@ import 'package:shell/services/account_client.dart';
 
 const _kProfile = UserProfile(userId: 'u1', displayName: 'Player');
 
-Widget _buildSubject({VoidCallback? onLogout}) {
+Widget _buildSubject({VoidCallback? onLogout, VoidCallback? onGoogleLink}) {
   return MaterialApp(
     home: AccountScreen(
       profile: _kProfile,
       onBack: () {},
       onLogout: onLogout ?? () {},
+      googleLinkSupported: onGoogleLink != null,
+      onGoogleLinkPressed: onGoogleLink,
     ),
   );
 }
@@ -38,6 +40,21 @@ void main() {
       await tester.pump();
 
       expect(logoutCalled, isTrue);
+    });
+
+    testWidgets('Google linking is an explicit account action', (tester) async {
+      var linkCalled = false;
+      await tester.pumpWidget(
+        _buildSubject(onGoogleLink: () => linkCalled = true),
+      );
+
+      expect(find.text('Connect Google'), findsOneWidget);
+      expect(
+        find.textContaining('only when you are signed in'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('account_google_link_button')));
+      expect(linkCalled, isTrue);
     });
 
     testWidgets('latest match history renders character result and time',
@@ -65,8 +82,9 @@ void main() {
       expect(find.text('Cat'), findsOneWidget);
       expect(find.text('WIN'), findsOneWidget);
       expect(find.byKey(const Key('match_history_time')), findsOneWidget);
-      final rowSize =
-          tester.getSize(find.byKey(const Key('match_history_row')));
+      final rowSize = tester.getSize(
+        find.byKey(const Key('match_history_row')),
+      );
       expect(rowSize.height, greaterThanOrEqualTo(84));
     });
 

@@ -12,6 +12,8 @@ class RegisterScreen extends StatefulWidget {
     super.key,
     required this.onRegisterPressed,
     required this.onCancelPressed,
+    this.onGoogleSignInPressed,
+    this.googleSignInSupported = true,
   });
 
   /// Called with (username, password, email?) when the user submits.
@@ -19,6 +21,8 @@ class RegisterScreen extends StatefulWidget {
       onRegisterPressed;
 
   final VoidCallback onCancelPressed;
+  final VoidCallback? onGoogleSignInPressed;
+  final bool googleSignInSupported;
 
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
@@ -150,6 +154,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ),
                   ),
+                  if (widget.googleSignInSupported &&
+                      widget.onGoogleSignInPressed != null) ...[
+                    const SizedBox(height: 20),
+                    const Row(
+                      children: [
+                        Expanded(child: Divider()),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: Text('or'),
+                        ),
+                        Expanded(child: Divider()),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      height: 52,
+                      child: OutlinedButton.icon(
+                        key: const Key('register_google_sign_in_button'),
+                        onPressed: widget.onGoogleSignInPressed,
+                        icon: const Icon(Icons.g_mobiledata_rounded),
+                        label: const Text('Continue with Google'),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

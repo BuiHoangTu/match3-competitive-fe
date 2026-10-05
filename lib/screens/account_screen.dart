@@ -21,6 +21,8 @@ class AccountScreen extends StatefulWidget {
     required this.onBack,
     required this.onLogout,
     this.loadMatchHistory,
+    this.onGoogleLinkPressed,
+    this.googleLinkSupported = false,
   });
 
   /// Currently signed-in user.
@@ -29,6 +31,8 @@ class AccountScreen extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onLogout;
   final Future<List<AccountMatchHistoryEntry>> Function()? loadMatchHistory;
+  final VoidCallback? onGoogleLinkPressed;
+  final bool googleLinkSupported;
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -65,6 +69,24 @@ class _AccountScreenState extends State<AccountScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _ProfilePanel(profile: widget.profile),
+                if (widget.googleLinkSupported &&
+                    widget.onGoogleLinkPressed != null) ...[
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    key: const Key('account_google_link_button'),
+                    onPressed: widget.onGoogleLinkPressed,
+                    icon: const Icon(Icons.g_mobiledata_rounded),
+                    label: const Text('Connect Google'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Connect Google only when you are signed in to the account you want to keep.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Expanded(
                   child: _HistorySection(

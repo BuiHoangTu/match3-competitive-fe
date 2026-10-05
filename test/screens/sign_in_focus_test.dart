@@ -40,8 +40,29 @@ void main() {
       expect(find.byKey(const Key('register_link')), findsOneWidget);
       expect(find.byKey(const Key('apple_sign_in_button')), findsOneWidget);
       expect(find.byKey(const Key('google_sign_in_button')), findsOneWidget);
+      expect(find.text('Continue with Google'), findsOneWidget);
       expect(find.byKey(const Key('privacy_link')), findsOneWidget);
       expect(find.byKey(const Key('terms_link')), findsOneWidget);
+    });
+
+    testWidgets('Google button is hidden when web auth is unsupported', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SignInScreen(
+            onLocalSignInPressed: (_, __) {},
+            onRegisterPressed: () {},
+            onAppleSignInPressed: () {},
+            onGoogleSignInPressed: () {},
+            onPrivacyPressed: () {},
+            onTermsPressed: () {},
+            googleSignInSupported: false,
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('google_sign_in_button')), findsNothing);
     });
 
     testWidgets('Tab moves focus from username to password', (tester) async {
